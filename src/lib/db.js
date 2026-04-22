@@ -292,6 +292,54 @@ export const projectsDB = {
 };
 
 // ─────────────────────────────────────────────
+// PARTNER DRAWINGS
+// ─────────────────────────────────────────────
+const toDrawing = r => ({
+  id:          r.id,
+  partner:     r.partner,
+  amountTaken: r.amount_taken,
+  dateTaken:   r.date_taken,
+  purpose:     r.purpose,
+  returns:     r.returns || [],
+  notes:       r.notes,
+  createdAt:   r.created_at,
+});
+
+const fromDrawing = d => ({
+  partner:      d.partner,
+  amount_taken: +d.amountTaken,
+  date_taken:   d.dateTaken,
+  purpose:      d.purpose  || null,
+  returns:      d.returns  || [],
+  notes:        d.notes    || null,
+});
+
+export const drawingsDB = {
+  getAll: async () => {
+    const { data, error } = await supabase
+      .from('partner_drawings').select('*').order('date_taken', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(toDrawing);
+  },
+  create: async (d) => {
+    const { data, error } = await supabase
+      .from('partner_drawings').insert(fromDrawing(d)).select().single();
+    if (error) throw error;
+    return toDrawing(data);
+  },
+  delete: async (id) => {
+    const { error } = await supabase.from('partner_drawings').delete().eq('id', id);
+    if (error) throw error;
+  },
+  addReturn: async (id, returns) => {
+    const { data, error } = await supabase
+      .from('partner_drawings').update({ returns }).eq('id', id).select().single();
+    if (error) throw error;
+    return toDrawing(data);
+  },
+};
+
+// ─────────────────────────────────────────────
 // CREDENTIALS
 // ─────────────────────────────────────────────
 const toCred = r => ({

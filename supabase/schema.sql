@@ -105,19 +105,33 @@ create table if not exists credentials (
   created_at    timestamptz default now()
 );
 
+-- ── PARTNER DRAWINGS ─────────────────────────────────────────────
+create table if not exists partner_drawings (
+  id            uuid primary key default gen_random_uuid(),
+  partner       text not null,
+  amount_taken  numeric not null,
+  date_taken    text not null,
+  purpose       text,
+  returns       jsonb default '[]'::jsonb,
+  notes         text,
+  created_at    timestamptz default now()
+);
+
 -- ================================================================
 -- ROW LEVEL SECURITY
 -- ================================================================
-alter table clients      enable row level security;
-alter table transactions  enable row level security;
-alter table settings      enable row level security;
-alter table employees     enable row level security;
-alter table projects      enable row level security;
-alter table credentials   enable row level security;
+alter table clients           enable row level security;
+alter table transactions      enable row level security;
+alter table settings          enable row level security;
+alter table employees         enable row level security;
+alter table projects          enable row level security;
+alter table credentials       enable row level security;
+alter table partner_drawings  enable row level security;
 
-create policy "Public full access" on clients      for all using (true) with check (true);
-create policy "Public full access" on transactions  for all using (true) with check (true);
-create policy "Public full access" on settings      for all using (true) with check (true);
-create policy "Public full access" on employees     for all using (true) with check (true);
-create policy "Public full access" on projects      for all using (true) with check (true);
-create policy "Public full access" on credentials   for all using (true) with check (true);
+create policy "Public full access" on clients           for all using (true) with check (true);
+create policy "Public full access" on transactions      for all using (true) with check (true);
+create policy "Public full access" on settings          for all using (true) with check (true);
+create policy "Public full access" on employees         for all using (true) with check (true);
+create policy "Public full access" on projects          for all using (true) with check (true);
+create policy "Public full access" on credentials       for all using (true) with check (true);
+create policy "Public full access" on partner_drawings  for all using (true) with check (true);

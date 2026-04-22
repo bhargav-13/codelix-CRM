@@ -73,17 +73,17 @@ export default function Dashboard() {
           settingsDB.get('opening_balances'),
         ]);
         const openBal = obData || { cash: 25000, bank: 150000 };
-        let cC=0,cD=0,bC=0,bD=0;
+        let pC=0,pD=0,bC=0,bD=0;
         txs.forEach(t => {
-          if (t.accountType==='Cash') { t.type==='Credit' ? cC+=+t.amount : cD+=+t.amount; }
+          if (t.accountType==="Founder's Personal") { t.type==='Credit' ? pC+=+t.amount : pD+=+t.amount; }
           else { t.type==='Credit' ? bC+=+t.amount : bD+=+t.amount; }
         });
         const bal = {
-          cash: openBal.cash+cC-cD,
+          cash: openBal.cash+pC-pD,
           bank: openBal.bank+bC-bD,
-          total: openBal.cash+cC-cD+openBal.bank+bC-bD,
-          totalCredit: cC+bC,
-          totalDebit: cD+bD,
+          total: openBal.cash+pC-pD+openBal.bank+bC-bD,
+          totalCredit: pC+bC,
+          totalDebit: pD+bD,
         };
         setData({ clients, txs, employees, projects, bal });
       } catch(e) { console.error(e); }
@@ -121,7 +121,7 @@ export default function Dashboard() {
 
         {/* Stat Cards */}
         <div className="rg-4">
-          <StatCard label="Total Balance" value={fmt(bal.total)} sub={`Cash ${fmt(bal.cash)}`}
+          <StatCard label="Total Balance" value={fmt(bal.total)} sub={`Personal ${fmt(bal.cash)}`}
             gradient="linear-gradient(135deg,#E3F0FF,#CCE4FF)" icon={DollarSign} iconColor="#0071E3" />
           <StatCard label="Total Clients" value={clients.length} sub={`${hotClients.length} hot leads`}
             gradient="linear-gradient(135deg,#FFF0E0,#FFE0C0)" icon={Users} iconColor="#FF9500" />
