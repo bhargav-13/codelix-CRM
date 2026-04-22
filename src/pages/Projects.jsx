@@ -258,8 +258,8 @@ export default function Projects(){
       />
 
       {loading ? <CardGridSkeleton cols={2} count={4} /> : (
-        <div style={{padding:'24px 32px',display:'flex',flexDirection:'column',gap:18}}>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:14}}>
+        <div className="page-body">
+          <div className="rg-4">
             {[
               {label:'Total Projects',value:projs.length,bg:'rgba(0,113,227,0.08)',c:'#0071E3'},
               {label:'Total Value',value:fmt(totalVal),bg:'rgba(175,82,222,0.08)',c:'#AF52DE'},
@@ -288,7 +288,7 @@ export default function Projects(){
               ))}
             </div>
           )}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(2,minmax(0,1fr))',gap:14}}>
+          <div className="rg-2">
             {filtered.length===0?<div style={{gridColumn:'span 2',textAlign:'center',padding:'56px',color:'#AEAEB2',fontSize:13}}>No projects found</div>
               :filtered.map(p=>{
                 const paid=(p.payments||[]).reduce((s,py)=>s+(+py.amount||0),0);

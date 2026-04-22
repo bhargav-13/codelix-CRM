@@ -195,7 +195,7 @@ export default function Credentials(){
       />
 
       {loading ? <CardGridSkeleton cols={3} count={6} /> : (
-        <div style={{padding:'24px 32px',display:'flex',flexDirection:'column',gap:20}}>
+        <div className="page-body">
           <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderRadius:11,background:'rgba(255,204,0,0.08)',border:'1px solid rgba(255,204,0,0.2)'}}>
             <Lock size={14} color="#B8860B" style={{flexShrink:0}}/>
             <span style={{fontSize:12,color:'#8B6914',lineHeight:1.4}}>Credentials stored in Supabase with row-level security. Add Supabase Auth for user-login protection.</span>
@@ -220,7 +220,7 @@ export default function Credentials(){
                   <span style={{fontSize:11,color:'#AEAEB2'}}>({items.length})</span>
                   <div style={{flex:1,height:1,background:'rgba(0,0,0,0.07)',marginLeft:4}}/>
                 </div>
-                <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:14}}>
+                <div className="rg-3">
                   {items.map(c=>(
                     <CredCard key={c.id} cred={c}
                       onEdit={()=>{setEditCred(c);setForm(c);setShowAdd(true);}}

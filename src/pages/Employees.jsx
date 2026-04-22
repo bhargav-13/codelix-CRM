@@ -218,7 +218,7 @@ export default function Employees(){
       />
 
       {loading ? <CardGridSkeleton cols={3} count={6} /> : (
-        <div style={{padding:'24px 32px',display:'flex',flexDirection:'column',gap:18}}>
+        <div className="page-body">
           {pending.length>0&&(
             <div style={{display:'flex',alignItems:'center',gap:8,padding:'9px 14px',borderRadius:10,background:'rgba(255,149,0,0.07)',border:'1px solid rgba(255,149,0,0.15)'}}>
               <AlertCircle size={13} color="#FF9500"/><span style={{fontSize:12.5,color:'#FF9500',fontWeight:500}}>{pending.length} employee{pending.length>1?'s':''} have pending salary — {pending.map(e=>e.name).join(', ')}</span>
@@ -240,7 +240,7 @@ export default function Employees(){
               ))}
             </div>
           )}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:14}}>
+          <div className="rg-3">
             {filtered.length===0
               ?<div style={{gridColumn:'span 3',textAlign:'center',padding:'56px',color:'#AEAEB2',fontSize:13}}>No employees found</div>
               :filtered.map(e=>{

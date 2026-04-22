@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { useLayout } from '../../contexts/LayoutContext';
 import {
   LayoutDashboard, Users, DollarSign, UserCheck,
   FolderKanban, KeyRound,
@@ -14,15 +15,20 @@ const navItems = [
 ];
 
 export default function Sidebar() {
-  return (
-    <aside style={{
-      width: 216, minWidth: 216, height: '100vh',
-      background: '#ECECF0',
-      borderRight: '1px solid rgba(0,0,0,0.07)',
-      display: 'flex', flexDirection: 'column',
-      position: 'sticky', top: 0, overflow: 'hidden',
-    }}>
+  const { sidebarOpen, closeSidebar } = useLayout();
 
+  return (
+    <aside
+      className={`sidebar-aside ${sidebarOpen ? 'mobile-open' : ''}`}
+      style={{
+        width: 216, minWidth: 216, height: '100vh',
+        background: '#ECECF0',
+        borderRight: '1px solid rgba(0,0,0,0.07)',
+        display: 'flex', flexDirection: 'column',
+        position: 'sticky', top: 0, overflow: 'hidden',
+        flexShrink: 0,
+      }}
+    >
       {/* Brand */}
       <div style={{ padding: '22px 16px 14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -50,6 +56,7 @@ export default function Sidebar() {
             key={to}
             to={to}
             end={to === '/'}
+            onClick={closeSidebar}
             className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
           >
             <Icon size={15} strokeWidth={1.9} style={{ flexShrink: 0 }} />
@@ -59,10 +66,7 @@ export default function Sidebar() {
       </nav>
 
       {/* User */}
-      <div style={{
-        padding: '12px 14px',
-        borderTop: '1px solid rgba(0,0,0,0.07)',
-      }}>
+      <div style={{ padding: '12px 14px', borderTop: '1px solid rgba(0,0,0,0.07)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           <div style={{
             width: 28, height: 28, borderRadius: '50%',

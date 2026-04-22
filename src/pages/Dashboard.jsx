@@ -42,13 +42,13 @@ function SectionLabel({ title, right }) {
 
 function DashSkeleton() {
   return (
-    <div style={{ padding:'24px 32px', display:'flex', flexDirection:'column', gap:20 }}>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,minmax(0,1fr))', gap:14 }}>
+    <div className="page-body">
+      <div className="rg-4">
         {[0,1,2,3].map(i=>(
           <div key={i} style={{ height:110, borderRadius:16, background:'linear-gradient(90deg,rgba(0,0,0,0.04) 25%,rgba(0,0,0,0.07) 50%,rgba(0,0,0,0.04) 75%)', backgroundSize:'200% 100%', animation:'shimmer 1.4s infinite' }}/>
         ))}
       </div>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:14 }}>
+      <div className="rg-3">
         {[0,1,2].map(i=>(
           <div key={i} style={{ height:200, borderRadius:16, background:'linear-gradient(90deg,rgba(0,0,0,0.04) 25%,rgba(0,0,0,0.07) 50%,rgba(0,0,0,0.04) 75%)', backgroundSize:'200% 100%', animation:'shimmer 1.4s infinite' }}/>
         ))}
@@ -120,7 +120,7 @@ export default function Dashboard() {
       <div style={{ padding:'24px 32px', display:'flex', flexDirection:'column', gap:20 }}>
 
         {/* Stat Cards */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,minmax(0,1fr))', gap:14 }}>
+        <div className="rg-4">
           <StatCard label="Total Balance" value={fmt(bal.total)} sub={`Cash ${fmt(bal.cash)}`}
             gradient="linear-gradient(135deg,#E3F0FF,#CCE4FF)" icon={DollarSign} iconColor="#0071E3" />
           <StatCard label="Total Clients" value={clients.length} sub={`${hotClients.length} hot leads`}
@@ -156,7 +156,7 @@ export default function Dashboard() {
         )}
 
         {/* Middle Row */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,minmax(0,1fr))', gap:14 }}>
+        <div className="rg-3">
 
           {/* Finance Summary */}
           <div className="mac-card" style={{ padding:20 }}>
@@ -243,7 +243,7 @@ export default function Dashboard() {
         </div>
 
         {/* Bottom Row */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(2,minmax(0,1fr))', gap:14 }}>
+        <div className="rg-2">
 
           {/* Recent Transactions */}
           <div className="mac-card" style={{ padding:20 }}>

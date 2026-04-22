@@ -163,13 +163,13 @@ export default function Transactions(){
       />
 
       {loading ? <LoadingSpinner rows={7} /> : (
-        <div style={{padding:'24px 32px',display:'flex',flexDirection:'column',gap:18}}>
+        <div className="page-body">
           {bal.total<10000&&(
             <div style={{display:'flex',alignItems:'center',gap:8,padding:'9px 14px',borderRadius:10,background:'rgba(255,59,48,0.07)',border:'1px solid rgba(255,59,48,0.13)'}}>
               <AlertTriangle size={13} color="#FF3B30"/><span style={{fontSize:12.5,color:'#FF3B30',fontWeight:500}}>⚠ Low balance alert — only {fmt(bal.total)} remaining</span>
             </div>
           )}
-          <div style={{display:'grid',gridTemplateColumns:'repeat(4,minmax(0,1fr))',gap:14}}>
+          <div className="rg-4">
             {statCards.map(c=>(
               <div key={c.label} style={{borderRadius:16,padding:'18px 20px',background:c.gradient,display:'flex',flexDirection:'column',gap:10}}>
                 <div style={{width:34,height:34,borderRadius:10,background:'rgba(255,255,255,0.22)',display:'flex',alignItems:'center',justifyContent:'center'}}>
