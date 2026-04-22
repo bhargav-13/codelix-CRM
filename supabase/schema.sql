@@ -105,6 +105,18 @@ create table if not exists credentials (
   created_at    timestamptz default now()
 );
 
+-- ── PARTNER SALARIES ─────────────────────────────────────────────
+create table if not exists partner_salaries (
+  id              uuid primary key default gen_random_uuid(),
+  partner         text not null,
+  month           text not null,
+  amount          numeric not null,
+  paid_date       text,
+  payment_method  text,
+  notes           text,
+  created_at      timestamptz default now()
+);
+
 -- ── PARTNER DRAWINGS ─────────────────────────────────────────────
 create table if not exists partner_drawings (
   id            uuid primary key default gen_random_uuid(),
@@ -126,6 +138,7 @@ alter table settings          enable row level security;
 alter table employees         enable row level security;
 alter table projects          enable row level security;
 alter table credentials       enable row level security;
+alter table partner_salaries  enable row level security;
 alter table partner_drawings  enable row level security;
 
 create policy "Public full access" on clients           for all using (true) with check (true);
@@ -134,4 +147,5 @@ create policy "Public full access" on settings          for all using (true) wit
 create policy "Public full access" on employees         for all using (true) with check (true);
 create policy "Public full access" on projects          for all using (true) with check (true);
 create policy "Public full access" on credentials       for all using (true) with check (true);
+create policy "Public full access" on partner_salaries  for all using (true) with check (true);
 create policy "Public full access" on partner_drawings  for all using (true) with check (true);

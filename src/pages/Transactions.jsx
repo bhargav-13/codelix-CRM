@@ -5,11 +5,12 @@ import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
-import { transactionsDB, settingsDB, drawingsDB } from '../lib/db';
+import { transactionsDB, settingsDB, drawingsDB, partnerSalariesDB } from '../lib/db';
 import { TRANSACTION_SOURCES, EXPENSE_CATEGORIES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
 import {
   Plus, Filter, ArrowUpRight, ArrowDownRight, Edit2, Trash2,
   Wallet, History, AlertTriangle, DollarSign, HandCoins, RotateCcw,
+  Banknote, Settings2, CheckCircle2, Clock,
 } from 'lucide-react';
 
 const ACCOUNT_TYPES = ["Founder's Personal", 'Company Bank'];
@@ -23,8 +24,15 @@ const emptyTx = {
   source: 'Client Payment', category: 'Misc', clientName: '', paidTo: '',
   paymentMethod: 'Bank Transfer', remark: '',
 };
-const emptyDrawing = { partner: 'Bhargav', amountTaken: '', dateTaken: today, purpose: '', notes: '' };
-const emptyReturn  = { amount: '', date: today, notes: '' };
+const emptyDrawing   = { partner: 'Bhargav', amountTaken: '', dateTaken: today, purpose: '', notes: '' };
+const emptyReturn    = { amount: '', date: today, notes: '' };
+const DEFAULT_SALARY = { Bhargav: 0, Prince: 0, Manas: 0, Kushal: 0 };
+const emptySalPay    = { partner: 'Bhargav', month: '', amount: '', paidDate: today, paymentMethod: 'Bank Transfer', notes: '' };
+
+const currentMonthLabel = () => {
+  const d = new Date();
+  return d.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+};
 
 const PARTNER_COLORS = {
   Bhargav: { gradient: 'linear-gradient(135deg,#0071E3,#0A84FF)', text: '#0071E3' },
@@ -142,6 +150,37 @@ function ReturnForm({ v, onChange, drawing }) {
   );
 }
 
+function SalaryPayForm({ v, onChange, salaryConfig }) {
+  const s = (k, val) => onChange({ ...v, [k]: val });
+  const suggested = salaryConfig[v.partner] || 0;
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+      <FF label="Partner" required>
+        <select className="mac-select" value={v.partner} onChange={e => { s('partner', e.target.value); onChange({ ...v, partner: e.target.value, amount: String(salaryConfig[e.target.value] || '') }); }}>
+          {PARTNERS.map(p => <option key={p}>{p}</option>)}
+        </select>
+      </FF>
+      <FF label="Month" required>
+        <input className="mac-input" value={v.month} onChange={e=>s('month',e.target.value)} placeholder="e.g. April 2025"/>
+      </FF>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+        <FF label="Amount (₹)" required>
+          <input className="mac-input" type="number" value={v.amount} onChange={e=>s('amount',e.target.value)} placeholder={suggested ? String(suggested) : '0'}/>
+        </FF>
+        <FF label="Payment Date" required>
+          <input className="mac-input" type="date" value={v.paidDate} onChange={e=>s('paidDate',e.target.value)}/>
+        </FF>
+      </div>
+      <FF label="Payment Method">
+        <select className="mac-select" value={v.paymentMethod} onChange={e=>s('paymentMethod',e.target.value)}>
+          {PAYMENT_METHODS.map(m=><option key={m}>{m}</option>)}
+        </select>
+      </FF>
+      <FF label="Notes"><input className="mac-input" value={v.notes} onChange={e=>s('notes',e.target.value)} placeholder="Optional"/></FF>
+    </div>
+  );
+}
+
 const TH = ({ c }) => (
   <th style={{ textAlign:'left', padding:'10px 16px', fontSize:11, fontWeight:600, color:'#8E8E93', textTransform:'uppercase', letterSpacing:'0.5px', whiteSpace:'nowrap', borderBottom:'1px solid rgba(0,0,0,0.07)' }}>{c}</th>
 );
@@ -178,6 +217,16 @@ export default function Transactions() {
   const [returnId, setReturnId]               = useState(null);
   const [deleteDrawingId, setDeleteDrawingId] = useState(null);
 
+  // ── salary state ────────────────────────────────
+  const [salaryRecords, setSalaryRecords]     = useState([]);
+  const [loadingSalaries, setLoadingSalaries] = useState(false);
+  const [salaryConfig, setSalaryConfig]       = useState(DEFAULT_SALARY);
+  const [showSalConfig, setShowSalConfig]     = useState(false);
+  const [salConfigForm, setSalConfigForm]     = useState(DEFAULT_SALARY);
+  const [showAddSal, setShowAddSal]           = useState(false);
+  const [salPayForm, setSalPayForm]           = useState(emptySalPay);
+  const [deleteSalId, setDeleteSalId]         = useState(null);
+
   // ── data fetching ───────────────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -198,8 +247,22 @@ export default function Transactions() {
     setLoadingDrawings(false);
   }, []);
 
+  const fetchSalaries = useCallback(async () => {
+    setLoadingSalaries(true);
+    try {
+      const [records, config] = await Promise.all([
+        partnerSalariesDB.getAll(),
+        settingsDB.get('partner_salary_config'),
+      ]);
+      setSalaryRecords(records);
+      if (config) { setSalaryConfig(config); setSalConfigForm(config); }
+    } catch(e) { console.error(e); }
+    setLoadingSalaries(false);
+  }, []);
+
   useEffect(() => { fetchAll(); }, [fetchAll]);
   useEffect(() => { if (tab === 'drawings') fetchDrawings(); }, [tab, fetchDrawings]);
+  useEffect(() => { if (tab === 'salaries') fetchSalaries(); }, [tab, fetchSalaries]);
 
   // ── balance calc (personal = old "cash", bank = company bank) ──
   const bal = useMemo(() => {
@@ -302,6 +365,41 @@ export default function Transactions() {
     try { await drawingsDB.delete(id); } catch(e) { console.error(e); await fetchDrawings(); }
   }
 
+  // ── salary CRUD ─────────────────────────────────
+  async function saveSalaryConfig() {
+    setSalaryConfig(salConfigForm);
+    setShowSalConfig(false);
+    try { await settingsDB.set('partner_salary_config', salConfigForm); } catch(e) { console.error(e); }
+  }
+
+  async function saveSalaryPayment() {
+    if (!salPayForm.month || !salPayForm.amount || saving) return;
+    setSaving(true);
+    try {
+      const created = await partnerSalariesDB.create(salPayForm);
+      setSalaryRecords(rs => [created, ...rs]);
+    } catch(e) { console.error(e); }
+    setSaving(false);
+    setShowAddSal(false); setSalPayForm(emptySalPay);
+  }
+
+  async function deleteSalary(id) {
+    setSalaryRecords(rs => rs.filter(r => r.id !== id));
+    try { await partnerSalariesDB.delete(id); } catch(e) { console.error(e); await fetchSalaries(); }
+  }
+
+  // per-partner salary summary
+  const partnerSalarySummary = useMemo(() => (
+    PARTNERS.map(p => {
+      const paid = salaryRecords.filter(r => r.partner === p);
+      const totalPaid = paid.reduce((s, r) => s + (+r.amount || 0), 0);
+      const monthly = salaryConfig[p] || 0;
+      const currentMonth = currentMonthLabel();
+      const paidThisMonth = paid.some(r => r.month === currentMonth);
+      return { partner: p, totalPaid, monthly, paidThisMonth, paidCount: paid.length };
+    })
+  ), [salaryRecords, salaryConfig]);
+
   const statCards = [
     { label: 'Total Balance',       value: fmt(bal.total),       gradient: 'linear-gradient(135deg,#0071E3,#0A84FF)', icon: DollarSign },
     { label: 'Total Credit',        value: fmt(bal.totalCredit), gradient: 'linear-gradient(135deg,#34C759,#30D158)', icon: ArrowUpRight },
@@ -332,6 +430,16 @@ export default function Transactions() {
               <button onClick={() => { setDrawingForm(emptyDrawing); setShowAddDrawing(true); }} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>
                 <HandCoins size={14}/> Record Drawing
               </button>
+            )}
+            {tab === 'salaries' && (
+              <div style={{ display:'flex', gap:8 }}>
+                <button onClick={() => { setSalConfigForm(salaryConfig); setShowSalConfig(true); }} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>
+                  <Settings2 size={13}/> Set Amounts
+                </button>
+                <button onClick={() => { setSalPayForm({ ...emptySalPay, amount: String(salaryConfig['Bhargav'] || '') }); setShowAddSal(true); }} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>
+                  <Banknote size={14}/> Mark as Paid
+                </button>
+              </div>
             )}
           </div>
         }
@@ -368,7 +476,7 @@ export default function Transactions() {
           {/* Tab bar */}
           <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
             <div className="tab-bar">
-              {[['all','All'],['credit','Credit'],['debit','Debit'],['drawings','Drawings 💸']].map(([k, l]) => (
+              {[['all','All'],['credit','Credit'],['debit','Debit'],['drawings','Drawings 💸'],['salaries','Salaries 💰']].map(([k, l]) => (
                 <button key={k} onClick={() => setTab(k)} className={`tab-item ${tab===k?'active':''}`}>{l}</button>
               ))}
             </div>
@@ -579,6 +687,109 @@ export default function Transactions() {
               </>
             )
           )}
+
+          {/* ─── SALARIES TAB ──────────────────────────── */}
+          {tab === 'salaries' && (
+            loadingSalaries ? <LoadingSpinner rows={4}/> : (
+              <>
+                {/* Partner salary cards */}
+                <div className="rg-4">
+                  {partnerSalarySummary.map(({ partner, totalPaid, monthly, paidThisMonth, paidCount }) => {
+                    const col = PARTNER_COLORS[partner] || PARTNER_COLORS.Bhargav;
+                    const curMonth = currentMonthLabel();
+                    return (
+                      <div key={partner} style={{ background:'#fff', border:'1px solid rgba(0,0,0,0.07)', borderRadius:16, padding:'18px 20px', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
+                        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>
+                          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                            <div style={{ width:38, height:38, borderRadius:11, background:col.gradient, display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:13, fontWeight:700, flexShrink:0 }}>
+                              {partner.slice(0,2).toUpperCase()}
+                            </div>
+                            <div>
+                              <div style={{ fontSize:13.5, fontWeight:640, color:'#1D1D1F' }}>{partner}</div>
+                              <div style={{ fontSize:11, color:'#8E8E93' }}>{monthly > 0 ? fmt(monthly)+'/mo' : 'Not set'}</div>
+                            </div>
+                          </div>
+                          {monthly > 0 && (
+                            paidThisMonth
+                              ? <div style={{ display:'flex', alignItems:'center', gap:4 }}><CheckCircle2 size={14} color="#34C759"/><span style={{ fontSize:11, color:'#34C759', fontWeight:500 }}>Paid</span></div>
+                              : <div style={{ display:'flex', alignItems:'center', gap:4 }}><Clock size={14} color="#FF9500"/><span style={{ fontSize:11, color:'#FF9500', fontWeight:500 }}>Pending</span></div>
+                          )}
+                        </div>
+                        <div style={{ display:'flex', flexDirection:'column', gap:5 }}>
+                          <div style={{ display:'flex', justifyContent:'space-between' }}>
+                            <span style={{ fontSize:11, color:'#AEAEB2' }}>Monthly Salary</span>
+                            <span style={{ fontSize:12, fontWeight:600, color:'#1D1D1F' }}>{monthly > 0 ? fmt(monthly) : '—'}</span>
+                          </div>
+                          <div style={{ display:'flex', justifyContent:'space-between' }}>
+                            <span style={{ fontSize:11, color:'#AEAEB2' }}>Total Paid</span>
+                            <span style={{ fontSize:12, fontWeight:550, color:'#34C759' }}>{fmt(totalPaid)}</span>
+                          </div>
+                          <div style={{ display:'flex', justifyContent:'space-between' }}>
+                            <span style={{ fontSize:11, color:'#AEAEB2' }}>{curMonth}</span>
+                            <Badge color={paidThisMonth ? 'green' : monthly > 0 ? 'orange' : 'gray'}>
+                              {paidThisMonth ? 'Paid' : monthly > 0 ? 'Pending' : 'Not set'}
+                            </Badge>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Pending alert */}
+                {partnerSalarySummary.some(p => p.monthly > 0 && !p.paidThisMonth) && (
+                  <div style={{ display:'flex', alignItems:'center', gap:8, padding:'10px 16px', borderRadius:11, background:'rgba(255,149,0,0.07)', border:'1px solid rgba(255,149,0,0.15)' }}>
+                    <Clock size={14} color="#FF9500"/>
+                    <span style={{ fontSize:13, color:'#FF9500', fontWeight:500 }}>
+                      {currentMonthLabel()} salary pending for:{' '}
+                      <strong>{partnerSalarySummary.filter(p => p.monthly > 0 && !p.paidThisMonth).map(p => p.partner).join(', ')}</strong>
+                    </span>
+                  </div>
+                )}
+
+                {/* Payment history table */}
+                <div className="mac-card" style={{ overflow:'hidden' }}>
+                  <div style={{ overflowX:'auto' }}>
+                    <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                      <thead style={{ background:'rgba(0,0,0,0.018)' }}>
+                        <tr>{['Partner','Month','Amount','Date','Method','Notes','Actions'].map(h => <TH key={h} c={h}/>)}</tr>
+                      </thead>
+                      <tbody>
+                        {salaryRecords.length === 0
+                          ? <tr><td colSpan={7} style={{ textAlign:'center', padding:'48px 16px', color:'#AEAEB2', fontSize:13 }}>No salary payments recorded — click "Mark as Paid" to add one</td></tr>
+                          : salaryRecords.map(r => {
+                            const col = PARTNER_COLORS[r.partner] || PARTNER_COLORS.Bhargav;
+                            return (
+                              <tr key={r.id} className="table-row">
+                                <TD>
+                                  <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                                    <div style={{ width:28, height:28, borderRadius:8, background:col.gradient, display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:10, fontWeight:700, flexShrink:0 }}>
+                                      {r.partner.slice(0,2).toUpperCase()}
+                                    </div>
+                                    <span style={{ fontSize:13, fontWeight:550, color:'#1D1D1F' }}>{r.partner}</span>
+                                  </div>
+                                </TD>
+                                <TD><span style={{ fontSize:13, fontWeight:500, color:'#1D1D1F' }}>{r.month}</span></TD>
+                                <TD><span style={{ fontSize:13, fontWeight:650, color:'#34C759' }}>{fmt(r.amount)}</span></TD>
+                                <TD><span style={{ fontSize:12, color:'#6E6E73' }}>{r.paidDate || '—'}</span></TD>
+                                <TD><span style={{ fontSize:12, color:'#6E6E73' }}>{r.paymentMethod || '—'}</span></TD>
+                                <TD><span style={{ fontSize:12, color:'#8E8E93' }}>{r.notes || '—'}</span></TD>
+                                <TD>
+                                  <button onClick={() => setDeleteSalId(r.id)} style={{ width:28, height:28, borderRadius:8, background:'rgba(255,59,48,0.08)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                                    <Trash2 size={12} color="#FF3B30"/>
+                                  </button>
+                                </TD>
+                              </tr>
+                            );
+                          })
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )
+          )}
         </div>
       )}
 
@@ -645,8 +856,41 @@ export default function Transactions() {
         </div>
       </Modal>
 
+      {/* Set Salary Amounts Modal */}
+      <Modal isOpen={showSalConfig} onClose={() => setShowSalConfig(false)} title="Set Partner Monthly Salaries" size="sm">
+        <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+          {PARTNERS.map(p => {
+            const col = PARTNER_COLORS[p] || PARTNER_COLORS.Bhargav;
+            return (
+              <div key={p} style={{ display:'flex', alignItems:'center', gap:12 }}>
+                <div style={{ width:32, height:32, borderRadius:9, background:col.gradient, display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:11, fontWeight:700, flexShrink:0 }}>
+                  {p.slice(0,2).toUpperCase()}
+                </div>
+                <FF label={p} required>
+                  <input className="mac-input" type="number" value={salConfigForm[p] || ''} onChange={e => setSalConfigForm(c => ({ ...c, [p]: +e.target.value }))} placeholder="Monthly salary ₹"/>
+                </FF>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20, paddingTop:16, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
+          <button onClick={() => setShowSalConfig(false)} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>Cancel</button>
+          <button onClick={saveSalaryConfig} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>Save</button>
+        </div>
+      </Modal>
+
+      {/* Mark Salary Paid Modal */}
+      <Modal isOpen={showAddSal} onClose={() => setShowAddSal(false)} title="Mark Salary as Paid" size="sm">
+        <SalaryPayForm v={salPayForm} onChange={setSalPayForm} salaryConfig={salaryConfig}/>
+        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20, paddingTop:16, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
+          <button onClick={() => setShowAddSal(false)} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>Cancel</button>
+          <button onClick={saveSalaryPayment} disabled={saving} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>{saving ? 'Saving…' : 'Save Payment'}</button>
+        </div>
+      </Modal>
+
       <ConfirmDialog isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={() => del(deleteId)} title="Delete Transaction" message="This will permanently delete this transaction."/>
       <ConfirmDialog isOpen={!!deleteDrawingId} onClose={() => setDeleteDrawingId(null)} onConfirm={() => deleteDrawing(deleteDrawingId)} title="Delete Drawing" message="This will permanently delete this drawing record and all return history."/>
+      <ConfirmDialog isOpen={!!deleteSalId} onClose={() => setDeleteSalId(null)} onConfirm={() => deleteSalary(deleteSalId)} title="Delete Salary Record" message="This will permanently delete this salary payment record."/>
     </div>
   );
 }

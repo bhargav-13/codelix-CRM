@@ -292,6 +292,48 @@ export const projectsDB = {
 };
 
 // ─────────────────────────────────────────────
+// PARTNER SALARIES
+// ─────────────────────────────────────────────
+const toSalRec = r => ({
+  id:            r.id,
+  partner:       r.partner,
+  month:         r.month,
+  amount:        r.amount,
+  paidDate:      r.paid_date,
+  paymentMethod: r.payment_method,
+  notes:         r.notes,
+  createdAt:     r.created_at,
+});
+
+const fromSalRec = s => ({
+  partner:        s.partner,
+  month:          s.month,
+  amount:         +s.amount,
+  paid_date:      s.paidDate      || null,
+  payment_method: s.paymentMethod || null,
+  notes:          s.notes         || null,
+});
+
+export const partnerSalariesDB = {
+  getAll: async () => {
+    const { data, error } = await supabase
+      .from('partner_salaries').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(toSalRec);
+  },
+  create: async (s) => {
+    const { data, error } = await supabase
+      .from('partner_salaries').insert(fromSalRec(s)).select().single();
+    if (error) throw error;
+    return toSalRec(data);
+  },
+  delete: async (id) => {
+    const { error } = await supabase.from('partner_salaries').delete().eq('id', id);
+    if (error) throw error;
+  },
+};
+
+// ─────────────────────────────────────────────
 // PARTNER DRAWINGS
 // ─────────────────────────────────────────────
 const toDrawing = r => ({
