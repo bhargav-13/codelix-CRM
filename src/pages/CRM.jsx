@@ -7,7 +7,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import { clientsDB } from '../lib/db';
 import {
-  PROJECT_TYPES, SOURCES, CLIENT_STATUSES, PRIORITIES,
+  PROJECT_TYPES, SOURCES, CLIENT_STATUSES, PRIORITIES, PARTNERS,
 } from '../data/mockData';
 import {
   Plus, Filter, Phone, Mail, MapPin, Calendar, Building2, User, Clock,
@@ -21,7 +21,7 @@ const fmt = n => n ? '₹' + Number(n).toLocaleString('en-IN') : '—';
 const emptyClient = {
   clientName:'', companyName:'', contact:'', email:'', address:'',
   projectType:'Website', source:'Referral', status:'Cold', proposalValue:'',
-  finalPrice:'', priority:'Medium', createdBy:'Bhargav Shah', nextFollowup:'', followupHistory:[],
+  finalPrice:'', priority:'Medium', createdBy:'Bhargav', nextFollowup:'', followupHistory:[],
 };
 
 function FF({ label, children, required }) {
@@ -50,7 +50,7 @@ function ClientForm({ v, set }) {
       <FF label="Proposal Value (₹)"><input className="mac-input" type="number" value={v.proposalValue} onChange={e=>set('proposalValue',e.target.value)} placeholder="0" /></FF>
       <FF label="Final Price (₹)"><input className="mac-input" type="number" value={v.finalPrice} onChange={e=>set('finalPrice',e.target.value)} placeholder="0" /></FF>
       <FF label="Next Follow-up"><input className="mac-input" type="date" value={v.nextFollowup} onChange={e=>set('nextFollowup',e.target.value)} /></FF>
-      <FF label="Created By"><input className="mac-input" value={v.createdBy} onChange={e=>set('createdBy',e.target.value)} /></FF>
+      <FF label="Created By"><select className="mac-select" value={v.createdBy} onChange={e=>set('createdBy',e.target.value)}>{PARTNERS.map(p=><option key={p}>{p}</option>)}</select></FF>
     </div>
   );
 }

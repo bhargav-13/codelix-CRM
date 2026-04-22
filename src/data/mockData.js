@@ -97,9 +97,10 @@ export const mockCredentials = [
   { id: 4, clientName: 'Internal', projectName: 'Codelix Tools', type: 'Tool', platform: 'Figma', url: 'https://figma.com', username: 'design@codelix.in', password: '••••••••••', notes: 'Team design account' },
 ];
 
-export const PROJECT_TYPES = ['Website', 'App', 'ERP', 'Design', 'Digital Marketing', 'SEO', 'Branding', 'Other'];
+export const PROJECT_TYPES = ['Website', 'App', 'ERP', 'Design', 'Branding', 'Other'];
 export const SOURCES = ['Referral', 'LinkedIn', 'Google', 'Instagram', 'Facebook', 'Cold Call', 'Walk-in', 'Other'];
-export const CLIENT_STATUSES = ['Cold', 'Warm', 'Hot', 'Closed Won', 'Closed Lost'];
+export const CLIENT_STATUSES = ['Cold', 'Warm', 'Hot', 'Closed Won', 'Closed Lost', 'Not Received'];
+export const PARTNERS = ['Bhargav', 'Prince', 'Manas', 'Kushal'];
 export const PRIORITIES = ['High', 'Medium', 'Low'];
 export const DEPARTMENTS = ['Tech', 'Design', 'Sales', 'Ops'];
 export const EMPLOYMENT_TYPES = ['Full-time', 'Part-time', 'Freelancer', 'Intern'];
