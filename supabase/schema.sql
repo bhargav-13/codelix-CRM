@@ -129,6 +129,12 @@ create table if not exists partner_drawings (
   created_at    timestamptz default now()
 );
 
+-- ── TRANSACTIONS — new columns for unified form ──────────────
+-- Run these if the table already exists:
+-- ALTER TABLE transactions ADD COLUMN IF NOT EXISTS sub_type    text;
+-- ALTER TABLE transactions ADD COLUMN IF NOT EXISTS person      text;
+-- ALTER TABLE transactions ADD COLUMN IF NOT EXISTS month_label text;
+
 -- ================================================================
 -- ROW LEVEL SECURITY
 -- ================================================================

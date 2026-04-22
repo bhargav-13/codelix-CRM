@@ -94,6 +94,9 @@ const toTx = r => ({
   paidTo:        r.paid_to,
   paymentMethod: r.payment_method,
   remark:        r.remark,
+  subType:       r.sub_type,
+  person:        r.person,
+  monthLabel:    r.month_label,
 });
 
 const fromTx = t => ({
@@ -101,12 +104,15 @@ const fromTx = t => ({
   account_type:   t.accountType,
   amount:         +t.amount,
   date:           t.date,
-  source:         t.source   || null,
-  category:       t.category || null,
+  source:         t.source        || null,
+  category:       t.category      || null,
   client_name:    t.clientName    || null,
   paid_to:        t.paidTo        || null,
   payment_method: t.paymentMethod || null,
   remark:         t.remark        || null,
+  sub_type:       t.subType       || null,
+  person:         t.person        || null,
+  month_label:    t.monthLabel    || null,
 });
 
 export const transactionsDB = {
