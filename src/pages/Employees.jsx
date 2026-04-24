@@ -6,9 +6,11 @@ import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { CardGridSkeleton } from '../components/ui/LoadingSpinner';
 import { employeesDB } from '../lib/db';
+import { supabase } from '../lib/supabase';
 import { DEPARTMENTS, EMPLOYMENT_TYPES, SALARY_TYPES, PAYMENT_METHODS } from '../data/mockData';
-import { Plus, Edit2, Trash2, Filter, History, AlertCircle, Banknote, ChevronDown, ChevronRight, Phone, Mail, MapPin, Calendar, Clock, X } from 'lucide-react';
+import { Plus, Edit2, Trash2, Filter, History, AlertCircle, Banknote, ChevronDown, ChevronRight, Phone, Mail, MapPin, Calendar, Clock, X, KeyRound, Copy, CheckCheck } from 'lucide-react';
 
+const DEFAULT_PASSWORD = 'Codelix@1234';
 const today = new Date().toISOString().split('T')[0];
 const fmt = n => n ? '₹' + Number(n).toLocaleString('en-IN') : '₹0';
 
@@ -144,6 +146,8 @@ export default function Employees(){
   const [salForm,setSalForm]   = useState(emptySal);
   const [auditLog,setAuditLog] = useState([]);
   const [showAudit,setShowAudit] = useState(false);
+  const [createdCreds,setCreatedCreds] = useState(null); // { name, email } — shown after employee creation
+  const [copied,setCopied]     = useState(false);
 
   const s=(k,v)=>setForm(f=>({...f,[k]:v}));
 
@@ -176,10 +180,28 @@ export default function Employees(){
         const empId=`CLX${String(count+1).padStart(3,'0')}`;
         const created=await employeesDB.create({...form,empId,salaryHistory:[]});
         setEmps(es=>[...es,created]);
+
+        // ── Create login account if email provided ──────────────────
+        if(form.email){
+          const { error: authErr } = await supabase.auth.signUp({
+            email: form.email,
+            password: DEFAULT_PASSWORD,
+          });
+          if(authErr){
+            console.warn('Could not create auth account:', authErr.message);
+          } else {
+            // Show credentials to the admin
+            setCreatedCreds({ name: form.name, email: form.email });
+          }
+        }
       }
     } catch(e){ console.error(e); }
     setSaving(false);
     setShowAdd(false);setEditEmp(null);setForm(emptyEmp);
+  }
+
+  async function copyPassword(){
+    try{ await navigator.clipboard.writeText(DEFAULT_PASSWORD); setCopied(true); setTimeout(()=>setCopied(false),2000); } catch{}
   }
 
   async function del(id){
@@ -319,6 +341,54 @@ export default function Employees(){
       </Modal>
 
       <ConfirmDialog isOpen={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>del(deleteId)} title="Delete Employee" message="This will permanently delete the employee and all salary records."/>
+
+      {/* ── Login Credentials Created ──────────────────────────────── */}
+      <Modal isOpen={!!createdCreds} onClose={()=>setCreatedCreds(null)} title="Login Account Created" size="sm">
+        {createdCreds && (
+          <div style={{display:'flex',flexDirection:'column',gap:16}}>
+            {/* Success banner */}
+            <div style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderRadius:12,background:'rgba(52,199,89,0.08)',border:'1px solid rgba(52,199,89,0.18)'}}>
+              <div style={{width:32,height:32,borderRadius:9,background:'linear-gradient(135deg,#34C759,#30D158)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                <KeyRound size={14} color="#fff"/>
+              </div>
+              <div>
+                <div style={{fontSize:13,fontWeight:600,color:'#1D1D1F'}}>Account created for {createdCreds.name}</div>
+                <div style={{fontSize:11.5,color:'#6E6E73',marginTop:1}}>Share these credentials with the employee</div>
+              </div>
+            </div>
+
+            {/* Email */}
+            <div>
+              <label style={{display:'block',fontSize:11,fontWeight:600,color:'#8E8E93',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:5}}>Email</label>
+              <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(0,0,0,0.03)',border:'1px solid rgba(0,0,0,0.07)',fontSize:13.5,color:'#1D1D1F',fontWeight:450}}>
+                {createdCreds.email}
+              </div>
+            </div>
+
+            {/* Password */}
+            <div>
+              <label style={{display:'block',fontSize:11,fontWeight:600,color:'#8E8E93',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:5}}>Default Password</label>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <div style={{flex:1,padding:'10px 12px',borderRadius:10,background:'rgba(0,0,0,0.03)',border:'1px solid rgba(0,0,0,0.07)',fontSize:14,color:'#1D1D1F',fontFamily:'monospace',letterSpacing:'0.5px'}}>
+                  {DEFAULT_PASSWORD}
+                </div>
+                <button onClick={copyPassword} style={{width:36,height:36,borderRadius:10,background: copied?'rgba(52,199,89,0.1)':'rgba(0,0,0,0.05)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all 0.15s'}}>
+                  {copied ? <CheckCheck size={14} color="#34C759"/> : <Copy size={14} color="#6E6E73"/>}
+                </button>
+              </div>
+            </div>
+
+            {/* Note */}
+            <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(255,149,0,0.06)',border:'1px solid rgba(255,149,0,0.15)',fontSize:12,color:'#FF9500',lineHeight:1.5}}>
+              ⚠ Ask the employee to change their password after first login. They will see a "No Access" screen until you grant them features.
+            </div>
+
+            <div style={{paddingTop:4}}>
+              <button onClick={()=>setCreatedCreds(null)} className="mac-btn mac-btn-primary" style={{width:'100%',fontSize:13}}>Done</button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
