@@ -6,7 +6,7 @@ import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { CardGridSkeleton } from '../components/ui/LoadingSpinner';
 import { employeesDB } from '../lib/db';
-import { supabaseAuth } from '../lib/supabase';
+import { supabaseAdmin, hasServiceRole } from '../lib/supabase';
 import { DEPARTMENTS, EMPLOYMENT_TYPES, SALARY_TYPES, PAYMENT_METHODS } from '../data/mockData';
 import { Plus, Edit2, Trash2, Filter, History, AlertCircle, Banknote, ChevronDown, ChevronRight, Phone, Mail, MapPin, Calendar, Clock, X, KeyRound, Copy, CheckCheck } from 'lucide-react';
 
@@ -182,20 +182,29 @@ export default function Employees(){
         setEmps(es=>[...es,created]);
 
         // ── Create login account if email provided ──────────────────
-        // Uses a separate client (persistSession:false) so the current
-        // partner session is never touched by this signUp call.
+        // Uses admin.createUser() (service role key) which:
+        //   • Creates the account immediately — no confirmation email sent
+        //   • email_confirm:true marks it as confirmed right away
+        //   • Never touches the current partner session
         if(form.email){
-          const { error: authErr } = await supabaseAuth.auth.signUp({
-            email: form.email,
-            password: DEFAULT_PASSWORD,
-          });
-          if(authErr){
-            console.warn('Could not create auth account:', authErr.message);
-            // Still show the modal — employee DB record was created
-            setCreatedCreds({ name: form.name, email: form.email, authError: authErr.message });
+          let authError = null;
+          if(hasServiceRole){
+            // Preferred: no email, instant confirmation
+            const { error } = await supabaseAdmin.auth.admin.createUser({
+              email: form.email,
+              password: DEFAULT_PASSWORD,
+              email_confirm: true,
+            });
+            authError = error?.message || null;
           } else {
-            setCreatedCreds({ name: form.name, email: form.email, authError: null });
+            // Fallback if service role key not in .env
+            const { error } = await supabaseAdmin.auth.signUp({
+              email: form.email,
+              password: DEFAULT_PASSWORD,
+            });
+            authError = error?.message || null;
           }
+          setCreatedCreds({ name: form.name, email: form.email, authError });
         }
       }
     } catch(e){ console.error(e); }
@@ -381,14 +390,15 @@ export default function Employees(){
               </div>
             </div>
 
-            {/* Auth error or success note */}
+            {/* Note */}
             {createdCreds?.authError ? (
               <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(255,59,48,0.06)',border:'1px solid rgba(255,59,48,0.15)',fontSize:12,color:'#FF3B30',lineHeight:1.5}}>
-                ⚠ Employee record saved, but login account failed: {createdCreds.authError}. You can try again or ask them to sign up themselves.
+                <strong>Login account failed:</strong> {createdCreds.authError}
+                {!hasServiceRole && <><br/><br/>Add <code style={{background:'rgba(0,0,0,0.06)',padding:'1px 5px',borderRadius:4}}>VITE_SUPABASE_SERVICE_ROLE_KEY</code> to your <code style={{background:'rgba(0,0,0,0.06)',padding:'1px 5px',borderRadius:4}}>.env</code> file (Supabase → Settings → API → service_role key) to fix this permanently.</>}
               </div>
             ) : (
-              <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(255,149,0,0.06)',border:'1px solid rgba(255,149,0,0.15)',fontSize:12,color:'#FF9500',lineHeight:1.5}}>
-                ⚠ Ask the employee to change their password after first login. They will see a "No Access" screen until you grant them features.
+              <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(52,199,89,0.06)',border:'1px solid rgba(52,199,89,0.15)',fontSize:12,color:'#34C759',lineHeight:1.5}}>
+                ✓ Login account created. Ask the employee to change their password after first login.
               </div>
             )}
 
