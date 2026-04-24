@@ -4,18 +4,21 @@ import { supabase } from '../lib/supabase';
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser]               = useState(null);
-  const [loading, setLoading]         = useState(true);   // true while resolving session + role
-  const [isEmployee, setIsEmployee]   = useState(false);
-  const [employeeData, setEmployeeData] = useState(null); // { name, role, empId, id }
+  const [user, setUser]                 = useState(null);
+  const [loading, setLoading]           = useState(true);
+  const [isEmployee, setIsEmployee]     = useState(false);
+  const [employeeData, setEmployeeData] = useState(null);
 
-  // ── Check whether the signed-in email belongs to an employee record ─
+  // Check whether the signed-in email belongs to an employee record.
+  // Called with setTimeout(0) to avoid Supabase auth deadlock.
   async function resolveRole(authUser) {
     if (!authUser?.email) {
       setIsEmployee(false);
       setEmployeeData(null);
+      setLoading(false);
       return;
     }
+
     const { data } = await supabase
       .from('employees')
       .select('id, name, role, emp_id')
@@ -29,30 +32,31 @@ export function AuthProvider({ children }) {
       setIsEmployee(false);
       setEmployeeData(null);
     }
+    setLoading(false);
   }
 
-  // ── Bootstrap: restore session on mount ─────────────────────────────
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      const u = session?.user ?? null;
-      setUser(u);
-      await resolveRole(u);
-      setLoading(false);
-    });
-
+    // onAuthStateChange fires INITIAL_SESSION on mount — this is the only
+    // thing needed to restore a persisted session after a page refresh.
+    // We intentionally do NOT call getSession() separately to avoid
+    // running resolveRole twice and triggering a DB deadlock.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
+      (_event, session) => {
         const u = session?.user ?? null;
         setUser(u);
-        await resolveRole(u);
-        setLoading(false);
+
+        // Move the DB query out of the auth callback with setTimeout(0).
+        // Calling supabase.from() directly inside onAuthStateChange can
+        // deadlock the Supabase client on the same connection.
+        setTimeout(() => {
+          resolveRole(u);
+        }, 0);
       }
     );
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Actions ──────────────────────────────────────────────────────────
   async function login(email, password) {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     return { error };
@@ -64,10 +68,8 @@ export function AuthProvider({ children }) {
   }
 
   async function logout() {
+    setLoading(true);
     await supabase.auth.signOut();
-    setUser(null);
-    setIsEmployee(false);
-    setEmployeeData(null);
   }
 
   return (

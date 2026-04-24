@@ -6,7 +6,7 @@ import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { CardGridSkeleton } from '../components/ui/LoadingSpinner';
 import { employeesDB } from '../lib/db';
-import { supabase } from '../lib/supabase';
+import { supabaseAuth } from '../lib/supabase';
 import { DEPARTMENTS, EMPLOYMENT_TYPES, SALARY_TYPES, PAYMENT_METHODS } from '../data/mockData';
 import { Plus, Edit2, Trash2, Filter, History, AlertCircle, Banknote, ChevronDown, ChevronRight, Phone, Mail, MapPin, Calendar, Clock, X, KeyRound, Copy, CheckCheck } from 'lucide-react';
 
@@ -182,16 +182,19 @@ export default function Employees(){
         setEmps(es=>[...es,created]);
 
         // ── Create login account if email provided ──────────────────
+        // Uses a separate client (persistSession:false) so the current
+        // partner session is never touched by this signUp call.
         if(form.email){
-          const { error: authErr } = await supabase.auth.signUp({
+          const { error: authErr } = await supabaseAuth.auth.signUp({
             email: form.email,
             password: DEFAULT_PASSWORD,
           });
           if(authErr){
             console.warn('Could not create auth account:', authErr.message);
+            // Still show the modal — employee DB record was created
+            setCreatedCreds({ name: form.name, email: form.email, authError: authErr.message });
           } else {
-            // Show credentials to the admin
-            setCreatedCreds({ name: form.name, email: form.email });
+            setCreatedCreds({ name: form.name, email: form.email, authError: null });
           }
         }
       }
@@ -378,10 +381,16 @@ export default function Employees(){
               </div>
             </div>
 
-            {/* Note */}
-            <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(255,149,0,0.06)',border:'1px solid rgba(255,149,0,0.15)',fontSize:12,color:'#FF9500',lineHeight:1.5}}>
-              ⚠ Ask the employee to change their password after first login. They will see a "No Access" screen until you grant them features.
-            </div>
+            {/* Auth error or success note */}
+            {createdCreds?.authError ? (
+              <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(255,59,48,0.06)',border:'1px solid rgba(255,59,48,0.15)',fontSize:12,color:'#FF3B30',lineHeight:1.5}}>
+                ⚠ Employee record saved, but login account failed: {createdCreds.authError}. You can try again or ask them to sign up themselves.
+              </div>
+            ) : (
+              <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(255,149,0,0.06)',border:'1px solid rgba(255,149,0,0.15)',fontSize:12,color:'#FF9500',lineHeight:1.5}}>
+                ⚠ Ask the employee to change their password after first login. They will see a "No Access" screen until you grant them features.
+              </div>
+            )}
 
             <div style={{paddingTop:4}}>
               <button onClick={()=>setCreatedCreds(null)} className="mac-btn mac-btn-primary" style={{width:'100%',fontSize:13}}>Done</button>
