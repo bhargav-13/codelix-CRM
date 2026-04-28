@@ -1,0 +1,119 @@
+/* ─────────────────────────────────────────────────────────────────
+   Codelix Page Loader
+   ─────────────────────────────────────────────────────────────────
+   Color : #3E7DFC (Codelix blue)
+   Total duration: ~1.5s hold + 0.3s exit
+   ───────────────────────────────────────────────────────────────── */
+
+/* ── Overlay ─────────────────────────────────────────────────────── */
+.cl-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 0.7s cubic-bezier(0.19, 1, 0.22, 1) 0s;
+}
+
+.cl-loader.is-leaving {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Inner centering wrapper ─────────────────────────────────────── */
+.cl-loader__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+/* ── Logo container — scales in gently ──────────────────────────── */
+.cl-loader__logo {
+  animation: cl-logo-in 0.7s cubic-bezier(0.19, 1, 0.22, 1) 0.15s both;
+}
+
+.cl-loader__svg {
+  width: 72px;
+  height: auto;
+  display: block;
+}
+
+/* ── SVG paths: stagger up from below ───────────────────────────── */
+.cl-loader__path {
+  opacity: 0;
+  animation: cl-path-in 1s cubic-bezier(0.19, 1, 0.22, 1) both;
+}
+
+.cl-loader__path--1 {
+  animation-delay: 0.2s;
+}
+
+.cl-loader__path--2 {
+  animation-delay: 0.45s;
+}
+
+/* ── Wordmark: fades up after paths ─────────────────────────────── */
+.cl-loader__wordmark {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.45em;
+  color: #3E7DFC;
+  opacity: 0;
+  animation: cl-word-in 0.9s cubic-bezier(0.19, 1, 0.22, 1) 0.75s both;
+}
+
+/* ── Pulsing dot below wordmark ──────────────────────────────────── */
+.cl-loader__wordmark::after {
+  content: '';
+  display: block;
+  margin: 14px auto 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #3E7DFC;
+  opacity: 0;
+  animation: cl-pulse 1.4s ease-in-out 1.4s infinite;
+}
+
+/* ── Inline (in-page) loader ─────────────────────────────────────── */
+.cl-inline-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  width: 100%;
+}
+
+.cl-inline-loader__svg {
+  width: 48px;
+  height: auto;
+  display: block;
+}
+
+/* ── Keyframes ───────────────────────────────────────────────────── */
+@keyframes cl-logo-in {
+  from { opacity: 0; transform: scale(0.84); }
+  to   { opacity: 1; transform: scale(1);    }
+}
+
+@keyframes cl-path-in {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes cl-word-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes cl-pulse {
+  0%, 100% { opacity: 0.15; transform: scale(1);   }
+  50%       { opacity: 0.9;  transform: scale(1.6); }
+}

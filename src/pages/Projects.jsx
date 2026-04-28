@@ -4,7 +4,7 @@ import Badge, { getStatusColor } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { CardGridSkeleton } from '../components/ui/LoadingSpinner';
+import { PageLoader } from '../components/ui/CodelixLoader';
 import { projectsDB, employeesDB } from '../lib/db';
 import { PROJECT_TYPES, PROJECT_STATUSES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
 import { Plus, Edit2, Trash2, Filter, History, IndianRupee, ChevronDown, ChevronRight, User, Calendar } from 'lucide-react';
@@ -324,7 +324,7 @@ export default function Projects(){
         </div>}
       />
 
-      {loading ? <CardGridSkeleton cols={2} count={4} /> : (
+      {loading ? <PageLoader /> : (
         <div className="page-body">
           <div className="rg-4">
             {[

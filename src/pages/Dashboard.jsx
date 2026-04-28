@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import Badge, { getStatusColor } from '../components/ui/Badge';
+import { PageLoader } from '../components/ui/CodelixLoader';
 import { clientsDB, transactionsDB, employeesDB, projectsDB, settingsDB } from '../lib/db';
 import {
   Users, FolderKanban, UserCheck,
@@ -41,23 +42,6 @@ function SectionLabel({ title, right }) {
   );
 }
 
-function DashSkeleton() {
-  return (
-    <div className="page-body">
-      <div className="rg-4">
-        {[0,1,2,3].map(i=>(
-          <div key={i} style={{ height:110, borderRadius:16, background:'linear-gradient(90deg,rgba(0,0,0,0.04) 25%,rgba(0,0,0,0.07) 50%,rgba(0,0,0,0.04) 75%)', backgroundSize:'200% 100%', animation:'shimmer 1.4s infinite' }}/>
-        ))}
-      </div>
-      <div className="rg-3">
-        {[0,1,2].map(i=>(
-          <div key={i} style={{ height:200, borderRadius:16, background:'linear-gradient(90deg,rgba(0,0,0,0.04) 25%,rgba(0,0,0,0.07) 50%,rgba(0,0,0,0.04) 75%)', backgroundSize:'200% 100%', animation:'shimmer 1.4s infinite' }}/>
-        ))}
-      </div>
-      <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
-    </div>
-  );
-}
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -99,7 +83,7 @@ export default function Dashboard() {
   if (loading || !data) return (
     <div>
       <Header title="Dashboard" subtitle={new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} />
-      <DashSkeleton />
+      <PageLoader />
     </div>
   );
 

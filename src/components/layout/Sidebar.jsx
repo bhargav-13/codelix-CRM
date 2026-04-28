@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useLayout } from '../../contexts/LayoutContext';
 import { useAuth } from '../../contexts/AuthContext';
+import codelixLogo from '../../assets/codelix.svg';
 import {
   LayoutDashboard, Users, IndianRupee, UserCheck,
   FolderKanban, KeyRound, Newspaper,
@@ -59,15 +60,16 @@ export default function Sidebar() {
       }}
     >
       {/* Brand */}
-      <div style={{ padding: '22px 16px 14px' }}>
+      <div style={{ padding: '20px 16px 14px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
-            width: 34, height: 34, borderRadius: 10,
-            background: 'linear-gradient(135deg, #0071E3 0%, #0A84FF 100%)',
+            width: 36, height: 36, borderRadius: 10,
+            background: '#fff',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 2px 8px rgba(0,113,227,0.35)', flexShrink: 0,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.1)', flexShrink: 0,
+            padding: 5,
           }}>
-            <span style={{ color: '#fff', fontSize: 11, fontWeight: 700, letterSpacing: '-0.5px' }}>CX</span>
+            <img src={codelixLogo} alt="Codelix" style={{ width: 20, height: 'auto', display: 'block' }} />
           </div>
           <div>
             <div style={{ fontSize: 13.5, fontWeight: 650, color: '#1D1D1F', letterSpacing: '-0.3px', lineHeight: 1.2 }}>Codelix</div>

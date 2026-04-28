@@ -1,16 +1,17 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import LoadingSpinner from '../components/ui/LoadingSpinner';
+import { PageLoader } from '../components/ui/CodelixLoader';
 import { transactionsDB, settingsDB, employeesDB } from '../lib/db';
 import { TRANSACTION_SOURCES, EXPENSE_CATEGORIES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
 import {
   Plus, Filter, ArrowUpRight, ArrowDownRight, Edit2, Trash2,
   Wallet, History, AlertTriangle, IndianRupee, HandCoins, RotateCcw,
-  Banknote, Settings2, CheckCircle2, Clock, Users, ChevronDown, ChevronUp,
+  Banknote, Settings2, CheckCircle2, Clock, Users, ChevronDown, ChevronUp, ExternalLink,
 } from 'lucide-react';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -391,59 +392,41 @@ function TxFields({ form, onChange, partnerOutstanding, salaryConfig, employees 
     );
   }
 
-  // ── Employee Salary ──────────────────────────────────────
+  // ── Employee Salary — redirect to Employees page ────────────────────────────
   if (form.txType === 'e_salary') {
-    const selectedEmp = employees.find(e => e.name === form.person);
     return (
       <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-        <FF label="Employee" required>
-          <select
-            className="mac-select"
-            value={form.person}
-            onChange={e => {
-              const emp = employees.find(x => x.name === e.target.value);
-              onChange({
-                ...form,
-                person: e.target.value,
-                // Auto-fill salary amount from employee record, keep editable
-                amount: emp?.salaryAmount ? String(emp.salaryAmount) : form.amount,
-              });
-            }}
-          >
-            {employees.length === 0
-              ? <option value="">No active employees found</option>
-              : employees.map(e => (
-                  <option key={e.id} value={e.name}>
-                    {e.name}{e.role ? ` — ${e.role}` : ''}{e.salaryAmount ? ` (₹${Number(e.salaryAmount).toLocaleString('en-IN')})` : ''}
-                  </option>
-                ))
-            }
-          </select>
-          {selectedEmp?.salaryAmount && (
-            <div style={{ fontSize:11, color:'#8E8E93', marginTop:4 }}>
-              Configured salary: <span style={{ color:'#1D1D1F', fontWeight:550 }}>₹{Number(selectedEmp.salaryAmount).toLocaleString('en-IN')}</span> — you can edit below
+        <div style={{
+          padding:'20px 18px', borderRadius:14,
+          background:'linear-gradient(135deg,rgba(99,99,102,0.07),rgba(99,99,102,0.04))',
+          border:'1.5px solid rgba(99,99,102,0.15)',
+          display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center', gap:12,
+        }}>
+          <div style={{ width:48, height:48, borderRadius:14, background:'rgba(99,99,102,0.1)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+            <Users size={22} color="#636366"/>
+          </div>
+          <div>
+            <div style={{ fontSize:14, fontWeight:660, color:'#1D1D1F', marginBottom:4 }}>Employee Salary Payments</div>
+            <div style={{ fontSize:12.5, color:'#6E6E73', lineHeight:1.6, maxWidth:340 }}>
+              Salary payments are managed directly from the <strong>Employees</strong> page.
+              When you pay a salary there, it is <strong>automatically recorded</strong> as a transaction here.
             </div>
-          )}
-        </FF>
-        <FF label="Month" required>
-          <input className="mac-input" value={form.monthLabel} onChange={e => s('monthLabel', e.target.value)} placeholder={currentMonthLabel()}/>
-        </FF>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-          <FF label="Amount (₹)" required>
-            <input className="mac-input" type="number" value={form.amount} onChange={e => s('amount', e.target.value)} placeholder="0"/>
-          </FF>
-          <FF label="Date Paid" required>
-            <input className="mac-input" type="date" value={form.date} onChange={e => s('date', e.target.value)}/>
-          </FF>
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:6, width:'100%', marginTop:4 }}>
+            <div style={{ padding:'9px 12px', borderRadius:10, background:'rgba(52,199,89,0.07)', border:'1px solid rgba(52,199,89,0.15)', fontSize:12, color:'#34C759', display:'flex', alignItems:'center', gap:8 }}>
+              <CheckCircle2 size={13}/>
+              Salary budget tracking per employee
+            </div>
+            <div style={{ padding:'9px 12px', borderRadius:10, background:'rgba(52,199,89,0.07)', border:'1px solid rgba(52,199,89,0.15)', fontSize:12, color:'#34C759', display:'flex', alignItems:'center', gap:8 }}>
+              <CheckCircle2 size={13}/>
+              Overpayment prevention with remaining balance check
+            </div>
+            <div style={{ padding:'9px 12px', borderRadius:10, background:'rgba(52,199,89,0.07)', border:'1px solid rgba(52,199,89,0.15)', fontSize:12, color:'#34C759', display:'flex', alignItems:'center', gap:8 }}>
+              <CheckCircle2 size={13}/>
+              Auto-creates expense transaction on save
+            </div>
+          </div>
         </div>
-        <FF label="Payment Method">
-          <select className="mac-select" value={form.paymentMethod} onChange={e => s('paymentMethod', e.target.value)}>
-            {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
-          </select>
-        </FF>
-        <FF label="Notes">
-          <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional"/>
-        </FF>
       </div>
     );
   }
@@ -561,6 +544,7 @@ function PartnerOverview({ txs, salaryConfig, onSetSalaries }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Transactions() {
+  const navigate = useNavigate();
   const [txs, setTxs]               = useState([]);
   const [openBal, setOpenBal]       = useState({ cash: 0, bank: 0 });
   const [loading, setLoading]       = useState(true);
@@ -711,7 +695,7 @@ export default function Transactions() {
         }
       />
 
-      {loading ? <LoadingSpinner rows={7}/> : (
+      {loading ? <PageLoader /> : (
         <div className="page-body">
 
           {/* Low balance alert */}
@@ -885,9 +869,19 @@ export default function Transactions() {
 
         <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20, paddingTop:16, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
           <button onClick={() => { setShowAdd(false); setEditTx(null); }} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>Cancel</button>
-          <button onClick={save} disabled={saving} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>
-            {saving ? 'Saving…' : editTx ? 'Save Changes' : 'Add Transaction'}
-          </button>
+          {form.txType === 'e_salary' ? (
+            <button
+              onClick={() => { setShowAdd(false); navigate('/employees'); }}
+              className="mac-btn mac-btn-primary"
+              style={{ fontSize:13, display:'flex', alignItems:'center', gap:6 }}
+            >
+              <ExternalLink size={13}/> Go to Employees
+            </button>
+          ) : (
+            <button onClick={save} disabled={saving} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>
+              {saving ? 'Saving…' : editTx ? 'Save Changes' : 'Add Transaction'}
+            </button>
+          )}
         </div>
       </Modal>
 

@@ -1,21 +1,29 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import Badge, { getStatusColor } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { CardGridSkeleton } from '../components/ui/LoadingSpinner';
-import { employeesDB } from '../lib/db';
+import { PageLoader } from '../components/ui/CodelixLoader';
+import { employeesDB, transactionsDB } from '../lib/db';
 import { supabaseAdmin, hasServiceRole } from '../lib/supabase';
 import { DEPARTMENTS, EMPLOYMENT_TYPES, SALARY_TYPES, PAYMENT_METHODS } from '../data/mockData';
-import { Plus, Edit2, Trash2, Filter, History, AlertCircle, Banknote, ChevronDown, ChevronRight, Phone, Mail, MapPin, Calendar, Clock, X, KeyRound, Copy, CheckCheck } from 'lucide-react';
+import { Plus, Edit2, Trash2, Filter, History, AlertCircle, Banknote, ChevronDown, ChevronRight, Phone, Mail, MapPin, Calendar, Clock, X, KeyRound, Copy, CheckCheck, ArrowRight } from 'lucide-react';
 
 const DEFAULT_PASSWORD = 'Codelix@1234';
 const today = new Date().toISOString().split('T')[0];
 const fmt = n => n ? '₹' + Number(n).toLocaleString('en-IN') : '₹0';
 
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const _now = new Date();
+const _curMonthName = MONTH_NAMES[_now.getMonth()];
+const _curYear = _now.getFullYear();
+// Generate year options: 2 years back up to 1 year ahead
+const YEAR_OPTIONS = Array.from({length:4},(_,i)=>_curYear-2+i);
+
 const emptyEmp = { name:'',mobile:'',email:'',address:'',role:'',department:'Tech',joiningDate:today,employmentType:'Full-time',status:'Active',salaryType:'Monthly',salaryAmount:'',paymentCycle:'Monthly',bankDetails:'',upiId:'',salaryHistory:[] };
-const emptySal = { month:'',paid:'',date:today,method:'Bank Transfer',remark:'' };
+const emptySal = { month:`${_curMonthName} ${_curYear}`,paid:'',date:today,method:'Bank Transfer',remark:'' };
 
 const FF=({label,children,required})=>(
   <div>
@@ -47,17 +55,86 @@ function EmpForm({v,s}){
   );
 }
 
-function SalaryForm({v,onChange}){
-  const s=(k,val)=>onChange({...v,[k]:val});
+function SalaryForm({v, onChange, configuredSalary, totalPaid, salError, setSalError}){
+  const remaining = Math.max(0, (configuredSalary || 0) - (totalPaid || 0));
+  const s = (k, val) => {
+    onChange({...v, [k]: val});
+    if (k === 'paid') setSalError('');
+  };
+
+  // Parse current month string (e.g. "April 2025") into parts
+  const parts = (v.month || '').split(' ');
+  const selMonthName = MONTH_NAMES.includes(parts[0]) ? parts[0] : _curMonthName;
+  const selYear      = parseInt(parts[1]) || _curYear;
+
+  const setMonth = (mName, yr) => s('month', `${mName} ${yr}`);
+
   return(
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
-      <FF label="Month" required><input className="mac-input" value={v.month} onChange={e=>s('month',e.target.value)} placeholder="e.g. April 2025"/></FF>
+      {/* Salary Budget Info */}
+      {configuredSalary > 0 && (
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
+          <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(0,113,227,0.07)',border:'1px solid rgba(0,113,227,0.12)'}}>
+            <div style={{fontSize:10,color:'#AEAEB2',textTransform:'uppercase',letterSpacing:'0.4px',fontWeight:500,marginBottom:3}}>Total Salary</div>
+            <div style={{fontSize:14,fontWeight:680,color:'#0071E3'}}>₹{Number(configuredSalary).toLocaleString('en-IN')}</div>
+          </div>
+          <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(255,59,48,0.07)',border:'1px solid rgba(255,59,48,0.12)'}}>
+            <div style={{fontSize:10,color:'#AEAEB2',textTransform:'uppercase',letterSpacing:'0.4px',fontWeight:500,marginBottom:3}}>Already Paid</div>
+            <div style={{fontSize:14,fontWeight:680,color:'#FF3B30'}}>₹{Number(totalPaid).toLocaleString('en-IN')}</div>
+          </div>
+          <div style={{padding:'10px 12px',borderRadius:10,background:remaining>0?'rgba(52,199,89,0.07)':'rgba(142,142,147,0.07)',border:`1px solid ${remaining>0?'rgba(52,199,89,0.15)':'rgba(142,142,147,0.15)'}`}}>
+            <div style={{fontSize:10,color:'#AEAEB2',textTransform:'uppercase',letterSpacing:'0.4px',fontWeight:500,marginBottom:3}}>Remaining</div>
+            <div style={{fontSize:14,fontWeight:680,color:remaining>0?'#34C759':'#8E8E93'}}>₹{Number(remaining).toLocaleString('en-IN')}</div>
+          </div>
+        </div>
+      )}
+      {remaining === 0 && configuredSalary > 0 && (
+        <div style={{display:'flex',alignItems:'center',gap:8,padding:'9px 12px',borderRadius:10,background:'rgba(255,149,0,0.07)',border:'1px solid rgba(255,149,0,0.15)'}}>
+          <AlertCircle size={13} color="#FF9500"/>
+          <span style={{fontSize:12,color:'#FF9500',fontWeight:500}}>Full salary already paid — no remaining balance</span>
+        </div>
+      )}
+      {/* Month picker: two selects that compose "April 2025" */}
+      <FF label="Month" required>
+        <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:8}}>
+          <select
+            className="mac-select"
+            value={selMonthName}
+            onChange={e=>setMonth(e.target.value, selYear)}
+          >
+            {MONTH_NAMES.map(m=><option key={m} value={m}>{m}</option>)}
+          </select>
+          <select
+            className="mac-select"
+            value={selYear}
+            onChange={e=>setMonth(selMonthName, +e.target.value)}
+          >
+            {YEAR_OPTIONS.map(y=><option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+      </FF>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
-        <FF label="Amount Paid (₹)" required><input className="mac-input" type="number" value={v.paid} onChange={e=>s('paid',e.target.value)} placeholder="0"/></FF>
+        <FF label={`Amount Paid (₹)${configuredSalary > 0 ? ` — max ₹${Number(remaining).toLocaleString('en-IN')}` : ''}`} required>
+          <input
+            className="mac-input"
+            type="number"
+            value={v.paid}
+            onChange={e=>s('paid',e.target.value)}
+            placeholder="0"
+            max={configuredSalary > 0 ? remaining : undefined}
+            style={salError ? {borderColor:'#FF3B30',background:'rgba(255,59,48,0.04)'} : {}}
+          />
+          {salError && <div style={{fontSize:11,color:'#FF3B30',marginTop:3,fontWeight:500}}>{salError}</div>}
+        </FF>
         <FF label="Payment Date"><input className="mac-input" type="date" value={v.date} onChange={e=>s('date',e.target.value)}/></FF>
       </div>
       <FF label="Payment Method"><select className="mac-select" value={v.method} onChange={e=>s('method',e.target.value)}>{PAYMENT_METHODS.map(m=><option key={m}>{m}</option>)}</select></FF>
       <FF label="Remark"><input className="mac-input" value={v.remark} onChange={e=>s('remark',e.target.value)} placeholder="Optional"/></FF>
+      {/* Auto-transaction note */}
+      <div style={{display:'flex',alignItems:'flex-start',gap:8,padding:'9px 12px',borderRadius:10,background:'rgba(0,113,227,0.05)',border:'1px solid rgba(0,113,227,0.12)'}}>
+        <Banknote size={13} color="#0071E3" style={{marginTop:1,flexShrink:0}}/>
+        <span style={{fontSize:11.5,color:'#0071E3',lineHeight:1.5}}>This payment will automatically be recorded as an <strong>Expense → Employee Salary</strong> in Transactions.</span>
+      </div>
     </div>
   );
 }
@@ -130,6 +207,7 @@ function EmpDetail({emp,onEdit,onAddSalary,onClose}){
 }
 
 export default function Employees(){
+  const navigate = useNavigate();
   const [emps,setEmps]         = useState([]);
   const [loading,setLoading]   = useState(true);
   const [saving,setSaving]     = useState(false);
@@ -144,6 +222,7 @@ export default function Employees(){
   const [showSal,setShowSal]   = useState(false);
   const [salEmpId,setSalEmpId] = useState(null);
   const [salForm,setSalForm]   = useState(emptySal);
+  const [salError,setSalError] = useState('');
   const [auditLog,setAuditLog] = useState([]);
   const [showAudit,setShowAudit] = useState(false);
   const [createdCreds,setCreatedCreds] = useState(null); // { name, email } — shown after employee creation
@@ -225,17 +304,52 @@ export default function Employees(){
   }
 
   async function addSalary(){
-    if(!salForm.month||saving)return;
+    if(!salForm.month||saving) return;
+    const emp = emps.find(e=>e.id===salEmpId);
+    if(!emp){ return; }
+
+    const paidAmount = +salForm.paid;
+    if(!paidAmount || paidAmount <= 0){
+      setSalError('Please enter a valid amount greater than 0.');
+      return;
+    }
+
+    // ── Remaining salary validation ─────────────────────────
+    const configuredSalary = +(emp.salaryAmount || 0);
+    const totalAlreadyPaid = (emp.salaryHistory||[]).reduce((s,h)=>s+(+h.paid||0),0);
+    const remaining = Math.max(0, configuredSalary - totalAlreadyPaid);
+
+    if(configuredSalary > 0 && paidAmount > remaining){
+      setSalError(`Amount exceeds remaining salary balance. Max allowed: ₹${Number(remaining).toLocaleString('en-IN')}`);
+      return;
+    }
+
     setSaving(true);
-    const emp=emps.find(e=>e.id===salEmpId);
-    if(!emp){ setSaving(false); return; }
-    const newHistory=[{...salForm,paid:+salForm.paid},...(emp.salaryHistory||[])];
+    const newHistory=[{...salForm,paid:paidAmount},...(emp.salaryHistory||[])];
     try{
-      const updated=await employeesDB.addSalary(salEmpId,newHistory);
+      // 1. Update employee salary history
+      const updated = await employeesDB.addSalary(salEmpId,newHistory);
       setEmps(es=>es.map(e=>e.id===salEmpId?updated:e));
+
+      // 2. Auto-create a transaction (Debit / Employee Salary)
+      await transactionsDB.create({
+        type:          'Debit',
+        accountType:   'Company Bank',
+        amount:        paidAmount,
+        date:          salForm.date,
+        paymentMethod: salForm.method,
+        subType:       'employee_salary',
+        person:        emp.name,
+        monthLabel:    salForm.month,
+        remark:        salForm.remark || `${emp.name} Salary — ${salForm.month}`,
+        source:        null,
+        category:      'Payroll',
+        clientName:    null,
+        paidTo:        emp.name,
+      });
     } catch(e){ console.error(e); }
     setSaving(false);
-    setShowSal(false);setSalForm(emptySal);
+    setShowSal(false); setSalForm(emptySal); setSalError('');
   }
 
   const pending=emps.filter(e=>e.status==='Active'&&e.salaryType==='Monthly'&&e.salaryHistory?.[0]?.paid===0);
@@ -251,7 +365,7 @@ export default function Employees(){
         </div>}
       />
 
-      {loading ? <CardGridSkeleton cols={3} count={6} /> : (
+      {loading ? <PageLoader /> : (
         <div className="page-body">
           {pending.length>0&&(
             <div style={{display:'flex',alignItems:'center',gap:8,padding:'9px 14px',borderRadius:10,background:'rgba(255,149,0,0.07)',border:'1px solid rgba(255,149,0,0.15)'}}>
@@ -331,12 +445,36 @@ export default function Employees(){
         {detail&&<EmpDetail emp={detail} onClose={()=>setDetail(null)} onEdit={()=>{setEditEmp(detail);setForm(detail);setDetail(null);setShowAdd(true);}} onAddSalary={()=>{setSalEmpId(detail.id);setDetail(null);setShowSal(true);}}/>}
       </Modal>
 
-      <Modal isOpen={showSal} onClose={()=>setShowSal(false)} title="Add Salary Record" size="sm">
-        <SalaryForm v={salForm} onChange={setSalForm}/>
-        <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:20,paddingTop:16,borderTop:'1px solid rgba(0,0,0,0.07)'}}>
-          <button onClick={()=>setShowSal(false)} className="mac-btn mac-btn-secondary" style={{fontSize:13}}>Cancel</button>
-          <button onClick={addSalary} disabled={saving} className="mac-btn mac-btn-primary" style={{fontSize:13}}>{saving?'Saving…':'Save Record'}</button>
-        </div>
+      <Modal isOpen={showSal} onClose={()=>{setShowSal(false);setSalError('');}} title="Add Salary Payment" size="md">
+        {(() => {
+          const emp = emps.find(e=>e.id===salEmpId);
+          const configuredSalary = +(emp?.salaryAmount||0);
+          const totalAlreadyPaid = (emp?.salaryHistory||[]).reduce((s,h)=>s+(+h.paid||0),0);
+          const remaining = Math.max(0,configuredSalary-totalAlreadyPaid);
+          return (
+            <>
+              <SalaryForm
+                v={salForm}
+                onChange={setSalForm}
+                configuredSalary={configuredSalary}
+                totalPaid={totalAlreadyPaid}
+                salError={salError}
+                setSalError={setSalError}
+              />
+              <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:20,paddingTop:16,borderTop:'1px solid rgba(0,0,0,0.07)'}}>
+                <button onClick={()=>{setShowSal(false);setSalError('');}} className="mac-btn mac-btn-secondary" style={{fontSize:13}}>Cancel</button>
+                <button
+                  onClick={addSalary}
+                  disabled={saving||(configuredSalary>0&&remaining===0)}
+                  className="mac-btn mac-btn-primary"
+                  style={{fontSize:13}}
+                >
+                  {saving?'Saving…':'Save & Record Transaction'}
+                </button>
+              </div>
+            </>
+          );
+        })()}
       </Modal>
 
       <Modal isOpen={showAudit} onClose={()=>setShowAudit(false)} title="Audit Log" size="md">

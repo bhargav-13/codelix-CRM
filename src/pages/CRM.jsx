@@ -4,7 +4,7 @@ import Badge, { getStatusColor } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import LoadingSpinner from '../components/ui/LoadingSpinner';
+import { PageLoader } from '../components/ui/CodelixLoader';
 import { clientsDB } from '../lib/db';
 import {
   PROJECT_TYPES, SOURCES, CLIENT_STATUSES, PRIORITIES, PARTNERS,
@@ -264,7 +264,7 @@ export default function CRM() {
         }
       />
 
-      {loading ? <LoadingSpinner rows={6} /> : (
+      {loading ? <PageLoader /> : (
         <div className="page-body">
           {overdueCount>0 && (
             <div style={{ display:'flex', alignItems:'center', gap:8, padding:'9px 14px', borderRadius:10, background:'rgba(255,59,48,0.07)', border:'1px solid rgba(255,59,48,0.13)' }}>

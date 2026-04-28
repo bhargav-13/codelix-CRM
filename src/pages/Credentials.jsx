@@ -4,7 +4,7 @@ import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import Badge from '../components/ui/Badge';
-import { CardGridSkeleton } from '../components/ui/LoadingSpinner';
+import { PageLoader } from '../components/ui/CodelixLoader';
 import { credentialsDB } from '../lib/db';
 import { Plus, Edit2, Trash2, Eye, EyeOff, Copy, Check, KeyRound, Globe, Database, Smartphone, Wrench, Lock, StickyNote, User } from 'lucide-react';
 
@@ -194,7 +194,7 @@ export default function Credentials(){
         actions={<button onClick={()=>{setForm(emptyCred);setEditCred(null);setShowAdd(true);}} className="mac-btn mac-btn-primary" style={{fontSize:13}}><Plus size={14}/> Add Credential</button>}
       />
 
-      {loading ? <CardGridSkeleton cols={3} count={6} /> : (
+      {loading ? <PageLoader /> : (
         <div className="page-body">
           <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',borderRadius:11,background:'rgba(255,204,0,0.08)',border:'1px solid rgba(255,204,0,0.2)'}}>
             <Lock size={14} color="#B8860B" style={{flexShrink:0}}/>

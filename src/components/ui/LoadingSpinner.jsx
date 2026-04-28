@@ -1,3 +1,4 @@
+// ─── Shimmer skeleton — used for list/table in-page loading ──────────────────
 export default function LoadingSpinner({ rows = 5 }) {
   return (
     <div style={{ padding: '24px 32px' }}>
@@ -10,16 +11,12 @@ export default function LoadingSpinner({ rows = 5 }) {
           opacity: 1 - i * 0.12,
         }} />
       ))}
-      <style>{`
-        @keyframes shimmer {
-          0%   { background-position: 200% 0 }
-          100% { background-position: -200% 0 }
-        }
-      `}</style>
+      <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
     </div>
   );
 }
 
+// ─── Card grid skeleton — used for card-layout pages ─────────────────────────
 export function CardGridSkeleton({ cols = 3, count = 6 }) {
   return (
     <div style={{ padding: '24px 32px' }}>

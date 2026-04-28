@@ -4,7 +4,7 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import LoadingSpinner from '../components/ui/LoadingSpinner';
+import { PageLoader } from '../components/ui/CodelixLoader';
 import { projectUpdatesDB, uploadProjectFile, projectsDB } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
 import { PARTNERS } from '../data/mockData';
@@ -464,7 +464,7 @@ export default function ProjectUpdates({ readOnly = false }) {
         }
       />
 
-      {loading ? <LoadingSpinner rows={5}/> : (
+      {loading ? <PageLoader /> : (
         <div className="page-body">
 
           {/* Employee welcome banner */}
