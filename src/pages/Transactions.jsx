@@ -15,7 +15,7 @@ import {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const ACCOUNT_TYPES = ["Founder's Personal", 'Company Bank'];
+const ACCOUNT_TYPES = ['Cash + Savings Account', 'Company Bank'];
 
 const TX_TYPES = [
   { id: 'income',   label: 'Income',          icon: ArrowUpRight,   color: '#34C759', bg: 'rgba(52,199,89,0.09)',   desc: 'Client payment / revenue' },
@@ -36,13 +36,13 @@ const SUB_TYPE_META = {
 };
 
 const PARTNER_COLORS = {
-  Bhargav: { gradient: 'linear-gradient(135deg,#0071E3,#0A84FF)', text: '#0071E3' },
-  Prince:  { gradient: 'linear-gradient(135deg,#AF52DE,#BF5AF2)', text: '#AF52DE' },
-  Manas:   { gradient: 'linear-gradient(135deg,#34C759,#30D158)', text: '#34C759' },
-  Kushal:  { gradient: 'linear-gradient(135deg,#FF9500,#FFB340)', text: '#FF9500' },
+  'Bhargav Thesiya':   { gradient: 'linear-gradient(135deg,#0071E3,#0A84FF)', text: '#0071E3' },
+  'Manas Vadodaria':   { gradient: 'linear-gradient(135deg,#34C759,#30D158)', text: '#34C759' },
+  'Kushal Mungalpara': { gradient: 'linear-gradient(135deg,#FF9500,#FFB340)', text: '#FF9500' },
+  'Prince Padariya':   { gradient: 'linear-gradient(135deg,#AF52DE,#BF5AF2)', text: '#AF52DE' },
 };
 
-const DEFAULT_SALARY = { Bhargav: 0, Prince: 0, Manas: 0, Kushal: 0 };
+const DEFAULT_SALARY = { 'Bhargav Thesiya': 0, 'Manas Vadodaria': 0, 'Kushal Mungalpara': 0, 'Prince Padariya': 0 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -71,7 +71,7 @@ const initForm = (txType = 'income') => ({
   remark: '',
   source: 'Client Payment',
   clientName: '',
-  category: 'Misc',
+  category: 'Other',
   paidTo: '',
   person: PARTNERS[0],
   monthLabel: currentMonthLabel(),
@@ -129,14 +129,15 @@ const rowToForm = (t) => {
     : 'expense';
   return {
     txType,
-    accountType:  t.accountType  || 'Company Bank',
+    // Remap old "Founder's Personal" to new name for any legacy records
+    accountType:  (t.accountType === "Founder's Personal" ? 'Cash + Savings Account' : t.accountType) || 'Company Bank',
     amount:       String(t.amount || ''),
     date:         (t.date || today()).slice(0, 10),
     paymentMethod: t.paymentMethod || 'Bank Transfer',
     remark:       t.remark       || '',
     source:       t.source       || 'Client Payment',
     clientName:   t.clientName   || '',
-    category:     t.category     || 'Misc',
+    category:     t.category     || 'Other',
     paidTo:       t.paidTo       || '',
     person:       t.person       || PARTNERS[0],
     monthLabel:   t.monthLabel   || currentMonthLabel(),
@@ -391,37 +392,61 @@ function TxFields({ form, onChange, partnerOutstanding, salaryConfig, employees 
   }
 
   // ── Employee Salary ──────────────────────────────────────
-  if (form.txType === 'e_salary') return (
-    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      <FF label="Employee" required>
-        <select className="mac-select" value={form.person} onChange={e => s('person', e.target.value)}>
-          {employees.length === 0
-            ? <option value="">No active employees found</option>
-            : employees.map(e => <option key={e.id} value={e.name}>{e.name}{e.role ? ` — ${e.role}` : ''}</option>)
-          }
-        </select>
-      </FF>
-      <FF label="Month" required>
-        <input className="mac-input" value={form.monthLabel} onChange={e => s('monthLabel', e.target.value)} placeholder={currentMonthLabel()}/>
-      </FF>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-        <FF label="Amount (₹)" required>
-          <input className="mac-input" type="number" value={form.amount} onChange={e => s('amount', e.target.value)} placeholder="0"/>
+  if (form.txType === 'e_salary') {
+    const selectedEmp = employees.find(e => e.name === form.person);
+    return (
+      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+        <FF label="Employee" required>
+          <select
+            className="mac-select"
+            value={form.person}
+            onChange={e => {
+              const emp = employees.find(x => x.name === e.target.value);
+              onChange({
+                ...form,
+                person: e.target.value,
+                // Auto-fill salary amount from employee record, keep editable
+                amount: emp?.salaryAmount ? String(emp.salaryAmount) : form.amount,
+              });
+            }}
+          >
+            {employees.length === 0
+              ? <option value="">No active employees found</option>
+              : employees.map(e => (
+                  <option key={e.id} value={e.name}>
+                    {e.name}{e.role ? ` — ${e.role}` : ''}{e.salaryAmount ? ` (₹${Number(e.salaryAmount).toLocaleString('en-IN')})` : ''}
+                  </option>
+                ))
+            }
+          </select>
+          {selectedEmp?.salaryAmount && (
+            <div style={{ fontSize:11, color:'#8E8E93', marginTop:4 }}>
+              Configured salary: <span style={{ color:'#1D1D1F', fontWeight:550 }}>₹{Number(selectedEmp.salaryAmount).toLocaleString('en-IN')}</span> — you can edit below
+            </div>
+          )}
         </FF>
-        <FF label="Date Paid" required>
-          <input className="mac-input" type="date" value={form.date} onChange={e => s('date', e.target.value)}/>
+        <FF label="Month" required>
+          <input className="mac-input" value={form.monthLabel} onChange={e => s('monthLabel', e.target.value)} placeholder={currentMonthLabel()}/>
+        </FF>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+          <FF label="Amount (₹)" required>
+            <input className="mac-input" type="number" value={form.amount} onChange={e => s('amount', e.target.value)} placeholder="0"/>
+          </FF>
+          <FF label="Date Paid" required>
+            <input className="mac-input" type="date" value={form.date} onChange={e => s('date', e.target.value)}/>
+          </FF>
+        </div>
+        <FF label="Payment Method">
+          <select className="mac-select" value={form.paymentMethod} onChange={e => s('paymentMethod', e.target.value)}>
+            {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
+          </select>
+        </FF>
+        <FF label="Notes">
+          <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional"/>
         </FF>
       </div>
-      <FF label="Payment Method">
-        <select className="mac-select" value={form.paymentMethod} onChange={e => s('paymentMethod', e.target.value)}>
-          {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
-        </select>
-      </FF>
-      <FF label="Notes">
-        <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional"/>
-      </FF>
-    </div>
-  );
+    );
+  }
 
   return null;
 }

@@ -6,13 +6,13 @@ import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { CardGridSkeleton } from '../components/ui/LoadingSpinner';
 import { projectsDB, employeesDB } from '../lib/db';
-import { PROJECT_TYPES, PROJECT_STATUSES, PAYMENT_METHODS } from '../data/mockData';
+import { PROJECT_TYPES, PROJECT_STATUSES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
 import { Plus, Edit2, Trash2, Filter, History, IndianRupee, ChevronDown, ChevronRight, User, Calendar } from 'lucide-react';
 
 const today = new Date().toISOString().split('T')[0];
 const fmt = n => n != null ? '₹' + Number(n).toLocaleString('en-IN') : '—';
 
-const emptyProj = { projectName:'',clientName:'',companyName:'',projectType:'Website',handledBy:'',startDate:today,dueDate:'',status:'Pending',valuation:'',milestones:[],payments:[],nextPaymentDue:'',assignedEmployees:[] };
+const emptyProj = { projectName:'',clientName:'',companyName:'',projectType:'Website Development',handledBy:'',startDate:today,dueDate:'',status:'Pending',valuation:'',milestones:[],payments:[],nextPaymentDue:'',assignedEmployees:[] };
 const emptyPay  = { amount:'',date:today+'T10:00',method:'Bank Transfer',remark:'' };
 const emptyMs   = { label:'',percent:'' };
 
@@ -44,7 +44,7 @@ function ProjectForm({v,onChange,employees=[]}){
         <FF label="Project Type"><select className="mac-select" value={v.projectType} onChange={e=>s('projectType',e.target.value)}>{PROJECT_TYPES.map(t=><option key={t}>{t}</option>)}</select></FF>
         <FF label="Client Name"><input className="mac-input" value={v.clientName} onChange={e=>s('clientName',e.target.value)} placeholder="Client name"/></FF>
         <FF label="Company Name"><input className="mac-input" value={v.companyName} onChange={e=>s('companyName',e.target.value)} placeholder="Company"/></FF>
-        <FF label="Handled By"><input className="mac-input" value={v.handledBy} onChange={e=>s('handledBy',e.target.value)} placeholder="Partner / Employee"/></FF>
+        <FF label="Handled By"><select className="mac-select" value={v.handledBy} onChange={e=>s('handledBy',e.target.value)}><option value="">— Select Partner —</option>{PARTNERS.map(p=><option key={p}>{p}</option>)}</select></FF>
         <FF label="Status"><select className="mac-select" value={v.status} onChange={e=>s('status',e.target.value)}>{PROJECT_STATUSES.map(x=><option key={x}>{x}</option>)}</select></FF>
         <FF label="Start Date"><input className="mac-input" type="date" value={v.startDate} onChange={e=>s('startDate',e.target.value)}/></FF>
         <FF label="Due Date"><input className="mac-input" type="date" value={v.dueDate} onChange={e=>s('dueDate',e.target.value)}/></FF>

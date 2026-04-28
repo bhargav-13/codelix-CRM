@@ -20,8 +20,8 @@ const fmt = n => n ? '₹' + Number(n).toLocaleString('en-IN') : '—';
 
 const emptyClient = {
   clientName:'', companyName:'', contact:'', email:'', address:'',
-  projectType:'Website', source:'Referral', status:'Cold', proposalValue:'',
-  finalPrice:'', priority:'Medium', createdBy:'Bhargav', nextFollowup:'', followupHistory:[],
+  projectType:'Website Development', source:'Referral', status:'Cold', proposalValue:'',
+  finalPrice:'', priority:'Medium', createdBy:'Bhargav Thesiya', nextFollowup:'', followupHistory:[],
 };
 
 function FF({ label, children, required }) {

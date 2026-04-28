@@ -36,7 +36,10 @@ const TYPE_META = {
 };
 
 const PARTNER_COLORS = {
-  Bhargav: '#0071E3', Prince: '#AF52DE', Manas: '#34C759', Kushal: '#FF9500',
+  'Bhargav Thesiya':   '#0071E3',
+  'Manas Vadodaria':   '#34C759',
+  'Kushal Mungalpara': '#FF9500',
+  'Prince Padariya':   '#AF52DE',
 };
 
 const emptyForm = {
@@ -337,8 +340,9 @@ export default function ProjectUpdates({ readOnly = false }) {
   const [showFilters, setShowFilters]   = useState(false);
   const [showAdd, setShowAdd]           = useState(false);
   const [editUpdate, setEditUpdate]     = useState(null);
-  const [form, setForm]                 = useState(emptyForm);
+  const [form, setForm]                 = useState({ ...emptyForm, attachments: [] });
   const [deleteId, setDeleteId]         = useState(null);
+  const [saveError, setSaveError]       = useState('');
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -396,17 +400,22 @@ export default function ProjectUpdates({ readOnly = false }) {
   async function save() {
     if (!form.title || saving || uploading) return;
     setSaving(true);
+    setSaveError('');
     try {
       if (editUpdate) {
-        const updated = await projectUpdatesDB.update(editUpdate.id, form);
+        const updated = await projectUpdatesDB.update(editUpdate.id, { ...form, attachments: form.attachments || [] });
         setUpdates(us => us.map(u => u.id === editUpdate.id ? updated : u));
       } else {
-        const created = await projectUpdatesDB.create(form);
+        const created = await projectUpdatesDB.create({ ...form, attachments: form.attachments || [] });
         setUpdates(us => [created, ...us]);
       }
-    } catch (e) { console.error(e); }
-    setSaving(false);
-    setShowAdd(false); setEditUpdate(null); setForm(emptyForm);
+      setSaving(false);
+      setShowAdd(false); setEditUpdate(null); setForm({ ...emptyForm, attachments: [] });
+    } catch (e) {
+      console.error('Save error:', e);
+      setSaveError(e?.message || 'Failed to save. Make sure the project_updates table exists in Supabase.');
+      setSaving(false);
+    }
   }
 
   async function del(id) {
@@ -445,7 +454,7 @@ export default function ProjectUpdates({ readOnly = false }) {
         actions={
           !readOnly && (
             <button
-              onClick={() => { setForm({ ...emptyForm, attachments: [] }); setEditUpdate(null); setShowAdd(true); }}
+              onClick={() => { setForm({ ...emptyForm, attachments: [] }); setEditUpdate(null); setSaveError(''); setShowAdd(true); }}
               className="mac-btn mac-btn-primary"
               style={{ fontSize:13 }}
             >
@@ -566,7 +575,7 @@ export default function ProjectUpdates({ readOnly = false }) {
       {/* ── Add / Edit Modal ──────────────────────────────────── */}
       <Modal
         isOpen={showAdd}
-        onClose={() => { setShowAdd(false); setEditUpdate(null); setForm(emptyForm); }}
+        onClose={() => { setShowAdd(false); setEditUpdate(null); setForm({ ...emptyForm, attachments: [] }); setSaveError(''); }}
         title={editUpdate ? 'Edit Update' : 'Post New Update'}
         size="md"
       >
@@ -577,8 +586,14 @@ export default function ProjectUpdates({ readOnly = false }) {
           uploading={uploading}
           onFileSelect={handleFiles}
         />
-        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20, paddingTop:16, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
-          <button onClick={() => { setShowAdd(false); setEditUpdate(null); }} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>Cancel</button>
+        {saveError && (
+          <div style={{ marginTop:12, padding:'10px 14px', borderRadius:10, background:'rgba(255,59,48,0.07)', border:'1px solid rgba(255,59,48,0.2)', fontSize:12.5, color:'#FF3B30', display:'flex', alignItems:'flex-start', gap:7 }}>
+            <AlertCircle size={14} style={{ flexShrink:0, marginTop:1 }}/>
+            {saveError}
+          </div>
+        )}
+        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:16, paddingTop:16, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
+          <button onClick={() => { setShowAdd(false); setEditUpdate(null); setSaveError(''); }} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>Cancel</button>
           <button onClick={save} disabled={saving || uploading || !form.title} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>
             {saving ? 'Saving…' : uploading ? 'Uploading…' : editUpdate ? 'Save Changes' : 'Post Update'}
           </button>

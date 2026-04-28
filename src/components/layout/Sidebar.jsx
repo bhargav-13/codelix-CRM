@@ -2,14 +2,14 @@ import { NavLink } from 'react-router-dom';
 import { useLayout } from '../../contexts/LayoutContext';
 import { useAuth } from '../../contexts/AuthContext';
 import {
-  LayoutDashboard, Users, DollarSign, UserCheck,
+  LayoutDashboard, Users, IndianRupee, UserCheck,
   FolderKanban, KeyRound, Newspaper,
 } from 'lucide-react';
 
 const partnerNavItems = [
   { icon: LayoutDashboard, label: 'Dashboard',       to: '/' },
   { icon: Users,           label: 'CRM',              to: '/crm' },
-  { icon: DollarSign,      label: 'Transactions',     to: '/transactions' },
+  { icon: IndianRupee,     label: 'Transactions',     to: '/transactions' },
   { icon: UserCheck,       label: 'Employees',        to: '/employees' },
   { icon: FolderKanban,    label: 'Projects',         to: '/projects' },
   { icon: KeyRound,        label: 'Credentials',      to: '/credentials' },

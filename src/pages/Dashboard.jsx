@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import Badge, { getStatusColor } from '../components/ui/Badge';
 import { clientsDB, transactionsDB, employeesDB, projectsDB, settingsDB } from '../lib/db';
 import {
-  Users, DollarSign, FolderKanban, UserCheck,
+  Users, FolderKanban, UserCheck,
   ArrowUpRight, ArrowDownRight, AlertCircle, CalendarClock, Clock,
   IndianRupee,
 } from 'lucide-react';
@@ -59,6 +60,7 @@ function DashSkeleton() {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -75,8 +77,10 @@ export default function Dashboard() {
         const openBal = obData || { cash: 25000, bank: 150000 };
         let pC=0,pD=0,bC=0,bD=0;
         txs.forEach(t => {
-          if (t.accountType==="Founder's Personal") { t.type==='Credit' ? pC+=+t.amount : pD+=+t.amount; }
-          else { t.type==='Credit' ? bC+=+t.amount : bD+=+t.amount; }
+          // Support both old name "Founder's Personal" and new "Cash + Savings Account"
+          const isCash = t.accountType === 'Cash + Savings Account' || t.accountType === "Founder's Personal";
+          if (isCash) { t.type==='Credit' ? pC+=+t.amount : pD+=+t.amount; }
+          else        { t.type==='Credit' ? bC+=+t.amount : bD+=+t.amount; }
         });
         const bal = {
           cash: openBal.cash+pC-pD,
@@ -121,8 +125,8 @@ export default function Dashboard() {
 
         {/* Stat Cards */}
         <div className="rg-4">
-          <StatCard label="Total Balance" value={fmt(bal.total)} sub={`Personal ${fmt(bal.cash)}`}
-            gradient="linear-gradient(135deg,#E3F0FF,#CCE4FF)" icon={DollarSign} iconColor="#0071E3" />
+          <StatCard label="Total Balance" value={fmt(bal.total)} sub={`Cash ${fmt(bal.cash)}`}
+            gradient="linear-gradient(135deg,#E3F0FF,#CCE4FF)" icon={IndianRupee} iconColor="#0071E3" />
           <StatCard label="Total Clients" value={clients.length} sub={`${hotClients.length} hot leads`}
             gradient="linear-gradient(135deg,#FFF0E0,#FFE0C0)" icon={Users} iconColor="#FF9500" />
           <StatCard label="Active Projects" value={activeProjects.length} sub={`${projects.filter(p=>p.status==='Completed').length} completed`}
@@ -135,22 +139,31 @@ export default function Dashboard() {
         {(overdueFollowups.length>0 || todayFollowups.length>0 || pendingSalaries.length>0) && (
           <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
             {overdueFollowups.length>0 && (
-              <div style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 14px', borderRadius:100, background:'rgba(255,59,48,0.08)', border:'1px solid rgba(255,59,48,0.15)' }}>
+              <button onClick={()=>navigate('/crm')} style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 14px', borderRadius:100, background:'rgba(255,59,48,0.08)', border:'1px solid rgba(255,59,48,0.15)', cursor:'pointer', transition:'background 0.15s' }}
+                onMouseEnter={e=>e.currentTarget.style.background='rgba(255,59,48,0.14)'}
+                onMouseLeave={e=>e.currentTarget.style.background='rgba(255,59,48,0.08)'}
+              >
                 <AlertCircle size={13} color="#FF3B30" />
                 <span style={{ fontSize:12.5, color:'#FF3B30', fontWeight:500 }}>{overdueFollowups.length} overdue follow-up{overdueFollowups.length>1?'s':''}</span>
-              </div>
+              </button>
             )}
             {todayFollowups.length>0 && (
-              <div style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 14px', borderRadius:100, background:'rgba(0,113,227,0.08)', border:'1px solid rgba(0,113,227,0.15)' }}>
+              <button onClick={()=>navigate('/crm')} style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 14px', borderRadius:100, background:'rgba(0,113,227,0.08)', border:'1px solid rgba(0,113,227,0.15)', cursor:'pointer', transition:'background 0.15s' }}
+                onMouseEnter={e=>e.currentTarget.style.background='rgba(0,113,227,0.14)'}
+                onMouseLeave={e=>e.currentTarget.style.background='rgba(0,113,227,0.08)'}
+              >
                 <CalendarClock size={13} color="#0071E3" />
                 <span style={{ fontSize:12.5, color:'#0071E3', fontWeight:500 }}>{todayFollowups.length} follow-up{todayFollowups.length>1?'s':''} today</span>
-              </div>
+              </button>
             )}
             {pendingSalaries.length>0 && (
-              <div style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 14px', borderRadius:100, background:'rgba(255,149,0,0.08)', border:'1px solid rgba(255,149,0,0.18)' }}>
+              <button onClick={()=>navigate('/employees')} style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 14px', borderRadius:100, background:'rgba(255,149,0,0.08)', border:'1px solid rgba(255,149,0,0.18)', cursor:'pointer', transition:'background 0.15s' }}
+                onMouseEnter={e=>e.currentTarget.style.background='rgba(255,149,0,0.14)'}
+                onMouseLeave={e=>e.currentTarget.style.background='rgba(255,149,0,0.08)'}
+              >
                 <Clock size={13} color="#FF9500" />
                 <span style={{ fontSize:12.5, color:'#FF9500', fontWeight:500 }}>{pendingSalaries.map(e=>e.name).join(', ')} — salary due</span>
-              </div>
+              </button>
             )}
           </div>
         )}
