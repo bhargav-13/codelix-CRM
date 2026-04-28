@@ -5,14 +5,14 @@ import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { CardGridSkeleton } from '../components/ui/LoadingSpinner';
-import { projectsDB } from '../lib/db';
+import { projectsDB, employeesDB } from '../lib/db';
 import { PROJECT_TYPES, PROJECT_STATUSES, PAYMENT_METHODS } from '../data/mockData';
 import { Plus, Edit2, Trash2, Filter, History, IndianRupee, ChevronDown, ChevronRight, User, Calendar } from 'lucide-react';
 
 const today = new Date().toISOString().split('T')[0];
 const fmt = n => n != null ? '₹' + Number(n).toLocaleString('en-IN') : '—';
 
-const emptyProj = { projectName:'',clientName:'',companyName:'',projectType:'Website',handledBy:'',startDate:today,dueDate:'',status:'Pending',valuation:'',milestones:[],payments:[],nextPaymentDue:'' };
+const emptyProj = { projectName:'',clientName:'',companyName:'',projectType:'Website',handledBy:'',startDate:today,dueDate:'',status:'Pending',valuation:'',milestones:[],payments:[],nextPaymentDue:'',assignedEmployees:[] };
 const emptyPay  = { amount:'',date:today+'T10:00',method:'Bank Transfer',remark:'' };
 const emptyMs   = { label:'',percent:'' };
 
@@ -25,11 +25,18 @@ const FF=({label,children,required})=>(
   </div>
 );
 
-function ProjectForm({v,onChange}){
+function ProjectForm({v,onChange,employees=[]}){
   const s=(k,val)=>onChange({...v,[k]:val});
   const [ms,setMs]=useState(emptyMs);
   function addMs(){if(!ms.label||!ms.percent)return;onChange({...v,milestones:[...(v.milestones||[]),{...ms,percent:+ms.percent}]});setMs(emptyMs);}
   function delMs(i){onChange({...v,milestones:v.milestones.filter((_,idx)=>idx!==i)});}
+
+  function toggleEmployee(emp){
+    const already=(v.assignedEmployees||[]).some(e=>e.id===emp.id);
+    if(already) onChange({...v,assignedEmployees:(v.assignedEmployees||[]).filter(e=>e.id!==emp.id)});
+    else         onChange({...v,assignedEmployees:[...(v.assignedEmployees||[]),{id:emp.id,name:emp.name}]});
+  }
+
   return(
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'14px 16px'}}>
@@ -44,6 +51,46 @@ function ProjectForm({v,onChange}){
         <FF label="Project Valuation (₹)" required><input className="mac-input" type="number" value={v.valuation} onChange={e=>s('valuation',e.target.value)} placeholder="0"/></FF>
         <FF label="Next Payment Due"><input className="mac-input" type="date" value={v.nextPaymentDue} onChange={e=>s('nextPaymentDue',e.target.value)}/></FF>
       </div>
+
+      {/* Assigned Employees */}
+      {employees.length > 0 && (
+        <div>
+          <label style={{display:'block',fontSize:11.5,fontWeight:550,color:'#6E6E73',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.4px'}}>
+            Assign Employees
+            {(v.assignedEmployees||[]).length > 0 && (
+              <span style={{marginLeft:6,fontSize:10.5,fontWeight:600,color:'#0071E3',background:'rgba(0,113,227,0.1)',padding:'1px 6px',borderRadius:10,textTransform:'none',letterSpacing:0}}>
+                {(v.assignedEmployees||[]).length} selected
+              </span>
+            )}
+          </label>
+          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+            {employees.map(emp=>{
+              const selected=(v.assignedEmployees||[]).some(e=>e.id===emp.id);
+              return(
+                <button
+                  key={emp.id}
+                  type="button"
+                  onClick={()=>toggleEmployee(emp)}
+                  style={{
+                    display:'flex',alignItems:'center',gap:7,padding:'6px 11px',borderRadius:20,cursor:'pointer',
+                    border:`1.5px solid ${selected?'#0071E3':'rgba(0,0,0,0.1)'}`,
+                    background:selected?'rgba(0,113,227,0.08)':'#fff',
+                    transition:'all 0.13s',
+                  }}
+                >
+                  <div style={{width:18,height:18,borderRadius:'50%',background:selected?'#0071E3':'rgba(0,0,0,0.1)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:8,fontWeight:700,color:selected?'#fff':'#6E6E73',flexShrink:0}}>
+                    {emp.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()}
+                  </div>
+                  <span style={{fontSize:12.5,fontWeight:500,color:selected?'#0071E3':'#3C3C43'}}>{emp.name}</span>
+                  {emp.role&&<span style={{fontSize:10.5,color:selected?'#5BA3F5':'#AEAEB2'}}>· {emp.role}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Payment Milestones */}
       <div>
         <label style={{display:'block',fontSize:11.5,fontWeight:550,color:'#6E6E73',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.4px'}}>Payment Milestones</label>
         <div style={{display:'flex',gap:8,marginBottom:8}}>
@@ -105,6 +152,21 @@ function ProjectDetail({proj,onEdit,onAddPayment,onClose}){
           </div>
         ))}
       </div>
+      {(proj.assignedEmployees||[]).length > 0 && (
+        <div>
+          <div style={{fontSize:12,fontWeight:600,color:'#3C3C43',marginBottom:8}}>Team</div>
+          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+            {proj.assignedEmployees.map(e=>(
+              <div key={e.id} style={{display:'flex',alignItems:'center',gap:6,padding:'5px 10px',borderRadius:20,background:'rgba(52,199,89,0.07)',border:'1px solid rgba(52,199,89,0.15)'}}>
+                <div style={{width:18,height:18,borderRadius:'50%',background:'linear-gradient(135deg,#34C759,#30D158)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:7,fontWeight:700,color:'#fff',flexShrink:0}}>
+                  {e.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()}
+                </div>
+                <span style={{fontSize:12,fontWeight:500,color:'#1D1D1F'}}>{e.name}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div style={{padding:'14px 16px',borderRadius:14,background:'rgba(0,0,0,0.025)',border:'1px solid rgba(0,0,0,0.06)'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
           <span style={{fontSize:12.5,fontWeight:600,color:'#3C3C43'}}>Payment Progress</span>
@@ -188,12 +250,17 @@ export default function Projects(){
   const [showPay,setShowPay]   = useState(false);
   const [payProjId,setPayProjId] = useState(null);
   const [payForm,setPayForm]   = useState(emptyPay);
-  const [auditLog,setAuditLog] = useState([]);
+  const [auditLog,setAuditLog]   = useState([]);
   const [showAudit,setShowAudit] = useState(false);
+  const [employees,setEmployees] = useState([]);
 
   const fetchProjs = useCallback(async () => {
     setLoading(true);
-    try { setProjs(await projectsDB.getAll()); } catch(e) { console.error(e); }
+    try {
+      const [ps, emps] = await Promise.all([projectsDB.getAll(), employeesDB.getAll()]);
+      setProjs(ps);
+      setEmployees(emps.filter(e => e.status === 'Active'));
+    } catch(e) { console.error(e); }
     setLoading(false);
   }, []);
 
@@ -333,9 +400,19 @@ export default function Projects(){
                         </div>
                       ))}
                     </div>
-                    <div style={{display:'flex',justifyContent:'space-between',paddingTop:10,borderTop:'1px solid rgba(0,0,0,0.06)',marginTop:6}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:10,borderTop:'1px solid rgba(0,0,0,0.06)',marginTop:6}}>
                       <span style={{fontSize:11,color:'#8E8E93'}}>Due: {p.dueDate||'—'}</span>
-                      <span style={{fontSize:11,color:'#8E8E93'}}>By: {p.handledBy}</span>
+                      <div style={{display:'flex',alignItems:'center',gap:4}}>
+                        {(p.assignedEmployees||[]).slice(0,3).map((e,i)=>(
+                          <div key={e.id} title={e.name} style={{width:20,height:20,borderRadius:'50%',background:'linear-gradient(135deg,#34C759,#30D158)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:7,fontWeight:700,color:'#fff',border:'1.5px solid #fff',marginLeft:i?-6:0,zIndex:i}}>
+                            {e.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()}
+                          </div>
+                        ))}
+                        {(p.assignedEmployees||[]).length > 3 && (
+                          <span style={{fontSize:10,color:'#AEAEB2',marginLeft:2}}>+{(p.assignedEmployees||[]).length-3}</span>
+                        )}
+                        {!(p.assignedEmployees||[]).length && <span style={{fontSize:11,color:'#8E8E93'}}>By: {p.handledBy}</span>}
+                      </div>
                     </div>
                   </div>
                 );
@@ -346,7 +423,7 @@ export default function Projects(){
       )}
 
       <Modal isOpen={showAdd} onClose={()=>{setShowAdd(false);setEditProj(null);setForm(emptyProj);}} title={editProj?'Edit Project':'New Project'} size="xl">
-        <ProjectForm v={form} onChange={setForm}/>
+        <ProjectForm v={form} onChange={setForm} employees={employees}/>
         <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:20,paddingTop:16,borderTop:'1px solid rgba(0,0,0,0.07)'}}>
           <button onClick={()=>{setShowAdd(false);setEditProj(null);}} className="mac-btn mac-btn-secondary" style={{fontSize:13}}>Cancel</button>
           <button onClick={save} disabled={saving} className="mac-btn mac-btn-primary" style={{fontSize:13}}>{saving?'Saving…':editProj?'Save Changes':'Create Project'}</button>

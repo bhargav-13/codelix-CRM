@@ -1,21 +1,50 @@
 import { NavLink } from 'react-router-dom';
 import { useLayout } from '../../contexts/LayoutContext';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   LayoutDashboard, Users, DollarSign, UserCheck,
-  FolderKanban, KeyRound,
+  FolderKanban, KeyRound, Newspaper,
 } from 'lucide-react';
 
-const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard',   to: '/' },
-  { icon: Users,           label: 'CRM',          to: '/crm' },
-  { icon: DollarSign,      label: 'Transactions', to: '/transactions' },
-  { icon: UserCheck,       label: 'Employees',    to: '/employees' },
-  { icon: FolderKanban,    label: 'Projects',     to: '/projects' },
-  { icon: KeyRound,        label: 'Credentials',  to: '/credentials' },
+const partnerNavItems = [
+  { icon: LayoutDashboard, label: 'Dashboard',       to: '/' },
+  { icon: Users,           label: 'CRM',              to: '/crm' },
+  { icon: DollarSign,      label: 'Transactions',     to: '/transactions' },
+  { icon: UserCheck,       label: 'Employees',        to: '/employees' },
+  { icon: FolderKanban,    label: 'Projects',         to: '/projects' },
+  { icon: KeyRound,        label: 'Credentials',      to: '/credentials' },
+  { icon: Newspaper,       label: 'Project Updates',  to: '/updates' },
 ];
+
+const employeeNavItems = [
+  { icon: Newspaper, label: 'Project Updates', to: '/updates' },
+];
+
+// Derive a display name from a partner email, e.g. "bhargav.codelix@gmail.com" → "Bhargav"
+function nameFromEmail(email = '') {
+  const part = email.split('@')[0].split('.')[0];
+  return part.charAt(0).toUpperCase() + part.slice(1);
+}
 
 export default function Sidebar() {
   const { sidebarOpen, closeSidebar } = useLayout();
+  const { user, isEmployee, employeeData } = useAuth();
+
+  const navItems = isEmployee ? employeeNavItems : partnerNavItems;
+
+  // User footer info
+  const displayName = isEmployee
+    ? (employeeData?.name ?? user?.email ?? '—')
+    : nameFromEmail(user?.email);
+  const displayRole = isEmployee
+    ? (employeeData?.role ?? 'Employee')
+    : 'Partner';
+  const initials = displayName
+    .split(' ')
+    .slice(0, 2)
+    .map(w => w[0])
+    .join('')
+    .toUpperCase();
 
   return (
     <aside
@@ -70,15 +99,17 @@ export default function Sidebar() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
           <div style={{
             width: 28, height: 28, borderRadius: '50%',
-            background: 'linear-gradient(135deg,#0071E3,#0A84FF)',
+            background: isEmployee
+              ? 'linear-gradient(135deg,#34C759,#30D158)'
+              : 'linear-gradient(135deg,#0071E3,#0A84FF)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: '#fff', fontSize: 10, fontWeight: 600, flexShrink: 0,
-          }}>BS</div>
+          }}>{initials}</div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 12, fontWeight: 550, color: '#1D1D1F', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Bhargav Shah
+              {displayName}
             </div>
-            <div style={{ fontSize: 10.5, color: '#8E8E93' }}>Admin</div>
+            <div style={{ fontSize: 10.5, color: '#8E8E93' }}>{displayRole}</div>
           </div>
         </div>
       </div>

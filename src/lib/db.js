@@ -236,34 +236,36 @@ export const employeesDB = {
 // PROJECTS
 // ─────────────────────────────────────────────
 const toProj = r => ({
-  id:              r.id,
-  projectName:     r.project_name,
-  clientName:      r.client_name,
-  companyName:     r.company_name,
-  projectType:     r.project_type,
-  handledBy:       r.handled_by,
-  startDate:       r.start_date,
-  dueDate:         r.due_date,
-  status:          r.status,
-  valuation:       r.valuation,
-  milestones:      r.milestones  || [],
-  payments:        r.payments    || [],
-  nextPaymentDue:  r.next_payment_due,
+  id:                 r.id,
+  projectName:        r.project_name,
+  clientName:         r.client_name,
+  companyName:        r.company_name,
+  projectType:        r.project_type,
+  handledBy:          r.handled_by,
+  startDate:          r.start_date,
+  dueDate:            r.due_date,
+  status:             r.status,
+  valuation:          r.valuation,
+  milestones:         r.milestones          || [],
+  payments:           r.payments            || [],
+  nextPaymentDue:     r.next_payment_due,
+  assignedEmployees:  r.assigned_employees  || [],  // [{id, name}]
 });
 
 const fromProj = p => ({
-  project_name:     p.projectName,
-  client_name:      p.clientName      || null,
-  company_name:     p.companyName     || null,
-  project_type:     p.projectType,
-  handled_by:       p.handledBy       || null,
-  start_date:       p.startDate       || null,
-  due_date:         p.dueDate         || null,
-  status:           p.status,
-  valuation:        p.valuation ? +p.valuation : null,
-  milestones:       p.milestones      || [],
-  payments:         p.payments        || [],
-  next_payment_due: p.nextPaymentDue  || null,
+  project_name:        p.projectName,
+  client_name:         p.clientName         || null,
+  company_name:        p.companyName        || null,
+  project_type:        p.projectType,
+  handled_by:          p.handledBy          || null,
+  start_date:          p.startDate          || null,
+  due_date:            p.dueDate            || null,
+  status:              p.status,
+  valuation:           p.valuation ? +p.valuation : null,
+  milestones:          p.milestones         || [],
+  payments:            p.payments           || [],
+  next_payment_due:    p.nextPaymentDue     || null,
+  assigned_employees:  p.assignedEmployees  || [],
 });
 
 export const projectsDB = {
@@ -437,3 +439,68 @@ export const credentialsDB = {
     if (error) throw error;
   },
 };
+
+// ─────────────────────────────────────────────
+// PROJECT UPDATES
+// ─────────────────────────────────────────────
+const toUpdate = r => ({
+  id:          r.id,
+  projectName: r.project_name,
+  title:       r.title,
+  content:     r.content,
+  status:      r.status,
+  updateType:  r.update_type,
+  createdBy:   r.created_by,
+  attachments: r.attachments || [],
+  createdAt:   r.created_at,
+});
+
+const fromUpdate = u => ({
+  project_name: u.projectName || null,
+  title:        u.title,
+  content:      u.content     || null,
+  status:       u.status      || 'In Progress',
+  update_type:  u.updateType  || 'Update',
+  created_by:   u.createdBy   || null,
+  attachments:  u.attachments || [],
+});
+
+export const projectUpdatesDB = {
+  getAll: async () => {
+    const { data, error } = await supabase
+      .from('project_updates').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(toUpdate);
+  },
+  create: async (u) => {
+    const { data, error } = await supabase
+      .from('project_updates').insert(fromUpdate(u)).select().single();
+    if (error) throw error;
+    return toUpdate(data);
+  },
+  update: async (id, u) => {
+    const { data, error } = await supabase
+      .from('project_updates').update(fromUpdate(u)).eq('id', id).select().single();
+    if (error) throw error;
+    return toUpdate(data);
+  },
+  delete: async (id) => {
+    const { error } = await supabase.from('project_updates').delete().eq('id', id);
+    if (error) throw error;
+  },
+};
+
+// ─────────────────────────────────────────────
+// FILE UPLOAD  (Supabase Storage — bucket: project-updates)
+// ─────────────────────────────────────────────
+export async function uploadProjectFile(file) {
+  const ext      = file.name.split('.').pop().toLowerCase();
+  const safeName = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+  const { error } = await supabase.storage
+    .from('project-updates')
+    .upload(safeName, file, { cacheControl: '3600', upsert: false });
+  if (error) throw error;
+  const { data: { publicUrl } } = supabase.storage
+    .from('project-updates').getPublicUrl(safeName);
+  return { name: file.name, url: publicUrl, type: file.type, size: file.size, path: safeName };
+}

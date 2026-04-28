@@ -129,6 +129,24 @@ create table if not exists partner_drawings (
   created_at    timestamptz default now()
 );
 
+-- ── PROJECT UPDATES ──────────────────────────────────────────
+create table if not exists project_updates (
+  id           uuid primary key default gen_random_uuid(),
+  project_name text,
+  title        text not null,
+  content      text,
+  status       text default 'In Progress',
+  update_type  text default 'Update',
+  created_by   text,
+  attachments  jsonb default '[]'::jsonb,
+  created_at   timestamptz default now()
+);
+-- Also create a public Storage bucket named "project-updates" in the Supabase dashboard.
+
+-- ── PROJECTS — employee assignment column ────────────────────
+-- Run this if the table already exists:
+-- ALTER TABLE projects ADD COLUMN IF NOT EXISTS assigned_employees jsonb DEFAULT '[]'::jsonb;
+
 -- ── TRANSACTIONS — new columns for unified form ──────────────
 -- Run these if the table already exists:
 -- ALTER TABLE transactions ADD COLUMN IF NOT EXISTS sub_type    text;
@@ -146,6 +164,7 @@ alter table projects          enable row level security;
 alter table credentials       enable row level security;
 alter table partner_salaries  enable row level security;
 alter table partner_drawings  enable row level security;
+alter table project_updates   enable row level security;
 
 create policy "Public full access" on clients           for all using (true) with check (true);
 create policy "Public full access" on transactions      for all using (true) with check (true);
@@ -155,3 +174,4 @@ create policy "Public full access" on projects          for all using (true) wit
 create policy "Public full access" on credentials       for all using (true) with check (true);
 create policy "Public full access" on partner_salaries  for all using (true) with check (true);
 create policy "Public full access" on partner_drawings  for all using (true) with check (true);
+create policy "Public full access" on project_updates  for all using (true) with check (true);

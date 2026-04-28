@@ -1,14 +1,14 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Layout from './components/layout/Layout';
 import Login from './pages/Login';
-import NoAccess from './pages/NoAccess';
 import Dashboard from './pages/Dashboard';
 import CRM from './pages/CRM';
 import Transactions from './pages/Transactions';
 import Employees from './pages/Employees';
 import Projects from './pages/Projects';
 import Credentials from './pages/Credentials';
+import ProjectUpdates from './pages/ProjectUpdates';
 
 function AppContent() {
   const { user, loading, isEmployee } = useAuth();
@@ -41,8 +41,18 @@ function AppContent() {
   // ── Not signed in ─────────────────────────────────────────────────
   if (!user) return <Login />;
 
-  // ── Signed in as employee — no feature access yet ─────────────────
-  if (isEmployee) return <NoAccess />;
+  // ── Signed in as employee — only Project Updates ──────────────────
+  if (isEmployee) {
+    return (
+      <Layout>
+        <Routes>
+          <Route path="/updates" element={<ProjectUpdates readOnly />} />
+          {/* Redirect everything else to /updates */}
+          <Route path="*" element={<Navigate to="/updates" replace />} />
+        </Routes>
+      </Layout>
+    );
+  }
 
   // ── Signed in as partner — full app ──────────────────────────────
   return (
@@ -54,6 +64,7 @@ function AppContent() {
         <Route path="/employees"    element={<Employees />} />
         <Route path="/projects"     element={<Projects />} />
         <Route path="/credentials"  element={<Credentials />} />
+        <Route path="/updates"      element={<ProjectUpdates />} />
       </Routes>
     </Layout>
   );
