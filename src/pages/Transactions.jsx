@@ -9,7 +9,7 @@ import { transactionsDB, settingsDB, employeesDB } from '../lib/db';
 import { TRANSACTION_SOURCES, EXPENSE_CATEGORIES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
 import {
   Plus, Filter, ArrowUpRight, ArrowDownRight, Edit2, Trash2,
-  Wallet, History, AlertTriangle, DollarSign, HandCoins, RotateCcw,
+  Wallet, History, AlertTriangle, IndianRupee, HandCoins, RotateCcw,
   Banknote, Settings2, CheckCircle2, Clock, Users, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
@@ -687,10 +687,10 @@ export default function Transactions() {
 
   // ── Stat cards ─────────────────────────────────────────────
   const statCards = [
-    { label:'Total Balance',      value:fmt(bal.total),       gradient:'linear-gradient(135deg,#0071E3,#0A84FF)', icon:DollarSign    },
+    { label:'Total Balance',      value:fmt(bal.total),       gradient:'linear-gradient(135deg,#0071E3,#0A84FF)', icon:IndianRupee   },
     { label:'Total Credit',       value:fmt(bal.totalCredit), gradient:'linear-gradient(135deg,#34C759,#30D158)', icon:ArrowUpRight  },
     { label:'Total Debit',        value:fmt(bal.totalDebit),  gradient:'linear-gradient(135deg,#FF3B30,#FF6961)', icon:ArrowDownRight },
-    { label:"Founder's Personal", value:fmt(bal.personal),    gradient:'linear-gradient(135deg,#FF9500,#FFB340)', icon:Wallet        },
+    { label:"Cash + Savings", value:fmt(bal.personal),    gradient:'linear-gradient(135deg,#FF9500,#FFB340)', icon:Wallet        },
   ];
 
   // ── Render ─────────────────────────────────────────────────
