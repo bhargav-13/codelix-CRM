@@ -671,10 +671,11 @@ export default function Transactions() {
 
   // ── Stat cards ─────────────────────────────────────────────
   const statCards = [
-    { label:'Total Balance',      value:fmt(bal.total),       gradient:'linear-gradient(135deg,#0071E3,#0A84FF)', icon:IndianRupee   },
-    { label:'Total Credit',       value:fmt(bal.totalCredit), gradient:'linear-gradient(135deg,#34C759,#30D158)', icon:ArrowUpRight  },
-    { label:'Total Debit',        value:fmt(bal.totalDebit),  gradient:'linear-gradient(135deg,#FF3B30,#FF6961)', icon:ArrowDownRight },
-    { label:"Cash + Savings", value:fmt(bal.personal),    gradient:'linear-gradient(135deg,#FF9500,#FFB340)', icon:Wallet        },
+    { label:'Total Balance',       value:fmt(bal.total),       gradient:'linear-gradient(135deg,#0071E3,#0A84FF)', icon:IndianRupee   },
+    { label:'Total Credit',        value:fmt(bal.totalCredit), gradient:'linear-gradient(135deg,#34C759,#30D158)', icon:ArrowUpRight  },
+    { label:'Total Debit',         value:fmt(bal.totalDebit),  gradient:'linear-gradient(135deg,#FF3B30,#FF6961)', icon:ArrowDownRight },
+    { label:'Cash + Savings',      value:fmt(bal.personal),    gradient:'linear-gradient(135deg,#FF9500,#FFB340)', icon:Wallet        },
+    { label:'Current Bank Balance',value:fmt(bal.bank),        gradient:'linear-gradient(135deg,#5856D6,#7B7AEB)', icon:Banknote      },
   ];
 
   // ── Render ─────────────────────────────────────────────────
@@ -707,7 +708,7 @@ export default function Transactions() {
           )}
 
           {/* Stat cards */}
-          <div className="rg-4">
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:14 }}>
             {statCards.map(c => (
               <div key={c.label} style={{ borderRadius:16, padding:'18px 20px', background:c.gradient, display:'flex', flexDirection:'column', gap:10 }}>
                 <div style={{ width:34, height:34, borderRadius:10, background:'rgba(255,255,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -888,7 +889,7 @@ export default function Transactions() {
       {/* ── Opening Balance Modal ────────────────────────────── */}
       <Modal isOpen={showOB} onClose={() => setShowOB(false)} title="Set Opening Balance" size="sm">
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-          <FF label="Founder's Personal (₹)" required>
+          <FF label="Cash + Savings (₹)" required>
             <input className="mac-input" type="number" value={obForm.cash} onChange={e => setObForm(b => ({ ...b, cash: +e.target.value }))}/>
           </FF>
           <FF label="Company Bank (₹)" required>
