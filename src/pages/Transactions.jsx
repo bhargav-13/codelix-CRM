@@ -113,7 +113,7 @@ const formToRow = (form) => {
       return { ...base, type: 'Credit', accountType: 'Company Bank', subType: 'drawing_return',
         person: form.person, remark: form.remark || `Return — ${form.person}` };
     case 'p_salary':
-      return { ...base, type: 'Debit', accountType: 'Company Bank', subType: 'partner_salary',
+      return { ...base, type: 'Debit', accountType: form.accountType, subType: 'partner_salary',
         person: form.person, monthLabel: form.monthLabel,
         remark: form.remark || `${form.person} Salary — ${form.monthLabel}` };
     case 'e_salary':
@@ -397,6 +397,7 @@ function TxFields({ form, onChange, partnerOutstanding, partnerReimburseOwed, sa
           }}
           metaMap={meta}
         />
+        {accountToggle}
         <FF label="Month" required>
           <input className="mac-input" value={form.monthLabel} onChange={e => s('monthLabel', e.target.value)} placeholder={currentMonthLabel()}/>
         </FF>
