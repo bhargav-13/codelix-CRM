@@ -153,6 +153,11 @@ create table if not exists project_updates (
 -- ALTER TABLE transactions ADD COLUMN IF NOT EXISTS person      text;
 -- ALTER TABLE transactions ADD COLUMN IF NOT EXISTS month_label text;
 
+-- sub_type values: income | expense | drawing | drawing_return |
+--   partner_salary | employee_salary |
+--   personal_exp (partner paid from personal, account_type = 'Partner Personal', excluded from company balance) |
+--   reimbursement (company pays partner back, account_type = 'Company Bank')
+
 -- ================================================================
 -- ROW LEVEL SECURITY
 -- ================================================================

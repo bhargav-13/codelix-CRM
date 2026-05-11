@@ -12,6 +12,7 @@ import {
   Plus, Filter, ArrowUpRight, ArrowDownRight, Edit2, Trash2,
   Wallet, History, AlertTriangle, IndianRupee, HandCoins, RotateCcw,
   Banknote, Settings2, CheckCircle2, Clock, Users, ChevronDown, ChevronUp, ExternalLink,
+  CreditCard, ArrowRightLeft,
 } from 'lucide-react';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -19,12 +20,14 @@ import {
 const ACCOUNT_TYPES = ['Cash + Savings Account', 'Company Bank'];
 
 const TX_TYPES = [
-  { id: 'income',   label: 'Income',          icon: ArrowUpRight,   color: '#34C759', bg: 'rgba(52,199,89,0.09)',   desc: 'Client payment / revenue' },
-  { id: 'expense',  label: 'Expense',          icon: ArrowDownRight, color: '#FF3B30', bg: 'rgba(255,59,48,0.09)',  desc: 'Bills, tools, rent' },
-  { id: 'drawing',  label: 'Partner Drawing',  icon: HandCoins,      color: '#FF9500', bg: 'rgba(255,149,0,0.09)',  desc: 'Partner takes from company' },
-  { id: 'return',   label: 'Drawing Return',   icon: RotateCcw,      color: '#0071E3', bg: 'rgba(0,113,227,0.09)',  desc: 'Partner returns money' },
-  { id: 'p_salary', label: 'Partner Salary',   icon: Banknote,       color: '#AF52DE', bg: 'rgba(175,82,222,0.09)', desc: 'Monthly partner payment' },
-  { id: 'e_salary', label: 'Employee Salary',  icon: Users,          color: '#636366', bg: 'rgba(99,99,102,0.09)',  desc: 'Staff salary payment' },
+  { id: 'income',       label: 'Income',            icon: ArrowUpRight,   color: '#34C759', bg: 'rgba(52,199,89,0.09)',   desc: 'Client payment / revenue' },
+  { id: 'expense',      label: 'Expense',            icon: ArrowDownRight, color: '#FF3B30', bg: 'rgba(255,59,48,0.09)',  desc: 'Bills, tools, rent' },
+  { id: 'drawing',      label: 'Partner Drawing',    icon: HandCoins,      color: '#FF9500', bg: 'rgba(255,149,0,0.09)',  desc: 'Partner takes from company' },
+  { id: 'return',       label: 'Drawing Return',     icon: RotateCcw,      color: '#0071E3', bg: 'rgba(0,113,227,0.09)',  desc: 'Partner returns money' },
+  { id: 'p_salary',     label: 'Partner Salary',     icon: Banknote,       color: '#AF52DE', bg: 'rgba(175,82,222,0.09)', desc: 'Monthly partner payment' },
+  { id: 'e_salary',     label: 'Employee Salary',    icon: Users,          color: '#636366', bg: 'rgba(99,99,102,0.09)',  desc: 'Staff salary payment' },
+  { id: 'personal_exp', label: 'Personal Expense',   icon: CreditCard,     color: '#FF2D55', bg: 'rgba(255,45,85,0.09)',  desc: 'Partner paid from personal' },
+  { id: 'reimburse',    label: 'Reimburse Partner',  icon: ArrowRightLeft, color: '#00C7BE', bg: 'rgba(0,199,190,0.09)', desc: 'Pay partner back' },
 ];
 
 const SUB_TYPE_META = {
@@ -34,6 +37,8 @@ const SUB_TYPE_META = {
   drawing_return:  { label: 'Return',          color: 'blue'   },
   partner_salary:  { label: 'Partner Salary',  color: 'purple' },
   employee_salary: { label: 'Emp. Salary',     color: 'gray'   },
+  personal_exp:    { label: 'Personal Exp.',   color: 'red'    },
+  reimbursement:   { label: 'Reimbursed',      color: 'blue'   },
 };
 
 const PARTNER_COLORS = {
@@ -60,6 +65,8 @@ function txDesc(t) {
   if (t.subType === 'drawing_return')  return `${t.person || ''} Return`;
   if (t.subType === 'partner_salary')  return `${t.person || ''} · ${t.monthLabel || ''}`;
   if (t.subType === 'employee_salary') return `${t.person || ''} · ${t.monthLabel || ''}`;
+  if (t.subType === 'personal_exp')    return `${t.person || ''} Personal Expense`;
+  if (t.subType === 'reimbursement')   return `${t.person || ''} Reimbursed`;
   return t.remark || (t.type === 'Credit' ? t.source : t.category) || '—';
 }
 
@@ -113,6 +120,13 @@ const formToRow = (form) => {
       return { ...base, type: 'Debit', accountType: 'Company Bank', subType: 'employee_salary',
         person: form.person, monthLabel: form.monthLabel,
         remark: form.remark || `${form.person} Salary — ${form.monthLabel}` };
+    case 'personal_exp':
+      return { ...base, type: 'Debit', accountType: 'Partner Personal', subType: 'personal_exp',
+        person: form.person, category: form.category, paidTo: form.paidTo,
+        remark: form.remark || `${form.person} Personal Expense` };
+    case 'reimburse':
+      return { ...base, type: 'Debit', accountType: 'Partner Personal', subType: 'reimbursement',
+        person: form.person, remark: form.remark || `Reimbursement — ${form.person}` };
     default:
       return { ...base, type: 'Credit', accountType: form.accountType, subType: form.txType };
   }
@@ -126,6 +140,8 @@ const rowToForm = (t) => {
     : t.subType === 'drawing_return'? 'return'
     : t.subType === 'partner_salary'? 'p_salary'
     : t.subType === 'employee_salary'? 'e_salary'
+    : t.subType === 'personal_exp'  ? 'personal_exp'
+    : t.subType === 'reimbursement' ? 'reimburse'
     : t.type === 'Credit'           ? 'income'
     : 'expense';
   return {
@@ -229,7 +245,7 @@ function PartnerPicker({ value, onChange, metaMap = {} }) {
 
 // ─── TxFields — contextual fields per type ────────────────────────────────────
 
-function TxFields({ form, onChange, partnerOutstanding, salaryConfig, employees }) {
+function TxFields({ form, onChange, partnerOutstanding, partnerReimburseOwed, salaryConfig, employees }) {
   const s = (k, v) => onChange({ ...form, [k]: v });
 
   // Reused sub-blocks (as JSX values, not components, to avoid remount)
@@ -392,6 +408,73 @@ function TxFields({ form, onChange, partnerOutstanding, salaryConfig, employees 
     );
   }
 
+  // ── Partner Personal Expense ─────────────────────────────────────────────────
+  if (form.txType === 'personal_exp') {
+    const owedMeta = Object.fromEntries(PARTNERS.map(p => {
+      const owed = (partnerReimburseOwed || {})[p] || 0;
+      return [p, owed > 0 ? { label: fmt(owed) + ' pending', color: '#FF2D55' } : { label: 'Clear ✓', color: '#34C759' }];
+    }));
+    return (
+      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+        <div style={{ padding:'10px 14px', borderRadius:12, background:'rgba(255,45,85,0.06)', border:'1px solid rgba(255,45,85,0.15)', fontSize:12.5, color:'#FF2D55', lineHeight:1.6 }}>
+          Use this when a partner paid a company expense from their <strong>personal funds</strong>. The company will owe them a reimbursement.
+        </div>
+        <PartnerPicker value={form.person} onChange={v => s('person', v)} metaMap={owedMeta}/>
+        {amountDate('Date Paid')}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+          <FF label="Category">
+            <select className="mac-select" value={form.category} onChange={e => s('category', e.target.value)}>
+              {EXPENSE_CATEGORIES.map(x => <option key={x}>{x}</option>)}
+            </select>
+          </FF>
+          <FF label="Payment Method">
+            <select className="mac-select" value={form.paymentMethod} onChange={e => s('paymentMethod', e.target.value)}>
+              {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
+            </select>
+          </FF>
+        </div>
+        <FF label="Paid To (Vendor / Purpose)">
+          <input className="mac-input" value={form.paidTo} onChange={e => s('paidTo', e.target.value)} placeholder="e.g. Electrician, Amazon, Emergency repair"/>
+        </FF>
+        <FF label="Remark">
+          <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional note"/>
+        </FF>
+      </div>
+    );
+  }
+
+  // ── Reimburse Partner ────────────────────────────────────────────────────────
+  if (form.txType === 'reimburse') {
+    const owed = (partnerReimburseOwed || {})[form.person] || 0;
+    const owedMeta = Object.fromEntries(PARTNERS.map(p => {
+      const o = (partnerReimburseOwed || {})[p] || 0;
+      return [p, o > 0 ? { label: fmt(o) + ' owed', color: '#FF2D55' } : { label: 'All clear ✓', color: '#34C759' }];
+    }));
+    return (
+      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+        <PartnerPicker value={form.person} onChange={v => s('person', v)} metaMap={owedMeta}/>
+        {owed > 0 ? (
+          <div style={{ padding:'8px 12px', borderRadius:10, background:'rgba(255,45,85,0.06)', border:'1px solid rgba(255,45,85,0.12)', fontSize:12, color:'#FF2D55' }}>
+            Company owes <strong>{form.person}</strong> <strong>{fmt(owed)}</strong> in pending reimbursements
+          </div>
+        ) : (
+          <div style={{ padding:'8px 12px', borderRadius:10, background:'rgba(52,199,89,0.06)', border:'1px solid rgba(52,199,89,0.12)', fontSize:12, color:'#34C759' }}>
+            ✓ No pending reimbursements for {form.person}
+          </div>
+        )}
+        {amountDate('Date Paid')}
+        <FF label="Payment Method">
+          <select className="mac-select" value={form.paymentMethod} onChange={e => s('paymentMethod', e.target.value)}>
+            {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
+          </select>
+        </FF>
+        <FF label="Notes">
+          <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional"/>
+        </FF>
+      </div>
+    );
+  }
+
   // ── Employee Salary — redirect to Employees page ────────────────────────────
   if (form.txType === 'e_salary') {
     return (
@@ -442,17 +525,21 @@ function PartnerOverview({ txs, salaryConfig, onSetSalaries }) {
   const curMonth = currentMonthLabel();
 
   const overview = useMemo(() => PARTNERS.map(p => {
-    const taken    = txs.filter(t => t.subType === 'drawing'        && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-    const returned = txs.filter(t => t.subType === 'drawing_return' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-    const outstanding = Math.max(0, taken - returned);
-    const salaryPaid  = txs.some(t => t.subType === 'partner_salary' && t.person === p && t.monthLabel === curMonth);
-    const monthly     = salaryConfig[p] || 0;
-    return { partner: p, outstanding, salaryPaid, monthly };
+    const taken        = txs.filter(t => t.subType === 'drawing'        && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
+    const returned     = txs.filter(t => t.subType === 'drawing_return' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
+    const outstanding  = Math.max(0, taken - returned);
+    const personalSpent= txs.filter(t => t.subType === 'personal_exp'  && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
+    const reimbursed   = txs.filter(t => t.subType === 'reimbursement' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
+    const reimburseOwed= Math.max(0, personalSpent - reimbursed);
+    const salaryPaid   = txs.some(t => t.subType === 'partner_salary' && t.person === p && t.monthLabel === curMonth);
+    const monthly      = salaryConfig[p] || 0;
+    return { partner: p, outstanding, reimburseOwed, salaryPaid, monthly };
   }), [txs, salaryConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const totalOutstanding = overview.reduce((s, p) => s + p.outstanding, 0);
-  const pendingSalaries  = overview.filter(p => p.monthly > 0 && !p.salaryPaid).map(p => p.partner);
-  const curMonthShort    = curMonth.split(' ')[0];
+  const totalOutstanding  = overview.reduce((s, p) => s + p.outstanding, 0);
+  const totalReimburseOwed= overview.reduce((s, p) => s + p.reimburseOwed, 0);
+  const pendingSalaries   = overview.filter(p => p.monthly > 0 && !p.salaryPaid).map(p => p.partner);
+  const curMonthShort     = curMonth.split(' ')[0];
 
   return (
     <div style={{ background:'#fff', borderRadius:16, border:'1px solid rgba(0,0,0,0.07)', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
@@ -468,12 +555,17 @@ function PartnerOverview({ txs, salaryConfig, onSetSalaries }) {
               {fmt(totalOutstanding)} drawing due
             </span>
           )}
+          {totalReimburseOwed > 0 && (
+            <span style={{ fontSize:11, fontWeight:500, color:'#FF2D55', background:'rgba(255,45,85,0.08)', padding:'2px 9px', borderRadius:20 }}>
+              {fmt(totalReimburseOwed)} to reimburse
+            </span>
+          )}
           {pendingSalaries.length > 0 && (
             <span style={{ fontSize:11, fontWeight:500, color:'#FF9500', background:'rgba(255,149,0,0.08)', padding:'2px 9px', borderRadius:20 }}>
               {pendingSalaries.length} salary pending
             </span>
           )}
-          {totalOutstanding === 0 && pendingSalaries.length === 0 && (
+          {totalOutstanding === 0 && totalReimburseOwed === 0 && pendingSalaries.length === 0 && (
             <span style={{ fontSize:11, fontWeight:500, color:'#34C759', background:'rgba(52,199,89,0.08)', padding:'2px 9px', borderRadius:20 }}>
               All clear ✓
             </span>
@@ -493,7 +585,7 @@ function PartnerOverview({ txs, salaryConfig, onSetSalaries }) {
       {/* Partner cards row */}
       {open && (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', overflowX:'auto' }}>
-          {overview.map(({ partner, outstanding, salaryPaid, monthly }, i) => {
+          {overview.map(({ partner, outstanding, reimburseOwed, salaryPaid, monthly }, i) => {
             const col = PARTNER_COLORS[partner];
             return (
               <div key={partner} style={{ padding:'14px 18px', borderRight: i < 3 ? '1px solid rgba(0,0,0,0.07)' : 'none' }}>
@@ -510,6 +602,14 @@ function PartnerOverview({ txs, salaryConfig, onSetSalaries }) {
                   <div style={{ fontSize:10, color:'#AEAEB2', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:2 }}>Drawing</div>
                   <div style={{ fontSize:13, fontWeight:650, color: outstanding > 0 ? '#FF3B30' : '#34C759' }}>
                     {outstanding > 0 ? fmt(outstanding) + ' due' : 'Settled ✓'}
+                  </div>
+                </div>
+
+                {/* Reimbursement row */}
+                <div style={{ marginBottom:8 }}>
+                  <div style={{ fontSize:10, color:'#AEAEB2', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:2 }}>Reimburse</div>
+                  <div style={{ fontSize:13, fontWeight:650, color: reimburseOwed > 0 ? '#FF2D55' : '#34C759' }}>
+                    {reimburseOwed > 0 ? fmt(reimburseOwed) + ' owed' : 'Clear ✓'}
                   </div>
                 </div>
 
@@ -590,6 +690,7 @@ export default function Transactions() {
   const bal = useMemo(() => {
     let pC=0, pD=0, bC=0, bD=0;
     txs.forEach(t => {
+      if (t.accountType === 'Partner Personal') return; // reimbursement settlements — no balance effect
       if (t.accountType === "Founder's Personal") {
         t.type === 'Credit' ? pC += +t.amount : pD += +t.amount;
       } else {
@@ -608,6 +709,17 @@ export default function Transactions() {
       const taken    = txs.filter(t => t.subType === 'drawing'        && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
       const returned = txs.filter(t => t.subType === 'drawing_return' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
       out[p] = Math.max(0, taken - returned);
+    });
+    return out;
+  }, [txs]);
+
+  // ── Partner reimbursement owed by company ──────────────────
+  const partnerReimburseOwed = useMemo(() => {
+    const out = {};
+    PARTNERS.forEach(p => {
+      const spent    = txs.filter(t => t.subType === 'personal_exp'  && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
+      const paid     = txs.filter(t => t.subType === 'reimbursement' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
+      out[p] = Math.max(0, spent - paid);
     });
     return out;
   }, [txs]);
@@ -670,12 +782,14 @@ export default function Transactions() {
   }
 
   // ── Stat cards ─────────────────────────────────────────────
+  const totalPendingReimburse = Object.values(partnerReimburseOwed).reduce((s, v) => s + v, 0);
   const statCards = [
-    { label:'Total Balance',       value:fmt(bal.total),       gradient:'linear-gradient(135deg,#0071E3,#0A84FF)', icon:IndianRupee   },
-    { label:'Total Credit',        value:fmt(bal.totalCredit), gradient:'linear-gradient(135deg,#34C759,#30D158)', icon:ArrowUpRight  },
-    { label:'Total Debit',         value:fmt(bal.totalDebit),  gradient:'linear-gradient(135deg,#FF3B30,#FF6961)', icon:ArrowDownRight },
-    { label:'Cash + Savings',      value:fmt(bal.personal),    gradient:'linear-gradient(135deg,#FF9500,#FFB340)', icon:Wallet        },
-    { label:'Current Bank Balance',value:fmt(bal.bank),        gradient:'linear-gradient(135deg,#5856D6,#7B7AEB)', icon:Banknote      },
+    { label:'Total Balance',        value:fmt(bal.total),              gradient:'linear-gradient(135deg,#0071E3,#0A84FF)', icon:IndianRupee   },
+    { label:'Total Credit',         value:fmt(bal.totalCredit),        gradient:'linear-gradient(135deg,#34C759,#30D158)', icon:ArrowUpRight  },
+    { label:'Total Debit',          value:fmt(bal.totalDebit),         gradient:'linear-gradient(135deg,#FF3B30,#FF6961)', icon:ArrowDownRight },
+    { label:'Cash + Savings',       value:fmt(bal.personal),           gradient:'linear-gradient(135deg,#FF9500,#FFB340)', icon:Wallet        },
+    { label:'Current Bank Balance', value:fmt(bal.bank),               gradient:'linear-gradient(135deg,#5856D6,#7B7AEB)', icon:Banknote      },
+    { label:'Pending Reimburse',    value:fmt(totalPendingReimburse),  gradient:'linear-gradient(135deg,#FF2D55,#FF6680)', icon:CreditCard    },
   ];
 
   // ── Render ─────────────────────────────────────────────────
@@ -708,7 +822,7 @@ export default function Transactions() {
           )}
 
           {/* Stat cards */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:14 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:14 }}>
             {statCards.map(c => (
               <div key={c.label} style={{ borderRadius:16, padding:'18px 20px', background:c.gradient, display:'flex', flexDirection:'column', gap:10 }}>
                 <div style={{ width:34, height:34, borderRadius:10, background:'rgba(255,255,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center' }}>
@@ -797,7 +911,7 @@ export default function Transactions() {
                             {t.paymentMethod && <div style={{ fontSize:11, color:'#AEAEB2', marginTop:1 }}>{t.paymentMethod}</div>}
                           </TD>
                           <TD><Badge color={meta.color}>{meta.label}</Badge></TD>
-                          <TD><Badge color={t.accountType==="Founder's Personal"?'orange':'blue'}>{t.accountType}</Badge></TD>
+                          <TD><Badge color={t.accountType==="Founder's Personal"?'orange':t.accountType==='Partner Personal'?'red':'blue'}>{t.accountType}</Badge></TD>
                           <TD>
                             <span style={{ fontSize:13, fontWeight:650, color: t.type==='Credit'?'#34C759':'#FF3B30', letterSpacing:'-0.2px' }}>
                               {t.type==='Credit'?'+':'-'}{fmt(t.amount)}
@@ -863,6 +977,7 @@ export default function Transactions() {
             form={form}
             onChange={setForm}
             partnerOutstanding={partnerOutstanding}
+            partnerReimburseOwed={partnerReimburseOwed}
             salaryConfig={salaryConfig}
             employees={employees}
           />
