@@ -58,20 +58,26 @@ export default function Dashboard() {
           projectsDB.getAll(),
           settingsDB.get('opening_balances'),
         ]);
-        const openBal = obData || { cash: 25000, bank: 150000 };
+        const openBal = obData || { cash: 0, bank: 0 };
         let pC=0,pD=0,bC=0,bD=0;
         txs.forEach(t => {
-          // Support both old name "Founder's Personal" and new "Cash + Savings Account"
+          if (t.accountType === 'Partner Personal') return; // excluded — personal_exp / reimbursement settlements
           const isCash = t.accountType === 'Cash + Savings Account' || t.accountType === "Founder's Personal";
           if (isCash) { t.type==='Credit' ? pC+=+t.amount : pD+=+t.amount; }
           else        { t.type==='Credit' ? bC+=+t.amount : bD+=+t.amount; }
         });
+        const pendingReimburse = (() => {
+          const spent = txs.filter(t => t.subType === 'personal_exp').reduce((s,t) => s+(+t.amount||0), 0);
+          const paid  = txs.filter(t => t.subType === 'reimbursement').reduce((s,t) => s+(+t.amount||0), 0);
+          return Math.max(0, spent - paid);
+        })();
         const bal = {
           cash: openBal.cash+pC-pD,
           bank: openBal.bank+bC-bD,
           total: openBal.cash+pC-pD+openBal.bank+bC-bD,
           totalCredit: pC+bC,
           totalDebit: pD+bD,
+          pendingReimburse,
         };
         setData({ clients, txs, employees, projects, bal });
       } catch(e) { console.error(e); }
@@ -94,7 +100,15 @@ export default function Dashboard() {
   const hotClients       = clients.filter(c => c.status === 'Hot');
   const activeProjects   = projects.filter(p => p.status === 'In Progress');
   const activeEmployees  = employees.filter(e => e.status === 'Active');
-  const pendingSalaries  = employees.filter(e => e.status==='Active' && e.salaryType==='Monthly' && e.salaryHistory?.[0]?.paid===0);
+  const curMonthLabel    = new Date().toLocaleString('en-IN',{month:'long',year:'numeric'});
+  const pendingSalaries  = employees.filter(e => {
+    if (e.status !== 'Active' || e.salaryType !== 'Monthly') return false;
+    if (!e.salaryAmount || +e.salaryAmount === 0) return false;
+    const paidThisMonth = (e.salaryHistory || [])
+      .filter(h => h.month === curMonthLabel)
+      .reduce((s, h) => s + (+h.paid || 0), 0);
+    return paidThisMonth < +e.salaryAmount;
+  });
   const recentTx = [...txs].sort((a,b) => new Date(b.date)-new Date(a.date)).slice(0,5);
   const pipelineStatuses = ['Hot','Warm','Cold','Closed Won','Closed Lost'];
   const pipelineColors   = { Hot:'#FF3B30', Warm:'#FF9500', Cold:'#0071E3', 'Closed Won':'#34C759', 'Closed Lost':'#AEAEB2' };
@@ -180,6 +194,12 @@ export default function Dashboard() {
                   <span style={{ fontSize:12.5, fontWeight:550, color:'#1D1D1F' }}>{v}</span>
                 </div>
               ))}
+              {bal.pendingReimburse > 0 && (
+                <div style={{ display:'flex', justifyContent:'space-between', padding:'2px 0' }}>
+                  <span style={{ fontSize:12, color:'#FF2D55' }}>Pending Reimburse</span>
+                  <span style={{ fontSize:12.5, fontWeight:550, color:'#FF2D55' }}>{fmt(bal.pendingReimburse)}</span>
+                </div>
+              )}
               <div style={{ display:'flex', justifyContent:'space-between', padding:'8px 0 0', borderTop:'1px solid rgba(0,0,0,0.05)', marginTop:2 }}>
                 <span style={{ fontSize:12.5, fontWeight:550, color:'#1D1D1F' }}>Total Balance</span>
                 <span style={{ fontSize:14, fontWeight:700, color:'#1D1D1F', letterSpacing:'-0.3px' }}>{fmt(bal.total)}</span>
