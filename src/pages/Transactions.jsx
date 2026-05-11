@@ -245,7 +245,7 @@ function PartnerPicker({ value, onChange, metaMap = {} }) {
 
 // ─── TxFields — contextual fields per type ────────────────────────────────────
 
-function TxFields({ form, onChange, partnerOutstanding, partnerReimburseOwed, salaryConfig, employees }) {
+function TxFields({ form, onChange, partnerOutstanding, partnerReimburseOwed, salaryConfig, partnerSalaryPaid, employees }) {
   const s = (k, v) => onChange({ ...form, [k]: v });
 
   // Reused sub-blocks (as JSX values, not components, to avoid remount)
@@ -374,23 +374,59 @@ function TxFields({ form, onChange, partnerOutstanding, partnerReimburseOwed, sa
 
   // ── Partner Salary ───────────────────────────────────────
   if (form.txType === 'p_salary') {
-    const suggested = salaryConfig[form.person] || 0;
-    const meta = Object.fromEntries(PARTNERS.map(p => [
-      p, { label: salaryConfig[p] > 0 ? fmt(salaryConfig[p]) + '/mo' : 'Not set', color: '#8E8E93' },
-    ]));
+    const monthly   = salaryConfig[form.person] || 0;
+    const paidSoFar = (partnerSalaryPaid || {})[form.person] || 0;
+    const remaining = Math.max(0, monthly - paidSoFar);
+    const isOverpay = +form.amount > remaining && remaining > 0;
+    const meta = Object.fromEntries(PARTNERS.map(p => {
+      const mo  = salaryConfig[p] || 0;
+      const paid= (partnerSalaryPaid || {})[p] || 0;
+      const rem = Math.max(0, mo - paid);
+      if (!mo)       return [p, { label: 'Not set',           color: '#AEAEB2' }];
+      if (rem === 0) return [p, { label: 'Fully paid ✓',      color: '#34C759' }];
+      if (paid > 0)  return [p, { label: fmt(rem) + ' left',  color: '#FF9500' }];
+      return           [p, { label: fmt(mo) + ' pending',    color: '#FF3B30' }];
+    }));
     return (
       <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
         <PartnerPicker
           value={form.person}
-          onChange={p => onChange({ ...form, person: p, amount: salaryConfig[p] ? String(salaryConfig[p]) : form.amount })}
+          onChange={p => {
+            const rem = Math.max(0, (salaryConfig[p] || 0) - ((partnerSalaryPaid || {})[p] || 0));
+            onChange({ ...form, person: p, amount: rem ? String(rem) : '' });
+          }}
           metaMap={meta}
         />
         <FF label="Month" required>
           <input className="mac-input" value={form.monthLabel} onChange={e => s('monthLabel', e.target.value)} placeholder={currentMonthLabel()}/>
         </FF>
+
+        {/* Salary progress for selected partner */}
+        {monthly > 0 && (
+          <div style={{ padding:'10px 14px', borderRadius:12, background: remaining === 0 ? 'rgba(52,199,89,0.06)' : 'rgba(255,149,0,0.06)', border: `1px solid ${remaining === 0 ? 'rgba(52,199,89,0.15)' : 'rgba(255,149,0,0.15)'}` }}>
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6, fontSize:12 }}>
+              <span style={{ color:'#6E6E73' }}>Paid this month</span>
+              <span style={{ fontWeight:650, color: remaining === 0 ? '#34C759' : '#FF9500' }}>{fmt(paidSoFar)} / {fmt(monthly)}</span>
+            </div>
+            <div style={{ height:5, borderRadius:99, background:'rgba(0,0,0,0.07)', overflow:'hidden' }}>
+              <div style={{ height:'100%', borderRadius:99, width:`${Math.min(100, (paidSoFar/monthly)*100)}%`, background: remaining === 0 ? '#34C759' : '#FF9500', transition:'width 0.3s' }}/>
+            </div>
+            {remaining > 0 && <div style={{ fontSize:11, color:'#FF9500', marginTop:5 }}>{fmt(remaining)} remaining this month</div>}
+            {remaining === 0 && <div style={{ fontSize:11, color:'#34C759', marginTop:5 }}>✓ Fully paid for {form.monthLabel}</div>}
+          </div>
+        )}
+
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
           <FF label="Amount (₹)" required>
-            <input className="mac-input" type="number" value={form.amount} onChange={e => s('amount', e.target.value)} placeholder={suggested ? String(suggested) : '0'}/>
+            <input
+              className="mac-input"
+              type="number"
+              value={form.amount}
+              onChange={e => s('amount', e.target.value)}
+              placeholder={remaining ? String(remaining) : '0'}
+              style={{ borderColor: isOverpay ? '#FF3B30' : undefined }}
+            />
+            {isOverpay && <div style={{ fontSize:11, color:'#FF3B30', marginTop:4 }}>Exceeds remaining {fmt(remaining)}</div>}
           </FF>
           <FF label="Date Paid" required>
             <input className="mac-input" type="date" value={form.date} onChange={e => s('date', e.target.value)}/>
@@ -525,21 +561,22 @@ function PartnerOverview({ txs, salaryConfig, onSetSalaries }) {
   const curMonth = currentMonthLabel();
 
   const overview = useMemo(() => PARTNERS.map(p => {
-    const taken        = txs.filter(t => t.subType === 'drawing'        && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-    const returned     = txs.filter(t => t.subType === 'drawing_return' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-    const outstanding  = Math.max(0, taken - returned);
-    const personalSpent= txs.filter(t => t.subType === 'personal_exp'  && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-    const reimbursed   = txs.filter(t => t.subType === 'reimbursement' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-    const reimburseOwed= Math.max(0, personalSpent - reimbursed);
-    const salaryPaid   = txs.some(t => t.subType === 'partner_salary' && t.person === p && t.monthLabel === curMonth);
-    const monthly      = salaryConfig[p] || 0;
-    return { partner: p, outstanding, reimburseOwed, salaryPaid, monthly };
+    const taken         = txs.filter(t => t.subType === 'drawing'        && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
+    const returned      = txs.filter(t => t.subType === 'drawing_return' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
+    const outstanding   = Math.max(0, taken - returned);
+    const personalSpent = txs.filter(t => t.subType === 'personal_exp'  && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
+    const reimbursed    = txs.filter(t => t.subType === 'reimbursement' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
+    const reimburseOwed = Math.max(0, personalSpent - reimbursed);
+    const monthly       = salaryConfig[p] || 0;
+    const salaryPaidAmt = txs.filter(t => t.subType === 'partner_salary' && t.person === p && t.monthLabel === curMonth).reduce((s, t) => s + (+t.amount || 0), 0);
+    const salaryRemaining = Math.max(0, monthly - salaryPaidAmt);
+    return { partner: p, outstanding, reimburseOwed, monthly, salaryPaidAmt, salaryRemaining };
   }), [txs, salaryConfig]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const totalOutstanding  = overview.reduce((s, p) => s + p.outstanding, 0);
-  const totalReimburseOwed= overview.reduce((s, p) => s + p.reimburseOwed, 0);
-  const pendingSalaries   = overview.filter(p => p.monthly > 0 && !p.salaryPaid).map(p => p.partner);
-  const curMonthShort     = curMonth.split(' ')[0];
+  const totalOutstanding   = overview.reduce((s, p) => s + p.outstanding, 0);
+  const totalReimburseOwed = overview.reduce((s, p) => s + p.reimburseOwed, 0);
+  const pendingSalaries    = overview.filter(p => p.monthly > 0 && p.salaryRemaining > 0);
+  const curMonthShort      = curMonth.split(' ')[0];
 
   return (
     <div style={{ background:'#fff', borderRadius:16, border:'1px solid rgba(0,0,0,0.07)', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
@@ -562,7 +599,10 @@ function PartnerOverview({ txs, salaryConfig, onSetSalaries }) {
           )}
           {pendingSalaries.length > 0 && (
             <span style={{ fontSize:11, fontWeight:500, color:'#FF9500', background:'rgba(255,149,0,0.08)', padding:'2px 9px', borderRadius:20 }}>
-              {pendingSalaries.length} salary pending
+              {pendingSalaries.filter(p => p.salaryPaidAmt === 0).length > 0 && `${pendingSalaries.filter(p => p.salaryPaidAmt === 0).length} unpaid`}
+              {pendingSalaries.filter(p => p.salaryPaidAmt === 0).length > 0 && pendingSalaries.filter(p => p.salaryPaidAmt > 0).length > 0 && ' · '}
+              {pendingSalaries.filter(p => p.salaryPaidAmt > 0).length > 0 && `${pendingSalaries.filter(p => p.salaryPaidAmt > 0).length} partial`}
+              {' salary'}
             </span>
           )}
           {totalOutstanding === 0 && totalReimburseOwed === 0 && pendingSalaries.length === 0 && (
@@ -585,7 +625,7 @@ function PartnerOverview({ txs, salaryConfig, onSetSalaries }) {
       {/* Partner cards row */}
       {open && (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', overflowX:'auto' }}>
-          {overview.map(({ partner, outstanding, reimburseOwed, salaryPaid, monthly }, i) => {
+          {overview.map(({ partner, outstanding, reimburseOwed, monthly, salaryPaidAmt, salaryRemaining }, i) => {
             const col = PARTNER_COLORS[partner];
             return (
               <div key={partner} style={{ padding:'14px 18px', borderRight: i < 3 ? '1px solid rgba(0,0,0,0.07)' : 'none' }}>
@@ -615,20 +655,35 @@ function PartnerOverview({ txs, salaryConfig, onSetSalaries }) {
 
                 {/* Salary row */}
                 <div>
-                  <div style={{ fontSize:10, color:'#AEAEB2', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:2 }}>
+                  <div style={{ fontSize:10, color:'#AEAEB2', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:4 }}>
                     Salary · {curMonthShort}
                   </div>
-                  {monthly > 0 ? (
-                    salaryPaid
-                      ? <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                          <CheckCircle2 size={12} color="#34C759"/>
-                          <span style={{ fontSize:12, color:'#34C759', fontWeight:500 }}>Paid {fmt(monthly)}</span>
-                        </div>
-                      : <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                  {monthly > 0 ? (() => {
+                    if (salaryRemaining === 0) return (
+                      <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                        <CheckCircle2 size={12} color="#34C759"/>
+                        <span style={{ fontSize:12, color:'#34C759', fontWeight:500 }}>Fully Paid {fmt(monthly)}</span>
+                      </div>
+                    );
+                    if (salaryPaidAmt > 0) return (
+                      <div>
+                        <div style={{ display:'flex', alignItems:'center', gap:4, marginBottom:4 }}>
                           <Clock size={12} color="#FF9500"/>
-                          <span style={{ fontSize:12, color:'#FF9500', fontWeight:500 }}>Pending {fmt(monthly)}</span>
+                          <span style={{ fontSize:12, color:'#FF9500', fontWeight:500 }}>{fmt(salaryPaidAmt)} / {fmt(monthly)}</span>
                         </div>
-                  ) : (
+                        <div style={{ height:4, borderRadius:99, background:'rgba(0,0,0,0.07)', overflow:'hidden' }}>
+                          <div style={{ height:'100%', borderRadius:99, width:`${(salaryPaidAmt/monthly)*100}%`, background:'#FF9500' }}/>
+                        </div>
+                        <div style={{ fontSize:10, color:'#FF9500', marginTop:3 }}>{fmt(salaryRemaining)} pending</div>
+                      </div>
+                    );
+                    return (
+                      <div style={{ display:'flex', alignItems:'center', gap:4 }}>
+                        <Clock size={12} color="#FF3B30"/>
+                        <span style={{ fontSize:12, color:'#FF3B30', fontWeight:500 }}>Pending {fmt(monthly)}</span>
+                      </div>
+                    );
+                  })() : (
                     <span style={{ fontSize:12, color:'#AEAEB2' }}>Not configured</span>
                   )}
                 </div>
@@ -709,6 +764,16 @@ export default function Transactions() {
       const taken    = txs.filter(t => t.subType === 'drawing'        && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
       const returned = txs.filter(t => t.subType === 'drawing_return' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
       out[p] = Math.max(0, taken - returned);
+    });
+    return out;
+  }, [txs]);
+
+  // ── Partner salary paid this month ────────────────────────
+  const partnerSalaryPaid = useMemo(() => {
+    const curMonth = currentMonthLabel();
+    const out = {};
+    PARTNERS.forEach(p => {
+      out[p] = txs.filter(t => t.subType === 'partner_salary' && t.person === p && t.monthLabel === curMonth).reduce((s, t) => s + (+t.amount || 0), 0);
     });
     return out;
   }, [txs]);
@@ -979,6 +1044,7 @@ export default function Transactions() {
             partnerOutstanding={partnerOutstanding}
             partnerReimburseOwed={partnerReimburseOwed}
             salaryConfig={salaryConfig}
+            partnerSalaryPaid={partnerSalaryPaid}
             employees={employees}
           />
         </div>
