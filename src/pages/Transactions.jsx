@@ -747,7 +747,7 @@ export default function Transactions() {
     let pC=0, pD=0, bC=0, bD=0;
     txs.forEach(t => {
       if (t.accountType === 'Partner Personal') return; // reimbursement settlements — no balance effect
-      if (t.accountType === "Founder's Personal") {
+      if (t.accountType === 'Cash + Savings Account' || t.accountType === "Founder's Personal") {
         t.type === 'Credit' ? pC += +t.amount : pD += +t.amount;
       } else {
         t.type === 'Credit' ? bC += +t.amount : bD += +t.amount;
