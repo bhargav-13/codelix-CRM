@@ -48,7 +48,7 @@ function ProjectForm({v,onChange,employees=[]}){
         <FF label="Status"><select className="mac-select" value={v.status} onChange={e=>s('status',e.target.value)}>{PROJECT_STATUSES.map(x=><option key={x}>{x}</option>)}</select></FF>
         <FF label="Start Date"><input className="mac-input" type="date" value={v.startDate} onChange={e=>s('startDate',e.target.value)}/></FF>
         <FF label="Due Date"><input className="mac-input" type="date" value={v.dueDate} onChange={e=>s('dueDate',e.target.value)}/></FF>
-        <FF label="Project Valuation (₹)" required><input className="mac-input" type="number" value={v.valuation} onChange={e=>s('valuation',e.target.value)} placeholder="0"/></FF>
+        <FF label="Project Valuation (Including GST)" required><input className="mac-input" type="number" value={v.valuation} onChange={e=>s('valuation',e.target.value)} placeholder="0"/></FF>
         <FF label="Next Payment Due"><input className="mac-input" type="date" value={v.nextPaymentDue} onChange={e=>s('nextPaymentDue',e.target.value)}/></FF>
       </div>
 

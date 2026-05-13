@@ -161,6 +161,31 @@ const rowToForm = (t) => {
   };
 };
 
+// ─── NumInput — text input with comma formatting, no scroll-change ───────────
+
+function fmtInput(val) {
+  const str = String(val ?? '').replace(/,/g, '');
+  if (!str) return '';
+  const [int, dec] = str.split('.');
+  const formatted = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return dec !== undefined ? `${formatted}.${dec}` : formatted;
+}
+
+function NumInput({ value, onChange, placeholder, className, style }) {
+  return (
+    <input
+      className={className}
+      style={style}
+      type="text"
+      inputMode="numeric"
+      value={fmtInput(value)}
+      placeholder={placeholder}
+      onWheel={e => e.target.blur()}
+      onChange={e => onChange(e.target.value.replace(/,/g, '').replace(/[^0-9.]/g, ''))}
+    />
+  );
+}
+
 // ─── Small shared components ──────────────────────────────────────────────────
 
 const FF = ({ label, children, required }) => (
@@ -262,7 +287,7 @@ function TxFields({ form, onChange, partnerOutstanding, partnerReimburseOwed, sa
   const amountDate = (dateLabel = 'Date') => (
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
       <FF label="Amount (₹)" required>
-        <input className="mac-input" type="number" value={form.amount} onChange={e => s('amount', e.target.value)} placeholder="0"/>
+        <NumInput className="mac-input" value={form.amount} onChange={v => s('amount', v)} placeholder="0"/>
       </FF>
       <FF label={dateLabel} required>
         <input className="mac-input" type="date" value={form.date} onChange={e => s('date', e.target.value)}/>
@@ -419,12 +444,11 @@ function TxFields({ form, onChange, partnerOutstanding, partnerReimburseOwed, sa
 
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
           <FF label="Amount (₹)" required>
-            <input
+            <NumInput
               className="mac-input"
-              type="number"
               value={form.amount}
-              onChange={e => s('amount', e.target.value)}
-              placeholder={remaining ? String(remaining) : '0'}
+              onChange={v => s('amount', v)}
+              placeholder={remaining ? fmtInput(remaining) : '0'}
               style={{ borderColor: isOverpay ? '#FF3B30' : undefined }}
             />
             {isOverpay && <div style={{ fontSize:11, color:'#FF3B30', marginTop:4 }}>Exceeds remaining {fmt(remaining)}</div>}
@@ -1072,10 +1096,10 @@ export default function Transactions() {
       <Modal isOpen={showOB} onClose={() => setShowOB(false)} title="Set Opening Balance" size="sm">
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
           <FF label="Cash + Savings (₹)" required>
-            <input className="mac-input" type="number" value={obForm.cash} onChange={e => setObForm(b => ({ ...b, cash: +e.target.value }))}/>
+            <NumInput className="mac-input" value={obForm.cash || ''} onChange={v => setObForm(b => ({ ...b, cash: +v || 0 }))}/>
           </FF>
           <FF label="Company Bank (₹)" required>
-            <input className="mac-input" type="number" value={obForm.bank} onChange={e => setObForm(b => ({ ...b, bank: +e.target.value }))}/>
+            <NumInput className="mac-input" value={obForm.bank || ''} onChange={v => setObForm(b => ({ ...b, bank: +v || 0 }))}/>
           </FF>
         </div>
         <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20, paddingTop:16, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
@@ -1095,7 +1119,7 @@ export default function Transactions() {
                   {p.slice(0, 2).toUpperCase()}
                 </div>
                 <FF label={p} required>
-                  <input className="mac-input" type="number" value={salConfigForm[p] || ''} onChange={e => setSalConfigForm(c => ({ ...c, [p]: +e.target.value }))} placeholder="Monthly salary ₹"/>
+                  <NumInput className="mac-input" value={salConfigForm[p] || ''} onChange={v => setSalConfigForm(c => ({ ...c, [p]: +v || 0 }))} placeholder="Monthly salary ₹"/>
                 </FF>
               </div>
             );
