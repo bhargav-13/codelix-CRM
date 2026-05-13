@@ -437,6 +437,11 @@ export default function Projects(){
   const totalGstVal=gstProjs.reduce((s,p)=>s+(+p.valuation||0),0);
   const totalTaxable=gstProjs.reduce((s,p)=>s+gstBreakdown(p.valuation).taxable,0);
   const totalGst=totalGstVal-totalTaxable;
+  const gstOnPending=gstProjs.reduce((s,p)=>{
+    const paid=(p.payments||[]).reduce((a,py)=>a+(+py.amount||0),0);
+    return s+Math.round(Math.max(0,+p.valuation-paid)*18/118);
+  },0);
+  const pendingAfterGst=Math.max(0,(totalVal-totalRec)-gstOnPending);
 
   return(
     <div>
@@ -449,13 +454,14 @@ export default function Projects(){
 
       {loading ? <PageLoader /> : (
         <div className="page-body">
-          <div style={{display:'grid',gridTemplateColumns:'repeat(5,minmax(0,1fr))',gap:14}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:14}}>
             {[
               {label:'Total Projects',value:projs.length,bg:'rgba(0,113,227,0.08)',c:'#0071E3'},
               {label:'Total Value',value:fmt(totalVal),bg:'rgba(175,82,222,0.08)',c:'#AF52DE'},
               {label:'Received',value:fmt(totalRec),bg:'rgba(52,199,89,0.08)',c:'#34C759'},
               {label:'Pending',value:fmt(totalVal-totalRec),bg:'rgba(255,149,0,0.08)',c:'#FF9500'},
-              {label:'Taxable Amount',value:fmt(totalTaxable),bg:'rgba(255,204,0,0.08)',c:'#B8860B'},
+              {label:'GST Payable (18%)',value:fmt(totalGst),bg:'rgba(255,204,0,0.08)',c:'#B8860B'},
+              {label:'Pending After GST',value:fmt(pendingAfterGst),bg:'rgba(255,59,48,0.07)',c:'#FF3B30'},
             ].map(s=>(
               <div key={s.label} className="mac-card" style={{padding:'16px 18px',background:s.bg,borderColor:'rgba(0,0,0,0.06)'}}>
                 <div style={{fontSize:22,fontWeight:700,color:s.c,letterSpacing:'-0.6px'}}>{s.value}</div>
@@ -463,28 +469,6 @@ export default function Projects(){
               </div>
             ))}
           </div>
-          {gstProjs.length>0&&(
-            <div className="mac-card" style={{padding:'14px 18px',background:'rgba(255,204,0,0.06)',borderColor:'rgba(255,204,0,0.2)',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
-              <div style={{display:'flex',alignItems:'center',gap:8}}>
-                <div style={{fontSize:11,fontWeight:600,color:'#B8860B',textTransform:'uppercase',letterSpacing:'0.5px'}}>GST Summary</div>
-                <span style={{fontSize:11,color:'#AEAEB2'}}>({gstProjs.length} project{gstProjs.length>1?'s':''})</span>
-              </div>
-              <div style={{display:'flex',gap:24,flexWrap:'wrap'}}>
-                <div style={{textAlign:'center'}}>
-                  <div style={{fontSize:10.5,color:'#AEAEB2',marginBottom:2}}>Total Billed</div>
-                  <div style={{fontSize:13.5,fontWeight:700,color:'#1D1D1F',letterSpacing:'-0.3px'}}>{fmt(totalGstVal)}</div>
-                </div>
-                <div style={{textAlign:'center'}}>
-                  <div style={{fontSize:10.5,color:'#AEAEB2',marginBottom:2}}>Taxable Amount</div>
-                  <div style={{fontSize:13.5,fontWeight:700,color:'#34C759',letterSpacing:'-0.3px'}}>{fmt(totalTaxable)}</div>
-                </div>
-                <div style={{textAlign:'center'}}>
-                  <div style={{fontSize:10.5,color:'#AEAEB2',marginBottom:2}}>GST Payable (18%)</div>
-                  <div style={{fontSize:13.5,fontWeight:700,color:'#FF9500',letterSpacing:'-0.3px'}}>{fmt(totalGst)}</div>
-                </div>
-              </div>
-            </div>
-          )}
           <div style={{display:'flex',gap:10,alignItems:'center'}}>
             <div style={{flex:1,maxWidth:280}}><SearchBar value={search} onChange={setSearch} placeholder="Search projects…"/></div>
             <button onClick={()=>setShowFilters(f=>!f)} className={`mac-btn ${showFilters?'mac-btn-primary':'mac-btn-secondary'}`} style={{fontSize:13}}><Filter size={13}/> Filter</button>
