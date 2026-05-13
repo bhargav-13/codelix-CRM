@@ -7,6 +7,7 @@ import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { PageLoader } from '../components/ui/CodelixLoader';
 import { transactionsDB, settingsDB, employeesDB } from '../lib/db';
+import { fmtInput, NumInput } from '../lib/numInput';
 import { TRANSACTION_SOURCES, EXPENSE_CATEGORIES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
 import {
   Plus, Filter, ArrowUpRight, ArrowDownRight, Edit2, Trash2,
@@ -160,31 +161,6 @@ const rowToForm = (t) => {
     monthLabel:   t.monthLabel   || currentMonthLabel(),
   };
 };
-
-// ─── NumInput — text input with comma formatting, no scroll-change ───────────
-
-function fmtInput(val) {
-  const str = String(val ?? '').replace(/,/g, '');
-  if (!str) return '';
-  const [int, dec] = str.split('.');
-  const formatted = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return dec !== undefined ? `${formatted}.${dec}` : formatted;
-}
-
-function NumInput({ value, onChange, placeholder, className, style }) {
-  return (
-    <input
-      className={className}
-      style={style}
-      type="text"
-      inputMode="numeric"
-      value={fmtInput(value)}
-      placeholder={placeholder}
-      onWheel={e => e.target.blur()}
-      onChange={e => onChange(e.target.value.replace(/,/g, '').replace(/[^0-9.]/g, ''))}
-    />
-  );
-}
 
 // ─── Small shared components ──────────────────────────────────────────────────
 

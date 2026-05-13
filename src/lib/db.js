@@ -246,10 +246,11 @@ const toProj = r => ({
   dueDate:            r.due_date,
   status:             r.status,
   valuation:          r.valuation,
+  billingType:        r.billing_type        || 'Without GST',
   milestones:         r.milestones          || [],
   payments:           r.payments            || [],
   nextPaymentDue:     r.next_payment_due,
-  assignedEmployees:  r.assigned_employees  || [],  // [{id, name}]
+  assignedEmployees:  r.assigned_employees  || [],
 });
 
 const fromProj = p => ({
@@ -262,6 +263,7 @@ const fromProj = p => ({
   due_date:            p.dueDate            || null,
   status:              p.status,
   valuation:           p.valuation ? +p.valuation : null,
+  billing_type:        p.billingType        || 'Without GST',
   milestones:          p.milestones         || [],
   payments:            p.payments           || [],
   next_payment_due:    p.nextPaymentDue     || null,

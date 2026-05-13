@@ -6,6 +6,7 @@ import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { PageLoader } from '../components/ui/CodelixLoader';
 import { clientsDB } from '../lib/db';
+import { NumInput } from '../lib/numInput';
 import {
   PROJECT_TYPES, SOURCES, CLIENT_STATUSES, PRIORITIES, PARTNERS,
 } from '../data/mockData';
@@ -47,8 +48,8 @@ function ClientForm({ v, set }) {
       <FF label="Source"><select className="mac-select" value={v.source} onChange={e=>set('source',e.target.value)}>{SOURCES.map(s=><option key={s}>{s}</option>)}</select></FF>
       <FF label="Status"><select className="mac-select" value={v.status} onChange={e=>set('status',e.target.value)}>{CLIENT_STATUSES.map(s=><option key={s}>{s}</option>)}</select></FF>
       <FF label="Priority"><select className="mac-select" value={v.priority} onChange={e=>set('priority',e.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></FF>
-      <FF label="Proposal Value (₹)"><input className="mac-input" type="number" value={v.proposalValue} onChange={e=>set('proposalValue',e.target.value)} placeholder="0" /></FF>
-      <FF label="Final Price (₹)"><input className="mac-input" type="number" value={v.finalPrice} onChange={e=>set('finalPrice',e.target.value)} placeholder="0" /></FF>
+      <FF label="Proposal Value (₹)"><NumInput className="mac-input" value={v.proposalValue} onChange={v=>set('proposalValue',v)} placeholder="0"/></FF>
+      <FF label="Final Price (₹)"><NumInput className="mac-input" value={v.finalPrice} onChange={v=>set('finalPrice',v)} placeholder="0"/></FF>
       <FF label="Next Follow-up"><input className="mac-input" type="date" value={v.nextFollowup} onChange={e=>set('nextFollowup',e.target.value)} /></FF>
       <FF label="Created By"><select className="mac-select" value={v.createdBy} onChange={e=>set('createdBy',e.target.value)}>{PARTNERS.map(p=><option key={p}>{p}</option>)}</select></FF>
     </div>

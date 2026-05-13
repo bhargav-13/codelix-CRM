@@ -7,6 +7,7 @@ import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { PageLoader } from '../components/ui/CodelixLoader';
 import { employeesDB, transactionsDB } from '../lib/db';
+import { NumInput } from '../lib/numInput';
 import { supabaseAdmin, hasServiceRole } from '../lib/supabase';
 import { DEPARTMENTS, EMPLOYMENT_TYPES, SALARY_TYPES, PAYMENT_METHODS } from '../data/mockData';
 import { Plus, Edit2, Trash2, Filter, History, AlertCircle, Banknote, ChevronDown, ChevronRight, Phone, Mail, MapPin, Calendar, Clock, X, KeyRound, Copy, CheckCheck, ArrowRight } from 'lucide-react';
@@ -47,7 +48,7 @@ function EmpForm({v,s}){
       <FF label="Employment Type"><select className="mac-select" value={v.employmentType} onChange={e=>s('employmentType',e.target.value)}>{EMPLOYMENT_TYPES.map(t=><option key={t}>{t}</option>)}</select></FF>
       <FF label="Status"><select className="mac-select" value={v.status} onChange={e=>s('status',e.target.value)}>{['Active','Inactive','Left'].map(x=><option key={x}>{x}</option>)}</select></FF>
       <FF label="Salary Type"><select className="mac-select" value={v.salaryType} onChange={e=>s('salaryType',e.target.value)}>{SALARY_TYPES.map(x=><option key={x}>{x}</option>)}</select></FF>
-      <FF label="Salary Amount (₹)"><input className="mac-input" type="number" value={v.salaryAmount} onChange={e=>s('salaryAmount',e.target.value)} placeholder="0"/></FF>
+      <FF label="Salary Amount (₹)"><NumInput className="mac-input" value={v.salaryAmount} onChange={v=>s('salaryAmount',v)} placeholder="0"/></FF>
       <FF label="Payment Cycle"><select className="mac-select" value={v.paymentCycle} onChange={e=>s('paymentCycle',e.target.value)}>{['Monthly','Weekly','Custom'].map(x=><option key={x}>{x}</option>)}</select></FF>
       <FF label="UPI ID"><input className="mac-input" value={v.upiId} onChange={e=>s('upiId',e.target.value)} placeholder="name@upi"/></FF>
       <FF label="Bank Details"><input className="mac-input" value={v.bankDetails} onChange={e=>s('bankDetails',e.target.value)} placeholder="Account / IFSC (optional)"/></FF>
@@ -115,13 +116,11 @@ function SalaryForm({v, onChange, configuredSalary, totalPaid, salError, setSalE
       </FF>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14}}>
         <FF label={`Amount Paid (₹)${configuredSalary > 0 ? ` — max ₹${Number(remaining).toLocaleString('en-IN')}` : ''}`} required>
-          <input
+          <NumInput
             className="mac-input"
-            type="number"
             value={v.paid}
-            onChange={e=>s('paid',e.target.value)}
+            onChange={v=>s('paid',v)}
             placeholder="0"
-            max={configuredSalary > 0 ? remaining : undefined}
             style={salError ? {borderColor:'#FF3B30',background:'rgba(255,59,48,0.04)'} : {}}
           />
           {salError && <div style={{fontSize:11,color:'#FF3B30',marginTop:3,fontWeight:500}}>{salError}</div>}

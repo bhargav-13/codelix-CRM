@@ -6,13 +6,21 @@ import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { PageLoader } from '../components/ui/CodelixLoader';
 import { projectsDB, employeesDB } from '../lib/db';
+import { NumInput } from '../lib/numInput';
 import { PROJECT_TYPES, PROJECT_STATUSES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
-import { Plus, Edit2, Trash2, Filter, History, IndianRupee, ChevronDown, ChevronRight, User, Calendar } from 'lucide-react';
+import { Plus, Edit2, Trash2, Filter, History, IndianRupee, ChevronDown, ChevronRight, User, Calendar, Check, X as XIcon } from 'lucide-react';
 
 const today = new Date().toISOString().split('T')[0];
 const fmt = n => n != null ? '₹' + Number(n).toLocaleString('en-IN') : '—';
 
-const emptyProj = { projectName:'',clientName:'',companyName:'',projectType:'Website Development',handledBy:'',startDate:today,dueDate:'',status:'Pending',valuation:'',milestones:[],payments:[],nextPaymentDue:'',assignedEmployees:[] };
+const emptyProj = { projectName:'',clientName:'',companyName:'',projectType:'Website Development',handledBy:'',startDate:today,dueDate:'',status:'Pending',valuation:'',billingType:'Without GST',milestones:[],payments:[],nextPaymentDue:'',assignedEmployees:[] };
+
+const GST_RATE = 0.18;
+const gstBreakdown = val => {
+  const v = +val || 0;
+  const taxable = Math.round(v / (1 + GST_RATE));
+  return { taxable, gst: v - taxable };
+};
 const emptyPay  = { amount:'',date:today+'T10:00',method:'Bank Transfer',remark:'' };
 const emptyMs   = { label:'',percent:'' };
 
@@ -24,6 +32,27 @@ const FF=({label,children,required})=>(
     {children}
   </div>
 );
+
+function GstBreakdownLine({val}){
+  const {taxable,gst}=gstBreakdown(val);
+  return(
+    <div style={{fontSize:11,color:'#6E6E73',marginTop:5,display:'flex',gap:10}}>
+      <span>Taxable: <strong style={{color:'#1D1D1F'}}>₹{taxable.toLocaleString('en-IN')}</strong></span>
+      <span>GST 18%: <strong style={{color:'#FF9500'}}>₹{gst.toLocaleString('en-IN')}</strong></span>
+    </div>
+  );
+}
+
+function GstBreakdownDetail({val}){
+  const {taxable,gst}=gstBreakdown(val);
+  return(
+    <div style={{display:'flex',gap:10,justifyContent:'center',marginTop:10,paddingTop:10,borderTop:'1px solid rgba(0,0,0,0.06)'}}>
+      <span style={{fontSize:11.5,color:'#6E6E73'}}>Taxable: <strong style={{color:'#1D1D1F'}}>₹{taxable.toLocaleString('en-IN')}</strong></span>
+      <span style={{fontSize:11.5,color:'#6E6E73'}}>·</span>
+      <span style={{fontSize:11.5,color:'#6E6E73'}}>GST (18%): <strong style={{color:'#FF9500'}}>₹{gst.toLocaleString('en-IN')}</strong></span>
+    </div>
+  );
+}
 
 function ProjectForm({v,onChange,employees=[]}){
   const s=(k,val)=>onChange({...v,[k]:val});
@@ -46,9 +75,24 @@ function ProjectForm({v,onChange,employees=[]}){
         <FF label="Company Name"><input className="mac-input" value={v.companyName} onChange={e=>s('companyName',e.target.value)} placeholder="Company"/></FF>
         <FF label="Handled By"><select className="mac-select" value={v.handledBy} onChange={e=>s('handledBy',e.target.value)}><option value="">— Select Partner —</option>{PARTNERS.map(p=><option key={p}>{p}</option>)}</select></FF>
         <FF label="Status"><select className="mac-select" value={v.status} onChange={e=>s('status',e.target.value)}>{PROJECT_STATUSES.map(x=><option key={x}>{x}</option>)}</select></FF>
+        <FF label="Billing Type" required>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            {['With GST','Without GST'].map(t=>{
+              const active=v.billingType===t;
+              return(
+                <button key={t} type="button" onClick={()=>s('billingType',t)} style={{padding:'9px 10px',borderRadius:10,border:`1.5px solid ${active?'#0071E3':'rgba(0,0,0,0.1)'}`,background:active?'rgba(0,113,227,0.08)':'rgba(0,0,0,0.015)',cursor:'pointer',fontSize:12.5,fontWeight:active?600:400,color:active?'#0071E3':'#3C3C43',transition:'all 0.13s'}}>
+                  {t}{t==='With GST'&&<span style={{fontSize:10,marginLeft:4,color:active?'#0071E3':'#AEAEB2'}}>18%</span>}
+                </button>
+              );
+            })}
+          </div>
+        </FF>
         <FF label="Start Date"><input className="mac-input" type="date" value={v.startDate} onChange={e=>s('startDate',e.target.value)}/></FF>
         <FF label="Due Date"><input className="mac-input" type="date" value={v.dueDate} onChange={e=>s('dueDate',e.target.value)}/></FF>
-        <FF label="Project Valuation (Including GST)" required><input className="mac-input" type="number" value={v.valuation} onChange={e=>s('valuation',e.target.value)} placeholder="0"/></FF>
+        <FF label={v.billingType==='With GST'?'Total Value (Incl. 18% GST)':'Project Value'} required>
+          <NumInput className="mac-input" value={v.valuation} onChange={val=>s('valuation',val)} placeholder="0"/>
+          {v.billingType==='With GST'&&v.valuation&&<GstBreakdownLine val={v.valuation}/>}
+        </FF>
         <FF label="Next Payment Due"><input className="mac-input" type="date" value={v.nextPaymentDue} onChange={e=>s('nextPaymentDue',e.target.value)}/></FF>
       </div>
 
@@ -95,7 +139,7 @@ function ProjectForm({v,onChange,employees=[]}){
         <label style={{display:'block',fontSize:11.5,fontWeight:550,color:'#6E6E73',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.4px'}}>Payment Milestones</label>
         <div style={{display:'flex',gap:8,marginBottom:8}}>
           <input className="mac-input" style={{flex:1}} value={ms.label} onChange={e=>setMs(m=>({...m,label:e.target.value}))} placeholder="Label (e.g. 30% Advance)"/>
-          <input className="mac-input" style={{width:80}} type="number" value={ms.percent} onChange={e=>setMs(m=>({...m,percent:e.target.value}))} placeholder="%"/>
+          <NumInput className="mac-input" style={{width:80}} value={ms.percent} onChange={v=>setMs(m=>({...m,percent:v}))} placeholder="%"/>
           <button onClick={addMs} className="mac-btn mac-btn-secondary" style={{fontSize:13,flexShrink:0}}>Add</button>
         </div>
         {(v.milestones||[]).map((m,i)=>(
@@ -116,7 +160,7 @@ function PaymentForm({v,onChange}){
   const s=(k,val)=>onChange({...v,[k]:val});
   return(
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
-      <FF label="Amount (₹)" required><input className="mac-input" type="number" value={v.amount} onChange={e=>s('amount',e.target.value)} placeholder="0"/></FF>
+      <FF label="Amount (₹)" required><NumInput className="mac-input" value={v.amount} onChange={v=>s('amount',v)} placeholder="0"/></FF>
       <FF label="Date & Time"><input className="mac-input" type="datetime-local" value={v.date} onChange={e=>s('date',e.target.value)}/></FF>
       <FF label="Payment Method"><select className="mac-select" value={v.method} onChange={e=>s('method',e.target.value)}>{PAYMENT_METHODS.map(m=><option key={m}>{m}</option>)}</select></FF>
       <FF label="Remark"><input className="mac-input" value={v.remark} onChange={e=>s('remark',e.target.value)} placeholder="Optional note"/></FF>
@@ -124,12 +168,20 @@ function PaymentForm({v,onChange}){
   );
 }
 
-function ProjectDetail({proj,onEdit,onAddPayment,onClose}){
+function ProjectDetail({proj,onEdit,onAddPayment,onUpdatePayment,onDeletePayment,onClose}){
   const [showPay,setShowPay]=useState(true);
+  const [editIdx,setEditIdx]=useState(null);
+  const [editForm,setEditForm]=useState(null);
+  const [deleteConfirmIdx,setDeleteConfirmIdx]=useState(null);
   const paid=(proj.payments||[]).reduce((s,p)=>s+(+p.amount||0),0);
   const pct=proj.valuation?Math.round((paid/+proj.valuation)*100):0;
   const rem=Math.max(0,+proj.valuation-paid);
   const payStatus=pct>=100?'Completed':pct>0?'Partial':'Pending';
+
+  function startEdit(i,p){setEditIdx(i);setEditForm({...p,amount:String(p.amount)});}
+  function cancelEdit(){setEditIdx(null);setEditForm(null);}
+  function saveEdit(){if(!editForm.amount)return;onUpdatePayment(editIdx,{...editForm,amount:+editForm.amount});setEditIdx(null);setEditForm(null);}
+
   return(
     <div style={{display:'flex',flexDirection:'column',gap:16}}>
       <div style={{display:'flex',alignItems:'flex-start',gap:14}}>
@@ -169,7 +221,10 @@ function ProjectDetail({proj,onEdit,onAddPayment,onClose}){
       )}
       <div style={{padding:'14px 16px',borderRadius:14,background:'rgba(0,0,0,0.025)',border:'1px solid rgba(0,0,0,0.06)'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-          <span style={{fontSize:12.5,fontWeight:600,color:'#3C3C43'}}>Payment Progress</span>
+          <div style={{display:'flex',alignItems:'center',gap:7}}>
+            <span style={{fontSize:12.5,fontWeight:600,color:'#3C3C43'}}>Payment Progress</span>
+            {proj.billingType==='With GST'&&<Badge color="yellow">GST 18%</Badge>}
+          </div>
           <div style={{display:'flex',alignItems:'center',gap:8}}><Badge color={getStatusColor(payStatus)}>{payStatus}</Badge><span style={{fontSize:14,fontWeight:700,color:'#1D1D1F'}}>{pct}%</span></div>
         </div>
         <div style={{height:6,borderRadius:100,background:'rgba(0,0,0,0.08)',overflow:'hidden',marginBottom:12}}>
@@ -183,6 +238,7 @@ function ProjectDetail({proj,onEdit,onAddPayment,onClose}){
             </div>
           ))}
         </div>
+        {proj.billingType==='With GST'&&proj.valuation&&<GstBreakdownDetail val={proj.valuation}/>}
       </div>
       {(proj.milestones||[]).length>0&&(
         <div>
@@ -207,13 +263,53 @@ function ProjectDetail({proj,onEdit,onAddPayment,onClose}){
         </button>
         {showPay&&(
           <div style={{display:'flex',flexDirection:'column',gap:6}}>
-            {(proj.payments||[]).length===0?<p style={{fontSize:12,color:'#AEAEB2',textAlign:'center',padding:'12px 0'}}>No payments recorded</p>
-              :(proj.payments||[]).map((p,i)=>(
-                <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 12px',borderRadius:10,background:'rgba(52,199,89,0.06)',border:'1px solid rgba(52,199,89,0.12)'}}>
-                  <div><div style={{fontSize:12.5,fontWeight:500,color:'#1D1D1F'}}>{p.remark||'Payment'}</div><div style={{fontSize:10.5,color:'#AEAEB2',marginTop:1}}>{p.date} · {p.method}</div></div>
-                  <span style={{fontSize:13,fontWeight:680,color:'#34C759'}}>+{fmt(p.amount)}</span>
-                </div>
-              ))
+            {(proj.payments||[]).length===0
+              ? <p style={{fontSize:12,color:'#AEAEB2',textAlign:'center',padding:'12px 0'}}>No payments recorded</p>
+              : (proj.payments||[]).map((p,i)=> editIdx===i ? (
+                  /* ── inline edit row ── */
+                  <div key={i} style={{padding:'12px',borderRadius:10,background:'rgba(0,113,227,0.05)',border:'1px solid rgba(0,113,227,0.18)'}}>
+                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+                      <FF label="Amount (₹)">
+                        <NumInput className="mac-input" value={editForm.amount} onChange={v=>setEditForm(f=>({...f,amount:v}))} placeholder="0"/>
+                      </FF>
+                      <FF label="Date & Time">
+                        <input className="mac-input" type="datetime-local" value={editForm.date} onChange={e=>setEditForm(f=>({...f,date:e.target.value}))}/>
+                      </FF>
+                      <FF label="Method">
+                        <select className="mac-select" value={editForm.method} onChange={e=>setEditForm(f=>({...f,method:e.target.value}))}>
+                          {PAYMENT_METHODS.map(m=><option key={m}>{m}</option>)}
+                        </select>
+                      </FF>
+                      <FF label="Remark">
+                        <input className="mac-input" value={editForm.remark||''} onChange={e=>setEditForm(f=>({...f,remark:e.target.value}))} placeholder="Optional note"/>
+                      </FF>
+                    </div>
+                    <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
+                      <button onClick={cancelEdit} className="mac-btn mac-btn-secondary" style={{fontSize:12,padding:'5px 12px'}}><XIcon size={11}/> Cancel</button>
+                      <button onClick={saveEdit} className="mac-btn mac-btn-primary" style={{fontSize:12,padding:'5px 12px'}}><Check size={11}/> Save</button>
+                    </div>
+                  </div>
+                ) : deleteConfirmIdx===i ? (
+                  /* ── inline delete confirm ── */
+                  <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 12px',borderRadius:10,background:'rgba(255,59,48,0.06)',border:'1px solid rgba(255,59,48,0.18)'}}>
+                    <span style={{fontSize:12.5,color:'#FF3B30',fontWeight:500}}>Delete {fmt(p.amount)} payment?</span>
+                    <div style={{display:'flex',gap:6}}>
+                      <button onClick={()=>setDeleteConfirmIdx(null)} className="mac-btn mac-btn-secondary" style={{fontSize:12,padding:'4px 10px'}}>Cancel</button>
+                      <button onClick={()=>{onDeletePayment(i);setDeleteConfirmIdx(null);}} className="mac-btn" style={{fontSize:12,padding:'4px 10px',background:'#FF3B30',color:'#fff',border:'none',borderRadius:8,cursor:'pointer'}}>Delete</button>
+                    </div>
+                  </div>
+                ) : (
+                  /* ── normal display row ── */
+                  <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 12px',borderRadius:10,background:'rgba(52,199,89,0.06)',border:'1px solid rgba(52,199,89,0.12)'}}>
+                    <div><div style={{fontSize:12.5,fontWeight:500,color:'#1D1D1F'}}>{p.remark||'Payment'}</div><div style={{fontSize:10.5,color:'#AEAEB2',marginTop:1}}>{p.date} · {p.method}</div></div>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <span style={{fontSize:13,fontWeight:680,color:'#34C759'}}>+{fmt(p.amount)}</span>
+                      <button onClick={()=>startEdit(i,p)} style={{width:24,height:24,borderRadius:6,background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Edit2 size={11} color="#6E6E73"/></button>
+                      <button onClick={()=>setDeleteConfirmIdx(i)} style={{width:24,height:24,borderRadius:6,background:'rgba(255,59,48,0.08)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Trash2 size={11} color="#FF3B30"/></button>
+                    </div>
+                  </div>
+                )
+              )
             }
           </div>
         )}
@@ -307,13 +403,40 @@ export default function Projects(){
     try{
       const updated=await projectsDB.addPayment(payProjId,newPayments);
       setProjs(ps=>ps.map(p=>p.id===payProjId?updated:p));
+      setDetail(d=>d&&d.id===payProjId?updated:d);
     } catch(e){ console.error(e); }
     setSaving(false);
     setShowPay(false);setPayForm(emptyPay);
   }
 
+  async function updatePayment(idx,pay){
+    const proj=projs.find(p=>p.id===detail?.id);
+    if(!proj)return;
+    const newPayments=(proj.payments||[]).map((p,i)=>i===idx?pay:p);
+    try{
+      const updated=await projectsDB.addPayment(proj.id,newPayments);
+      setProjs(ps=>ps.map(p=>p.id===proj.id?updated:p));
+      setDetail(updated);
+    } catch(e){ console.error(e); }
+  }
+
+  async function deletePayment(idx){
+    const proj=projs.find(p=>p.id===detail?.id);
+    if(!proj)return;
+    const newPayments=(proj.payments||[]).filter((_,i)=>i!==idx);
+    try{
+      const updated=await projectsDB.addPayment(proj.id,newPayments);
+      setProjs(ps=>ps.map(p=>p.id===proj.id?updated:p));
+      setDetail(updated);
+    } catch(e){ console.error(e); }
+  }
+
   const totalVal=projs.reduce((s,p)=>s+(+p.valuation||0),0);
   const totalRec=projs.reduce((s,p)=>s+(p.payments||[]).reduce((a,py)=>a+(+py.amount||0),0),0);
+  const gstProjs=projs.filter(p=>p.billingType==='With GST');
+  const totalGstVal=gstProjs.reduce((s,p)=>s+(+p.valuation||0),0);
+  const totalTaxable=gstProjs.reduce((s,p)=>s+gstBreakdown(p.valuation).taxable,0);
+  const totalGst=totalGstVal-totalTaxable;
 
   return(
     <div>
@@ -326,12 +449,13 @@ export default function Projects(){
 
       {loading ? <PageLoader /> : (
         <div className="page-body">
-          <div className="rg-4">
+          <div style={{display:'grid',gridTemplateColumns:'repeat(5,minmax(0,1fr))',gap:14}}>
             {[
               {label:'Total Projects',value:projs.length,bg:'rgba(0,113,227,0.08)',c:'#0071E3'},
               {label:'Total Value',value:fmt(totalVal),bg:'rgba(175,82,222,0.08)',c:'#AF52DE'},
               {label:'Received',value:fmt(totalRec),bg:'rgba(52,199,89,0.08)',c:'#34C759'},
               {label:'Pending',value:fmt(totalVal-totalRec),bg:'rgba(255,149,0,0.08)',c:'#FF9500'},
+              {label:'Taxable Amount',value:fmt(totalTaxable),bg:'rgba(255,204,0,0.08)',c:'#B8860B'},
             ].map(s=>(
               <div key={s.label} className="mac-card" style={{padding:'16px 18px',background:s.bg,borderColor:'rgba(0,0,0,0.06)'}}>
                 <div style={{fontSize:22,fontWeight:700,color:s.c,letterSpacing:'-0.6px'}}>{s.value}</div>
@@ -339,6 +463,28 @@ export default function Projects(){
               </div>
             ))}
           </div>
+          {gstProjs.length>0&&(
+            <div className="mac-card" style={{padding:'14px 18px',background:'rgba(255,204,0,0.06)',borderColor:'rgba(255,204,0,0.2)',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <div style={{fontSize:11,fontWeight:600,color:'#B8860B',textTransform:'uppercase',letterSpacing:'0.5px'}}>GST Summary</div>
+                <span style={{fontSize:11,color:'#AEAEB2'}}>({gstProjs.length} project{gstProjs.length>1?'s':''})</span>
+              </div>
+              <div style={{display:'flex',gap:24,flexWrap:'wrap'}}>
+                <div style={{textAlign:'center'}}>
+                  <div style={{fontSize:10.5,color:'#AEAEB2',marginBottom:2}}>Total Billed</div>
+                  <div style={{fontSize:13.5,fontWeight:700,color:'#1D1D1F',letterSpacing:'-0.3px'}}>{fmt(totalGstVal)}</div>
+                </div>
+                <div style={{textAlign:'center'}}>
+                  <div style={{fontSize:10.5,color:'#AEAEB2',marginBottom:2}}>Taxable Amount</div>
+                  <div style={{fontSize:13.5,fontWeight:700,color:'#34C759',letterSpacing:'-0.3px'}}>{fmt(totalTaxable)}</div>
+                </div>
+                <div style={{textAlign:'center'}}>
+                  <div style={{fontSize:10.5,color:'#AEAEB2',marginBottom:2}}>GST Payable (18%)</div>
+                  <div style={{fontSize:13.5,fontWeight:700,color:'#FF9500',letterSpacing:'-0.3px'}}>{fmt(totalGst)}</div>
+                </div>
+              </div>
+            </div>
+          )}
           <div style={{display:'flex',gap:10,alignItems:'center'}}>
             <div style={{flex:1,maxWidth:280}}><SearchBar value={search} onChange={setSearch} placeholder="Search projects…"/></div>
             <button onClick={()=>setShowFilters(f=>!f)} className={`mac-btn ${showFilters?'mac-btn-primary':'mac-btn-secondary'}`} style={{fontSize:13}}><Filter size={13}/> Filter</button>
@@ -373,6 +519,7 @@ export default function Projects(){
                         <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap',marginBottom:3}}>
                           <span style={{fontSize:13.5,fontWeight:620,color:'#1D1D1F',letterSpacing:'-0.2px'}}>{p.projectName}</span>
                           <Badge color={getStatusColor(p.status)}>{p.status}</Badge>
+                          {p.billingType==='With GST'&&<Badge color="yellow">GST</Badge>}
                           {isOverdue&&<Badge color="red">Overdue</Badge>}
                         </div>
                         <div style={{fontSize:12,color:'#6E6E73'}}>{p.clientName} · {p.projectType}</div>
@@ -431,7 +578,14 @@ export default function Projects(){
       </Modal>
 
       <Modal isOpen={!!detail} onClose={()=>setDetail(null)} title="Project Details" size="lg">
-        {detail&&<ProjectDetail proj={detail} onClose={()=>setDetail(null)} onEdit={()=>{setEditProj(detail);setForm(detail);setDetail(null);setShowAdd(true);}} onAddPayment={()=>{setPayProjId(detail.id);setDetail(null);setShowPay(true);}}/>}
+        {detail&&<ProjectDetail
+          proj={detail}
+          onClose={()=>setDetail(null)}
+          onEdit={()=>{setEditProj(detail);setForm(detail);setDetail(null);setShowAdd(true);}}
+          onAddPayment={()=>{setPayProjId(detail.id);setShowPay(true);}}
+          onUpdatePayment={updatePayment}
+          onDeletePayment={deletePayment}
+        />}
       </Modal>
 
       <Modal isOpen={showPay} onClose={()=>setShowPay(false)} title="Add Payment Entry" size="sm">
