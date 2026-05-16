@@ -95,8 +95,9 @@ export default function Dashboard() {
 
   const { clients, txs, employees, projects, bal } = data;
 
-  const overdueFollowups = clients.filter(c => c.nextFollowup && c.nextFollowup < today);
-  const todayFollowups   = clients.filter(c => c.nextFollowup === today);
+  const isActive = c => c.status !== 'Closed Won' && c.status !== 'Closed Lost';
+  const overdueFollowups = clients.filter(c => isActive(c) && c.nextFollowup && c.nextFollowup < today);
+  const todayFollowups   = clients.filter(c => isActive(c) && c.nextFollowup === today);
   const hotClients       = clients.filter(c => c.status === 'Hot');
   const activeProjects   = projects.filter(p => p.status === 'In Progress');
   const activeEmployees  = employees.filter(e => e.status === 'Active');
