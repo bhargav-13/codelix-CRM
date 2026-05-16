@@ -68,7 +68,7 @@ function FollowupForm({ v, onChange }) {
 }
 
 function ClientDetail({ client, onClose, onEdit, onAddFollowup }) {
-  const isOverdue = client.nextFollowup && client.nextFollowup < today;
+  const isOverdue = client.nextFollowup && client.nextFollowup < today && client.status !== 'Closed Won' && client.status !== 'Closed Lost';
   const initials = client.clientName.split(' ').map(n=>n[0]).join('').slice(0,2);
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
@@ -171,6 +171,8 @@ export default function CRM() {
   const [loading, setLoading]     = useState(true);
   const [saving, setSaving]       = useState(false);
   const [search, setSearch]       = useState('');
+  const [statusTab, setStatusTab]   = useState('all');
+  const [priorityTab, setPriorityTab] = useState('all');
   const [filters, setFilters]     = useState({ status:'', priority:'', source:'' });
   const [showFilters, setShowFilters] = useState(false);
   const [detailClient, setDetailClient] = useState(null);
@@ -195,10 +197,12 @@ export default function CRM() {
   const filtered = useMemo(()=> clients.filter(c=>{
     const q = search.toLowerCase();
     return (!q||c.clientName.toLowerCase().includes(q)||c.companyName?.toLowerCase().includes(q)||c.email?.toLowerCase().includes(q))
+      && (statusTab==='all'||c.status===statusTab)
+      && (priorityTab==='all'||c.priority===priorityTab)
       && (!filters.status||c.status===filters.status)
       && (!filters.priority||c.priority===filters.priority)
       && (!filters.source||c.source===filters.source);
-  }), [clients,search,filters]);
+  }), [clients,search,statusTab,priorityTab,filters]);
 
   async function saveClient() {
     if (!formData.clientName || saving) return;
@@ -242,7 +246,7 @@ export default function CRM() {
     setShowFollowup(false); setFollowupData({date:today,remark:'',nextFollowup:''});
   }
 
-  const overdueCount = clients.filter(c=>c.nextFollowup&&c.nextFollowup<today).length;
+  const overdueCount = clients.filter(c=>c.nextFollowup&&c.nextFollowup<today&&c.status!=='Closed Won'&&c.status!=='Closed Lost').length;
 
   const TH = ({children}) => (
     <th style={{ textAlign:'left', padding:'10px 16px', fontSize:11, fontWeight:600, color:'#8E8E93', textTransform:'uppercase', letterSpacing:'0.5px', whiteSpace:'nowrap', borderBottom:'1px solid rgba(0,0,0,0.07)' }}>
@@ -273,6 +277,18 @@ export default function CRM() {
               <span style={{ fontSize:12.5, color:'#FF3B30', fontWeight:500 }}>{overdueCount} overdue follow-up{overdueCount>1?'s':''} — click a row to add entry</span>
             </div>
           )}
+          <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+            <div className="tab-bar">
+              {[['all','All'],...CLIENT_STATUSES.map(s=>[s,s])].map(([k,l])=>(
+                <button key={k} onClick={()=>setStatusTab(k)} className={`tab-item ${statusTab===k?'active':''}`}>{l}</button>
+              ))}
+            </div>
+            <div className="tab-bar">
+              {[['all','All'],...PRIORITIES.map(p=>[p,p])].map(([k,l])=>(
+                <button key={k} onClick={()=>setPriorityTab(k)} className={`tab-item ${priorityTab===k?'active':''}`}>{l}</button>
+              ))}
+            </div>
+          </div>
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
             <div style={{ flex:1, maxWidth:280 }}><SearchBar value={search} onChange={setSearch} placeholder="Search clients…" /></div>
             <button onClick={()=>setShowFilters(f=>!f)} className={`mac-btn ${showFilters||Object.values(filters).some(Boolean)?'mac-btn-primary':'mac-btn-secondary'}`} style={{ fontSize:13 }}>
@@ -309,7 +325,7 @@ export default function CRM() {
                   {filtered.length===0
                     ? <tr><td colSpan={9} style={{ textAlign:'center', padding:'48px 16px', color:'#AEAEB2', fontSize:13 }}>No clients found</td></tr>
                     : filtered.map(c=>{
-                      const isOverdue = c.nextFollowup && c.nextFollowup<today;
+                      const isOverdue = c.nextFollowup && c.nextFollowup<today && c.status!=='Closed Won' && c.status!=='Closed Lost';
                       return (
                         <tr key={c.id} className="table-row" style={{ cursor:'pointer' }} onClick={()=>setDetailClient(c)}>
                           <TD>
