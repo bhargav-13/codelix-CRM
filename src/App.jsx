@@ -10,6 +10,7 @@ import Employees from './pages/Employees';
 import Projects from './pages/Projects';
 import Credentials from './pages/Credentials';
 import ProjectUpdates from './pages/ProjectUpdates';
+import ExistingProjects from './pages/ExistingProjects';
 
 function AppContent() {
   const { user, loading, isEmployee } = useAuth();
@@ -43,7 +44,8 @@ function AppContent() {
         <Route path="/employees"    element={<Employees />} />
         <Route path="/projects"     element={<Projects />} />
         <Route path="/credentials"  element={<Credentials />} />
-        <Route path="/updates"      element={<ProjectUpdates />} />
+        <Route path="/updates"            element={<ProjectUpdates />} />
+        <Route path="/existing-projects" element={<ExistingProjects />} />
       </Routes>
     </Layout>
   );

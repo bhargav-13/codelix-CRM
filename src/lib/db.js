@@ -493,6 +493,73 @@ export const projectUpdatesDB = {
 };
 
 // ─────────────────────────────────────────────
+// EXISTING PROJECTS
+// ─────────────────────────────────────────────
+const toExistingProj = r => ({
+  id:              r.id,
+  projectName:     r.project_name,
+  clientName:      r.client_name,
+  companyName:     r.company_name,
+  projectType:     r.project_type,
+  finalValue:      r.final_value,
+  billingType:     r.billing_type || 'Without GST',
+  description:     r.description,
+  techStack:       r.tech_stack,
+  projectUrl:      r.project_url,
+  status:          r.status,
+  notes:           r.notes,
+  contactPerson:   r.contact_person,
+  phone:           r.phone,
+  email:           r.email,
+  whatsapp:        r.whatsapp,
+  city:            r.city,
+});
+
+const fromExistingProj = p => ({
+  project_name:   p.projectName,
+  client_name:    p.clientName    || null,
+  company_name:   p.companyName   || null,
+  project_type:   p.projectType   || null,
+  final_value:    p.finalValue    ? +p.finalValue : null,
+  billing_type:   p.billingType   || 'Without GST',
+  description:    p.description   || null,
+  tech_stack:     p.techStack     || null,
+  project_url:    p.projectUrl    || null,
+  status:         p.status        || 'Delivered',
+  notes:          p.notes         || null,
+  contact_person: p.contactPerson || null,
+  phone:          p.phone         || null,
+  email:          p.email         || null,
+  whatsapp:       p.whatsapp      || null,
+  city:           p.city          || null,
+});
+
+export const existingProjectsDB = {
+  getAll: async () => {
+    const { data, error } = await supabase
+      .from('existing_projects').select('*').order('created_at', { ascending: false });
+    if (error) throw error;
+    return (data || []).map(toExistingProj);
+  },
+  create: async (p) => {
+    const { data, error } = await supabase
+      .from('existing_projects').insert(fromExistingProj(p)).select().single();
+    if (error) throw error;
+    return toExistingProj(data);
+  },
+  update: async (id, p) => {
+    const { data, error } = await supabase
+      .from('existing_projects').update(fromExistingProj(p)).eq('id', id).select().single();
+    if (error) throw error;
+    return toExistingProj(data);
+  },
+  delete: async (id) => {
+    const { error } = await supabase.from('existing_projects').delete().eq('id', id);
+    if (error) throw error;
+  },
+};
+
+// ─────────────────────────────────────────────
 // FILE UPLOAD  (Supabase Storage — bucket: project-updates)
 // ─────────────────────────────────────────────
 export async function uploadProjectFile(file) {

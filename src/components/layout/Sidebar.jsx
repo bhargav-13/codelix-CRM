@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import codelixLogo from '../../assets/codelix.svg';
 import {
   LayoutDashboard, Users, IndianRupee, UserCheck,
-  FolderKanban, KeyRound, Newspaper,
+  FolderKanban, KeyRound, Newspaper, Archive,
 } from 'lucide-react';
 
 const partnerNavItems = [
@@ -15,6 +15,7 @@ const partnerNavItems = [
   { icon: FolderKanban,    label: 'Projects',         to: '/projects' },
   { icon: KeyRound,        label: 'Credentials',      to: '/credentials' },
   { icon: Newspaper,       label: 'Project Updates',  to: '/updates' },
+  { icon: Archive,         label: 'Past Projects',    to: '/existing-projects' },
 ];
 
 const employeeNavItems = [
