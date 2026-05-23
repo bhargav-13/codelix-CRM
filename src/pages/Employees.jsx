@@ -6,7 +6,8 @@ import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { PageLoader } from '../components/ui/CodelixLoader';
-import { employeesDB, transactionsDB } from '../lib/db';
+import { employeesDB, transactionsDB, auditDB } from '../lib/db';
+import { useAuth } from '../contexts/AuthContext';
 import { NumInput } from '../lib/numInput';
 import { supabaseAdmin, hasServiceRole } from '../lib/supabase';
 import { DEPARTMENTS, EMPLOYMENT_TYPES, SALARY_TYPES, PAYMENT_METHODS } from '../data/mockData';
@@ -207,6 +208,8 @@ function EmpDetail({emp,onEdit,onAddSalary,onClose}){
 
 export default function Employees(){
   const navigate = useNavigate();
+  const { user, employeeData } = useAuth();
+  const currentUser = employeeData?.name || user?.email || 'Unknown';
   const [emps,setEmps]         = useState([]);
   const [loading,setLoading]   = useState(true);
   const [saving,setSaving]     = useState(false);
@@ -231,7 +234,11 @@ export default function Employees(){
 
   const fetchEmps = useCallback(async () => {
     setLoading(true);
-    try { setEmps(await employeesDB.getAll()); } catch(e) { console.error(e); }
+    try {
+      const [empData, auditData] = await Promise.all([employeesDB.getAll(), auditDB.getAll('employee')]);
+      setEmps(empData);
+      setAuditLog(auditData);
+    } catch(e) { console.error(e); }
     setLoading(false);
   }, []);
 
@@ -250,14 +257,17 @@ export default function Employees(){
     setSaving(true);
     try{
       if(editEmp){
-        setAuditLog(l=>[{id:Date.now(),action:'Edited',name:editEmp.name,by:'Bhargav Shah',date:today},...l]);
         const updated=await employeesDB.update(editEmp.id,form);
         setEmps(es=>es.map(e=>e.id===editEmp.id?updated:e));
+        await auditDB.log({ entity:'employee', entityId:editEmp.id, action:'Edited', description:updated.name, by:currentUser });
+        setAuditLog(l=>[{ id:Date.now(), entity:'employee', entityId:editEmp.id, action:'Edited', description:updated.name, by:currentUser, createdAt:new Date().toISOString() },...l]);
       } else {
         const count=await employeesDB.count();
         const empId=`CLX${String(count+1).padStart(3,'0')}`;
         const created=await employeesDB.create({...form,empId,salaryHistory:[]});
         setEmps(es=>[...es,created]);
+        await auditDB.log({ entity:'employee', entityId:created.id, action:'Created', description:created.name, by:currentUser });
+        setAuditLog(l=>[{ id:Date.now(), entity:'employee', entityId:created.id, action:'Created', description:created.name, by:currentUser, createdAt:new Date().toISOString() },...l]);
 
         // ── Create login account if email provided ──────────────────
         // Uses admin.createUser() (service role key) which:
@@ -296,10 +306,15 @@ export default function Employees(){
 
   async function del(id){
     const e=emps.find(x=>x.id===id);
-    if(e)setAuditLog(l=>[{id:Date.now(),action:'Deleted',name:e.name,by:'Bhargav Shah',date:today},...l]);
     setEmps(es=>es.filter(x=>x.id!==id));
     if(detail?.id===id)setDetail(null);
-    try{ await employeesDB.delete(id); } catch(err){ console.error(err); await fetchEmps(); }
+    try{
+      await employeesDB.delete(id);
+      if(e){
+        await auditDB.log({ entity:'employee', entityId:id, action:'Deleted', description:e.name, by:currentUser });
+        setAuditLog(l=>[{ id:Date.now(), entity:'employee', entityId:id, action:'Deleted', description:e.name, by:currentUser, createdAt:new Date().toISOString() },...l]);
+      }
+    } catch(err){ console.error(err); await fetchEmps(); }
   }
 
   async function addSalary(){
@@ -479,12 +494,19 @@ export default function Employees(){
       <Modal isOpen={showAudit} onClose={()=>setShowAudit(false)} title="Audit Log" size="md">
         {auditLog.length===0?<p style={{textAlign:'center',color:'#AEAEB2',padding:'32px 0',fontSize:13}}>No entries yet</p>
           :<div style={{display:'flex',flexDirection:'column',gap:6}}>
-            {auditLog.map(e=>(
-              <div key={e.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',borderRadius:10,background:'rgba(0,0,0,0.025)'}}>
-                <div style={{display:'flex',gap:8,alignItems:'center'}}><Badge color={e.action==='Deleted'?'red':'blue'}>{e.action}</Badge><span style={{fontSize:12.5,color:'#1D1D1F'}}>{e.name}</span></div>
-                <span style={{fontSize:11,color:'#AEAEB2'}}>{e.date} · {e.by}</span>
-              </div>
-            ))}
+            {auditLog.map(e=>{
+              const badgeColor=e.action==='Deleted'?'red':e.action==='Created'?'green':'blue';
+              const ts=e.createdAt?new Date(e.createdAt).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+              return(
+                <div key={e.id} style={{padding:'10px 12px',borderRadius:10,background:'rgba(0,0,0,0.025)',border:'1px solid rgba(0,0,0,0.06)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
+                    <div style={{display:'flex',gap:8,alignItems:'center'}}><Badge color={badgeColor}>{e.action}</Badge><span style={{fontSize:12.5,color:'#1D1D1F',fontWeight:500}}>{e.description||e.name}</span></div>
+                    <span style={{fontSize:11,color:'#AEAEB2',whiteSpace:'nowrap',marginLeft:8}}>{ts}</span>
+                  </div>
+                  <span style={{fontSize:11,color:'#6E6E73'}}>Updated by: <strong>{e.by||'—'}</strong></span>
+                </div>
+              );
+            })}
           </div>
         }
       </Modal>

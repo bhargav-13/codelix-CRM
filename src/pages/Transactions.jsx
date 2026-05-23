@@ -6,7 +6,8 @@ import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { PageLoader } from '../components/ui/CodelixLoader';
-import { transactionsDB, settingsDB, employeesDB } from '../lib/db';
+import { transactionsDB, settingsDB, employeesDB, auditDB } from '../lib/db';
+import { useAuth } from '../contexts/AuthContext';
 import { fmtInput, NumInput } from '../lib/numInput';
 import { TRANSACTION_SOURCES, EXPENSE_CATEGORIES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
 import {
@@ -55,7 +56,6 @@ const DEFAULT_SALARY = { 'Bhargav Thesiya': 0, 'Manas Vadodaria': 0, 'Kushal Mun
 
 const fmt = n => '₹' + Number(n).toLocaleString('en-IN');
 const today = () => new Date().toISOString().split('T')[0];
-const nowStr = () => new Date().toISOString().replace('T', ' ').slice(0, 16);
 
 const currentMonthLabel = () =>
   new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' });
@@ -108,10 +108,10 @@ const formToRow = (form) => {
       return { ...base, type: 'Debit', accountType: form.accountType, subType: 'expense',
         category: form.category, paidTo: form.paidTo };
     case 'drawing':
-      return { ...base, type: 'Debit', accountType: 'Company Bank', subType: 'drawing',
+      return { ...base, type: 'Debit', accountType: form.accountType, subType: 'drawing',
         person: form.person, remark: form.remark || `Drawing — ${form.person}` };
     case 'return':
-      return { ...base, type: 'Credit', accountType: 'Company Bank', subType: 'drawing_return',
+      return { ...base, type: 'Credit', accountType: form.accountType, subType: 'drawing_return',
         person: form.person, remark: form.remark || `Return — ${form.person}` };
     case 'p_salary':
       return { ...base, type: 'Debit', accountType: form.accountType, subType: 'partner_salary',
@@ -338,6 +338,7 @@ function TxFields({ form, onChange, partnerOutstanding, partnerReimburseOwed, sa
             ⚠ {form.person} already has <strong>{fmt(outstanding)}</strong> outstanding
           </div>
         )}
+        {accountToggle}
         {amountDate()}
         <FF label="Purpose / Notes">
           <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="e.g. Travel, Emergency, Personal"/>
@@ -365,6 +366,7 @@ function TxFields({ form, onChange, partnerOutstanding, partnerReimburseOwed, sa
             ✓ {form.person} has no outstanding drawings
           </div>
         )}
+        {accountToggle}
         {amountDate()}
         <FF label="Notes">
           <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional"/>
@@ -701,6 +703,8 @@ function PartnerOverview({ txs, salaryConfig, onSetSalaries }) {
 
 export default function Transactions() {
   const navigate = useNavigate();
+  const { user, employeeData } = useAuth();
+  const currentUser = employeeData?.name || user?.email || 'Unknown';
   const [txs, setTxs]               = useState([]);
   const [openBal, setOpenBal]       = useState({ cash: 0, bank: 0 });
   const [loading, setLoading]       = useState(true);
@@ -726,16 +730,18 @@ export default function Transactions() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [txData, obData, salConf, empData] = await Promise.all([
+      const [txData, obData, salConf, empData, auditData] = await Promise.all([
         transactionsDB.getAll(),
         settingsDB.get('opening_balances'),
         settingsDB.get('partner_salary_config'),
         employeesDB.getAll(),
+        auditDB.getAll('transaction'),
       ]);
       setTxs(txData);
       if (obData) { setOpenBal(obData); setObForm(obData); }
       if (salConf) { setSalaryConfig(salConf); setSalConfigForm(salConf); }
       setEmployees(empData.filter(e => e.status === 'Active'));
+      setAuditLog(auditData);
     } catch (e) { console.error(e); }
     setLoading(false);
   }, []);
@@ -818,12 +824,15 @@ export default function Transactions() {
     const row = formToRow(form);
     try {
       if (editTx) {
-        setAuditLog(l => [{ id: Date.now(), action:'Edited', prev:editTx, next:row, by:'You', date:nowStr() }, ...l]);
         const updated = await transactionsDB.update(editTx.id, row);
         setTxs(ts => ts.map(t => t.id === editTx.id ? updated : t));
+        await auditDB.log({ entity:'transaction', entityId:editTx.id, action:'Edited', description:`${txDesc(updated)} — ${fmt(updated.amount)}`, by:currentUser, prevData:editTx, nextData:updated });
+        setAuditLog(l => [{ id:Date.now(), entity:'transaction', entityId:editTx.id, action:'Edited', description:`${txDesc(updated)} — ${fmt(updated.amount)}`, by:currentUser, createdAt:new Date().toISOString(), prevData:editTx, nextData:updated }, ...l]);
       } else {
         const created = await transactionsDB.create(row);
         setTxs(ts => [created, ...ts]);
+        await auditDB.log({ entity:'transaction', entityId:created.id, action:'Created', description:`${txDesc(created)} — ${fmt(created.amount)}`, by:currentUser, nextData:created });
+        setAuditLog(l => [{ id:Date.now(), entity:'transaction', entityId:created.id, action:'Created', description:`${txDesc(created)} — ${fmt(created.amount)}`, by:currentUser, createdAt:new Date().toISOString(), nextData:created }, ...l]);
       }
     } catch (e) { console.error(e); }
     setSaving(false);
@@ -832,9 +841,14 @@ export default function Transactions() {
 
   async function del(id) {
     const tx = txs.find(t => t.id === id);
-    if (tx) setAuditLog(l => [{ id: Date.now(), action:'Deleted', prev:tx, next:null, by:'You', date:nowStr() }, ...l]);
     setTxs(ts => ts.filter(t => t.id !== id));
-    try { await transactionsDB.delete(id); } catch (e) { console.error(e); await fetchAll(); }
+    try {
+      await transactionsDB.delete(id);
+      if (tx) {
+        await auditDB.log({ entity:'transaction', entityId:id, action:'Deleted', description:`${txDesc(tx)} — ${fmt(tx.amount)}`, by:currentUser, prevData:tx });
+        setAuditLog(l => [{ id:Date.now(), entity:'transaction', entityId:id, action:'Deleted', description:`${txDesc(tx)} — ${fmt(tx.amount)}`, by:currentUser, createdAt:new Date().toISOString(), prevData:tx }, ...l]);
+      }
+    } catch (e) { console.error(e); await fetchAll(); }
   }
 
   async function saveOB() {
@@ -1112,16 +1126,31 @@ export default function Transactions() {
         {auditLog.length === 0
           ? <p style={{ textAlign:'center', color:'#AEAEB2', padding:'32px 0', fontSize:13 }}>No audit entries yet</p>
           : <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            {auditLog.map(e => (
-              <div key={e.id} style={{ padding:'10px 12px', borderRadius:10, background:'rgba(0,0,0,0.025)', border:'1px solid rgba(0,0,0,0.06)' }}>
-                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
-                  <Badge color={e.action === 'Deleted' ? 'red' : 'blue'}>{e.action}</Badge>
-                  <span style={{ fontSize:11, color:'#AEAEB2' }}>{e.date} · {e.by}</span>
+            {auditLog.map(e => {
+              const badgeColor = e.action === 'Deleted' ? 'red' : e.action === 'Created' ? 'green' : 'blue';
+              const ts = e.createdAt ? new Date(e.createdAt).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
+              return (
+                <div key={e.id} style={{ padding:'10px 12px', borderRadius:10, background:'rgba(0,0,0,0.025)', border:'1px solid rgba(0,0,0,0.06)' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4 }}>
+                    <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                      <Badge color={badgeColor}>{e.action}</Badge>
+                      {e.description && <span style={{ fontSize:12.5, color:'#1D1D1F', fontWeight:500 }}>{e.description}</span>}
+                    </div>
+                    <span style={{ fontSize:11, color:'#AEAEB2', textAlign:'right', whiteSpace:'nowrap', marginLeft:8 }}>{ts}</span>
+                  </div>
+                  <div style={{ display:'flex', gap:12, marginTop:3 }}>
+                    <span style={{ fontSize:11, color:'#6E6E73' }}>Updated by: <strong>{e.by || '—'}</strong></span>
+                  </div>
+                  {e.prevData && e.nextData && (
+                    <div style={{ marginTop:6, display:'flex', gap:8, fontSize:11 }}>
+                      <span style={{ color:'#FF3B30' }}>Before: {fmt(e.prevData.amount)} · {e.prevData.accountType}</span>
+                      <span style={{ color:'#AEAEB2' }}>→</span>
+                      <span style={{ color:'#34C759' }}>After: {fmt(e.nextData.amount)} · {e.nextData.accountType}</span>
+                    </div>
+                  )}
                 </div>
-                {e.prev && <div style={{ fontSize:11, color:'#6E6E73' }}>Before: {fmt(e.prev.amount)} · {e.prev.type}</div>}
-                {e.next && <div style={{ fontSize:11, color:'#1D1D1F', marginTop:2 }}>After: {fmt(e.next.amount)} · {e.next.type}</div>}
-              </div>
-            ))}
+              );
+            })}
           </div>
         }
       </Modal>

@@ -158,6 +158,19 @@ create table if not exists project_updates (
 --   personal_exp (partner paid from personal, account_type = 'Partner Personal', excluded from company balance) |
 --   reimbursement (company pays partner back, account_type = 'Company Bank')
 
+-- ── AUDIT LOG ────────────────────────────────────────────────────
+create table if not exists audit_log (
+  id           uuid primary key default gen_random_uuid(),
+  entity       text not null,
+  entity_id    text,
+  action       text not null,
+  description  text,
+  by           text,
+  prev_data    jsonb,
+  next_data    jsonb,
+  created_at   timestamptz default now()
+);
+
 -- ================================================================
 -- ROW LEVEL SECURITY
 -- ================================================================
@@ -170,6 +183,7 @@ alter table credentials       enable row level security;
 alter table partner_salaries  enable row level security;
 alter table partner_drawings  enable row level security;
 alter table project_updates   enable row level security;
+alter table audit_log         enable row level security;
 
 create policy "Public full access" on clients           for all using (true) with check (true);
 create policy "Public full access" on transactions      for all using (true) with check (true);
@@ -180,3 +194,4 @@ create policy "Public full access" on credentials       for all using (true) wit
 create policy "Public full access" on partner_salaries  for all using (true) with check (true);
 create policy "Public full access" on partner_drawings  for all using (true) with check (true);
 create policy "Public full access" on project_updates  for all using (true) with check (true);
+create policy "Public full access" on audit_log        for all using (true) with check (true);

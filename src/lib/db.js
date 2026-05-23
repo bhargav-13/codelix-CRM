@@ -560,6 +560,43 @@ export const existingProjectsDB = {
 };
 
 // ─────────────────────────────────────────────
+// AUDIT LOG
+// ─────────────────────────────────────────────
+const toAudit = r => ({
+  id:          r.id,
+  entity:      r.entity,
+  entityId:    r.entity_id,
+  action:      r.action,
+  description: r.description,
+  by:          r.by,
+  prevData:    r.prev_data,
+  nextData:    r.next_data,
+  createdAt:   r.created_at,
+});
+
+export const auditDB = {
+  getAll: async (entity) => {
+    let q = supabase.from('audit_log').select('*').order('created_at', { ascending: false });
+    if (entity) q = q.eq('entity', entity);
+    const { data, error } = await q;
+    if (error) throw error;
+    return (data || []).map(toAudit);
+  },
+  log: async ({ entity, entityId, action, description, by, prevData, nextData }) => {
+    const { error } = await supabase.from('audit_log').insert({
+      entity,
+      entity_id:   entityId   || null,
+      action,
+      description: description || null,
+      by:          by          || null,
+      prev_data:   prevData    || null,
+      next_data:   nextData    || null,
+    });
+    if (error) console.error('Audit log error:', error);
+  },
+};
+
+// ─────────────────────────────────────────────
 // FILE UPLOAD  (Supabase Storage — bucket: project-updates)
 // ─────────────────────────────────────────────
 export async function uploadProjectFile(file) {

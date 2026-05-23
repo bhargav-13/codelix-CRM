@@ -5,7 +5,8 @@ import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { PageLoader } from '../components/ui/CodelixLoader';
-import { projectsDB, employeesDB } from '../lib/db';
+import { projectsDB, employeesDB, auditDB } from '../lib/db';
+import { useAuth } from '../contexts/AuthContext';
 import { NumInput } from '../lib/numInput';
 import { PROJECT_TYPES, PROJECT_STATUSES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
 import { Plus, Edit2, Trash2, Filter, History, IndianRupee, ChevronDown, ChevronRight, User, Calendar, Check, X as XIcon } from 'lucide-react';
@@ -332,6 +333,8 @@ const statusGradients={
 };
 
 export default function Projects(){
+  const { user, employeeData } = useAuth();
+  const currentUser = employeeData?.name || user?.email || 'Unknown';
   const [projs,setProjs]       = useState([]);
   const [loading,setLoading]   = useState(true);
   const [saving,setSaving]     = useState(false);
@@ -353,9 +356,10 @@ export default function Projects(){
   const fetchProjs = useCallback(async () => {
     setLoading(true);
     try {
-      const [ps, emps] = await Promise.all([projectsDB.getAll(), employeesDB.getAll()]);
+      const [ps, emps, auditData] = await Promise.all([projectsDB.getAll(), employeesDB.getAll(), auditDB.getAll('project')]);
       setProjs(ps);
       setEmployees(emps.filter(e => e.status === 'Active'));
+      setAuditLog(auditData);
     } catch(e) { console.error(e); }
     setLoading(false);
   }, []);
@@ -374,12 +378,15 @@ export default function Projects(){
     setSaving(true);
     try{
       if(editProj){
-        setAuditLog(l=>[{id:Date.now(),action:'Edited',name:editProj.projectName,by:'Bhargav Shah',date:today},...l]);
         const updated=await projectsDB.update(editProj.id,{...form,valuation:+form.valuation});
         setProjs(ps=>ps.map(p=>p.id===editProj.id?updated:p));
+        await auditDB.log({ entity:'project', entityId:editProj.id, action:'Edited', description:updated.projectName, by:currentUser });
+        setAuditLog(l=>[{ id:Date.now(), entity:'project', entityId:editProj.id, action:'Edited', description:updated.projectName, by:currentUser, createdAt:new Date().toISOString() },...l]);
       } else {
         const created=await projectsDB.create({...form,valuation:+form.valuation,payments:[],milestones:form.milestones||[]});
         setProjs(ps=>[...ps,created]);
+        await auditDB.log({ entity:'project', entityId:created.id, action:'Created', description:created.projectName, by:currentUser });
+        setAuditLog(l=>[{ id:Date.now(), entity:'project', entityId:created.id, action:'Created', description:created.projectName, by:currentUser, createdAt:new Date().toISOString() },...l]);
       }
     } catch(e){ console.error(e); }
     setSaving(false);
@@ -388,10 +395,15 @@ export default function Projects(){
 
   async function del(id){
     const p=projs.find(x=>x.id===id);
-    if(p)setAuditLog(l=>[{id:Date.now(),action:'Deleted',name:p.projectName,by:'Bhargav Shah',date:today},...l]);
     setProjs(ps=>ps.filter(x=>x.id!==id));
     if(detail?.id===id)setDetail(null);
-    try{ await projectsDB.delete(id); } catch(e){ console.error(e); await fetchProjs(); }
+    try{
+      await projectsDB.delete(id);
+      if(p){
+        await auditDB.log({ entity:'project', entityId:id, action:'Deleted', description:p.projectName, by:currentUser });
+        setAuditLog(l=>[{ id:Date.now(), entity:'project', entityId:id, action:'Deleted', description:p.projectName, by:currentUser, createdAt:new Date().toISOString() },...l]);
+      }
+    } catch(e){ console.error(e); await fetchProjs(); }
   }
 
   async function addPayment(){
@@ -583,12 +595,19 @@ export default function Projects(){
       <Modal isOpen={showAudit} onClose={()=>setShowAudit(false)} title="Project Audit Log" size="md">
         {auditLog.length===0?<p style={{textAlign:'center',color:'#AEAEB2',padding:'32px 0',fontSize:13}}>No entries yet</p>
           :<div style={{display:'flex',flexDirection:'column',gap:6}}>
-            {auditLog.map(e=>(
-              <div key={e.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',borderRadius:10,background:'rgba(0,0,0,0.025)'}}>
-                <div style={{display:'flex',gap:8,alignItems:'center'}}><Badge color={e.action==='Deleted'?'red':'blue'}>{e.action}</Badge><span style={{fontSize:12.5,color:'#1D1D1F'}}>{e.name}</span></div>
-                <span style={{fontSize:11,color:'#AEAEB2'}}>{e.date} · {e.by}</span>
-              </div>
-            ))}
+            {auditLog.map(e=>{
+              const badgeColor=e.action==='Deleted'?'red':e.action==='Created'?'green':'blue';
+              const ts=e.createdAt?new Date(e.createdAt).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+              return(
+                <div key={e.id} style={{padding:'10px 12px',borderRadius:10,background:'rgba(0,0,0,0.025)',border:'1px solid rgba(0,0,0,0.06)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
+                    <div style={{display:'flex',gap:8,alignItems:'center'}}><Badge color={badgeColor}>{e.action}</Badge><span style={{fontSize:12.5,color:'#1D1D1F',fontWeight:500}}>{e.description||e.name}</span></div>
+                    <span style={{fontSize:11,color:'#AEAEB2',whiteSpace:'nowrap',marginLeft:8}}>{ts}</span>
+                  </div>
+                  <span style={{fontSize:11,color:'#6E6E73'}}>Updated by: <strong>{e.by||'—'}</strong></span>
+                </div>
+              );
+            })}
           </div>
         }
       </Modal>

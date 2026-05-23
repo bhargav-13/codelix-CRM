@@ -5,7 +5,8 @@ import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { PageLoader } from '../components/ui/CodelixLoader';
-import { clientsDB } from '../lib/db';
+import { clientsDB, auditDB } from '../lib/db';
+import { useAuth } from '../contexts/AuthContext';
 import { NumInput } from '../lib/numInput';
 import {
   PROJECT_TYPES, SOURCES, CLIENT_STATUSES, PRIORITIES, PARTNERS,
@@ -167,6 +168,8 @@ function StatusCell({ c, onUpdate }) {
 }
 
 export default function CRM() {
+  const { user, employeeData } = useAuth();
+  const currentUser = employeeData?.name || user?.email || 'Unknown';
   const [clients, setClients]     = useState([]);
   const [loading, setLoading]     = useState(true);
   const [saving, setSaving]       = useState(false);
@@ -183,12 +186,18 @@ export default function CRM() {
   const [showFollowup, setShowFollowup] = useState(false);
   const [followupData, setFollowupData] = useState({ date:today, remark:'', nextFollowup:'' });
   const [followupCId, setFollowupCId]   = useState(null);
+  const [auditLog, setAuditLog]         = useState([]);
+  const [showAudit, setShowAudit]       = useState(false);
 
   const set = (k,v) => setFormData(f=>({...f,[k]:v}));
 
   const fetchClients = useCallback(async () => {
     setLoading(true);
-    try { setClients(await clientsDB.getAll()); } catch(e) { console.error(e); }
+    try {
+      const [clientData, auditData] = await Promise.all([clientsDB.getAll(), auditDB.getAll('client')]);
+      setClients(clientData);
+      setAuditLog(auditData);
+    } catch(e) { console.error(e); }
     setLoading(false);
   }, []);
 
@@ -209,9 +218,13 @@ export default function CRM() {
     setSaving(true);
     try {
       if (editClient) {
-        await clientsDB.update(editClient.id, formData);
+        const updated = await clientsDB.update(editClient.id, formData);
+        await auditDB.log({ entity:'client', entityId:editClient.id, action:'Edited', description:formData.clientName, by:currentUser });
+        setAuditLog(l=>[{ id:Date.now(), entity:'client', entityId:editClient.id, action:'Edited', description:formData.clientName, by:currentUser, createdAt:new Date().toISOString() },...l]);
       } else {
-        await clientsDB.create({ ...formData, createdDate: today, lastContacted: today });
+        const created = await clientsDB.create({ ...formData, createdBy: currentUser, createdDate: today, lastContacted: today });
+        await auditDB.log({ entity:'client', entityId:created.id, action:'Created', description:created.clientName, by:currentUser });
+        setAuditLog(l=>[{ id:Date.now(), entity:'client', entityId:created.id, action:'Created', description:created.clientName, by:currentUser, createdAt:new Date().toISOString() },...l]);
       }
       await fetchClients();
     } catch(e) { console.error(e); }
@@ -220,9 +233,14 @@ export default function CRM() {
   }
 
   async function deleteClient(id) {
+    const c = clients.find(x=>x.id===id);
     try { await clientsDB.delete(id); } catch(e) { console.error(e); }
     setClients(cs=>cs.filter(c=>c.id!==id));
     if (detailClient?.id===id) setDetailClient(null);
+    if (c) {
+      await auditDB.log({ entity:'client', entityId:id, action:'Deleted', description:c.clientName, by:currentUser });
+      setAuditLog(l=>[{ id:Date.now(), entity:'client', entityId:id, action:'Deleted', description:c.clientName, by:currentUser, createdAt:new Date().toISOString() },...l]);
+    }
   }
 
   async function updateStatus(clientId, status) {
@@ -263,9 +281,12 @@ export default function CRM() {
         title="CRM"
         subtitle={`${clients.length} clients${overdueCount>0?` · ${overdueCount} overdue`:''}`}
         actions={
-          <button onClick={()=>{setFormData(emptyClient);setEditClient(null);setShowAdd(true);}} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>
-            <Plus size={14}/> Add Client
-          </button>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={()=>setShowAudit(true)} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}><History size={13}/> Audit</button>
+            <button onClick={()=>{setFormData(emptyClient);setEditClient(null);setShowAdd(true);}} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>
+              <Plus size={14}/> Add Client
+            </button>
+          </div>
         }
       />
 
@@ -398,6 +419,26 @@ export default function CRM() {
       </Modal>
 
       <ConfirmDialog isOpen={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>deleteClient(deleteId)} title="Delete Client" message="This will permanently delete the client and all their follow-up history." />
+
+      <Modal isOpen={showAudit} onClose={()=>setShowAudit(false)} title="Client Audit Log" size="md">
+        {auditLog.length===0?<p style={{textAlign:'center',color:'#AEAEB2',padding:'32px 0',fontSize:13}}>No audit entries yet</p>
+          :<div style={{display:'flex',flexDirection:'column',gap:6}}>
+            {auditLog.map(e=>{
+              const badgeColor=e.action==='Deleted'?'red':e.action==='Created'?'green':'blue';
+              const ts=e.createdAt?new Date(e.createdAt).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+              return(
+                <div key={e.id} style={{padding:'10px 12px',borderRadius:10,background:'rgba(0,0,0,0.025)',border:'1px solid rgba(0,0,0,0.06)'}}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
+                    <div style={{display:'flex',gap:8,alignItems:'center'}}><Badge color={badgeColor}>{e.action}</Badge><span style={{fontSize:12.5,color:'#1D1D1F',fontWeight:500}}>{e.description}</span></div>
+                    <span style={{fontSize:11,color:'#AEAEB2',whiteSpace:'nowrap',marginLeft:8}}>{ts}</span>
+                  </div>
+                  <span style={{fontSize:11,color:'#6E6E73'}}>Updated by: <strong>{e.by||'—'}</strong></span>
+                </div>
+              );
+            })}
+          </div>
+        }
+      </Modal>
     </div>
   );
 }
