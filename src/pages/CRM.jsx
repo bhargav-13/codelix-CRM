@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 
 const today = new Date().toISOString().split('T')[0];
+const cutoff20 = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 const fmt = n => n ? '₹' + Number(n).toLocaleString('en-IN') : '—';
 
 const emptyClient = {
@@ -205,6 +206,9 @@ export default function CRM() {
 
   const filtered = useMemo(()=> clients.filter(c=>{
     const q = search.toLowerCase();
+    const isClosed = c.status === 'Closed Won' || c.status === 'Closed Lost';
+    const refDate = c.lastContacted || c.createdDate || today;
+    if (isClosed && refDate < cutoff20) return false;
     return (!q||c.clientName.toLowerCase().includes(q)||c.companyName?.toLowerCase().includes(q)||c.email?.toLowerCase().includes(q))
       && (statusTab==='all'||c.status===statusTab)
       && (priorityTab==='all'||c.priority===priorityTab)
