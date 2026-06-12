@@ -446,9 +446,6 @@ export default function Projects(){
   const totalVal=projs.reduce((s,p)=>s+(+p.valuation||0),0);
   const totalRec=projs.reduce((s,p)=>s+(p.payments||[]).reduce((a,py)=>a+(+py.amount||0),0),0);
   const gstProjs=projs.filter(p=>p.billingType==='With GST');
-  const totalGstVal=gstProjs.reduce((s,p)=>s+(+p.valuation||0),0);
-  const totalTaxable=gstProjs.reduce((s,p)=>s+gstBreakdown(p.valuation).taxable,0);
-  const totalGst=totalGstVal-totalTaxable;
   const gstOnPending=gstProjs.reduce((s,p)=>{
     const paid=(p.payments||[]).reduce((a,py)=>a+(+py.amount||0),0);
     return s+Math.round(Math.max(0,+p.valuation-paid)*18/118);
@@ -472,7 +469,7 @@ export default function Projects(){
               {label:'Total Value',value:fmt(totalVal),bg:'rgba(175,82,222,0.08)',c:'#AF52DE'},
               {label:'Received',value:fmt(totalRec),bg:'rgba(52,199,89,0.08)',c:'#34C759'},
               {label:'Pending',value:fmt(totalVal-totalRec),bg:'rgba(255,149,0,0.08)',c:'#FF9500'},
-              {label:'GST Payable (18%)',value:fmt(totalGst),bg:'rgba(255,204,0,0.08)',c:'#B8860B'},
+              {label:'GST Payable (18%)',value:fmt(gstOnPending),bg:'rgba(255,204,0,0.08)',c:'#B8860B'},
               {label:'Total Value After GST',value:fmt(pendingAfterGst),bg:'rgba(255,59,48,0.07)',c:'#FF3B30'},
             ].map(s=>(
               <div key={s.label} className="mac-card" style={{padding:'16px 18px',background:s.bg,borderColor:'rgba(0,0,0,0.06)'}}>
