@@ -84,6 +84,7 @@ const initForm = (txType = 'income') => ({
   paidTo: '',
   person: PARTNERS[0],
   monthLabel: currentMonthLabel(),
+  reimburseFrom: 'none',
 });
 
 const formToRow = (form) => {
@@ -126,7 +127,9 @@ const formToRow = (form) => {
         person: form.person, category: form.category, paidTo: form.paidTo,
         remark: form.remark || `${form.person} Personal Expense` };
     case 'reimburse':
-      return { ...base, type: 'Debit', accountType: 'Partner Personal', subType: 'reimbursement',
+      return { ...base, type: 'Debit',
+        accountType: form.reimburseFrom === 'none' ? 'Partner Personal' : form.reimburseFrom,
+        subType: 'reimbursement',
         person: form.person, remark: form.remark || `Reimbursement — ${form.person}` };
     default:
       return { ...base, type: 'Credit', accountType: form.accountType, subType: form.txType };
@@ -159,6 +162,9 @@ const rowToForm = (t) => {
     paidTo:       t.paidTo       || '',
     person:       t.person       || PARTNERS[0],
     monthLabel:   t.monthLabel   || currentMonthLabel(),
+    reimburseFrom: t.subType === 'reimbursement'
+      ? (t.accountType === 'Partner Personal' ? 'none' : (t.accountType || 'none'))
+      : 'none',
   };
 };
 
@@ -501,6 +507,18 @@ function TxFields({ form, onChange, partnerOutstanding, partnerReimburseOwed, sa
             ✓ No pending reimbursements for {form.person}
           </div>
         )}
+        <FF label="Paid From" required>
+          <div className="tab-bar">
+            {[...ACCOUNT_TYPES, 'None'].map(t => (
+              <button key={t} onClick={() => s('reimburseFrom', t === 'None' ? 'none' : t)} className={`tab-item ${(form.reimburseFrom === 'none' ? 'None' : form.reimburseFrom) === t ? 'active' : ''}`} style={{ flex:1, fontSize:11.5 }}>{t}</button>
+            ))}
+          </div>
+          {form.reimburseFrom === 'none' ? (
+            <div style={{ fontSize:11, color:'#AEAEB2', marginTop:5 }}>No account balance will be affected — just clears the owed amount.</div>
+          ) : (
+            <div style={{ fontSize:11, color:'#FF2D55', marginTop:5 }}>This will decrease the {form.reimburseFrom} balance by the amount paid.</div>
+          )}
+        </FF>
         {amountDate('Date Paid')}
         <FF label="Payment Method">
           <select className="mac-select" value={form.paymentMethod} onChange={e => s('paymentMethod', e.target.value)}>
