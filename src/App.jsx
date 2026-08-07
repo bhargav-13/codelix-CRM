@@ -44,7 +44,6 @@ function AppContent() {
         <Route path="/employees"    element={<Employees />} />
         <Route path="/projects"     element={<Projects />} />
         <Route path="/credentials"  element={<Credentials />} />
-        <Route path="/updates"            element={<ProjectUpdates />} />
         <Route path="/existing-projects" element={<ExistingProjects />} />
       </Routes>
     </Layout>

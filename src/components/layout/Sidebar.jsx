@@ -14,7 +14,6 @@ const partnerNavItems = [
   { icon: UserCheck,       label: 'Employees',        to: '/employees' },
   { icon: FolderKanban,    label: 'Projects',         to: '/projects' },
   { icon: KeyRound,        label: 'Credentials',      to: '/credentials' },
-  { icon: Newspaper,       label: 'Project Updates',  to: '/updates' },
   { icon: Archive,         label: 'Past Projects',    to: '/existing-projects' },
 ];
 
