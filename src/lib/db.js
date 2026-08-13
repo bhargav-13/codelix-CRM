@@ -560,6 +560,164 @@ export const existingProjectsDB = {
 };
 
 // ─────────────────────────────────────────────
+// TASKS / TODO  (Kanban board)
+// ─────────────────────────────────────────────
+const toTask = r => ({
+  id:          r.id,
+  taskNo:      r.task_no,
+  title:       r.title,
+  description: r.description,
+  type:        r.type,
+  status:      r.status,
+  priority:    r.priority,
+  assignees:   r.assignees   || [],
+  reporter:    r.reporter,
+  dueDate:     r.due_date,
+  labels:      r.labels      || [],
+  projectName: r.project_name,
+  comments:    r.comments    || [],
+  attachments: r.attachments || [],
+  sortOrder:   r.sort_order,
+  createdAt:   r.created_at,
+});
+
+const fromTask = t => ({
+  task_no:      t.taskNo ?? null,
+  title:        t.title,
+  description:  t.description || null,
+  type:         t.type        || 'Task',
+  status:       t.status      || 'Backlog',
+  priority:     t.priority    || 'Medium',
+  assignees:    t.assignees   || [],
+  reporter:     t.reporter    || null,
+  due_date:     t.dueDate     || null,
+  labels:       t.labels      || [],
+  project_name: t.projectName || null,
+  comments:     t.comments    || [],
+  attachments:  t.attachments || [],
+  sort_order:   t.sortOrder ?? 0,
+});
+
+export const tasksDB = {
+  getAll: async () => {
+    const { data, error } = await supabase
+      .from('tasks').select('*').order('sort_order', { ascending: true }).order('created_at', { ascending: true });
+    if (error) throw error;
+    return (data || []).map(toTask);
+  },
+  create: async (t) => {
+    const { data, error } = await supabase
+      .from('tasks').insert(fromTask(t)).select().single();
+    if (error) throw error;
+    return toTask(data);
+  },
+  update: async (id, t) => {
+    const { data, error } = await supabase
+      .from('tasks').update(fromTask(t)).eq('id', id).select().single();
+    if (error) throw error;
+    return toTask(data);
+  },
+  // Lightweight patch used by drag-and-drop (status + ordering only)
+  move: async (id, status, sortOrder) => {
+    const { data, error } = await supabase
+      .from('tasks').update({ status, sort_order: sortOrder }).eq('id', id).select().single();
+    if (error) throw error;
+    return toTask(data);
+  },
+  patch: async (id, patch) => {
+    const { data, error } = await supabase
+      .from('tasks').update(patch).eq('id', id).select().single();
+    if (error) throw error;
+    return toTask(data);
+  },
+  delete: async (id) => {
+    const { error } = await supabase.from('tasks').delete().eq('id', id);
+    if (error) throw error;
+  },
+};
+
+// ─────────────────────────────────────────────
+// CHAT (DMs + Groups)
+// ─────────────────────────────────────────────
+const toChannel = r => ({
+  id:                 r.id,
+  name:               r.name,
+  type:               r.type || 'group',
+  members:            r.members || [],
+  createdBy:          r.created_by,
+  lastMessageAt:      r.last_message_at,
+  lastMessagePreview: r.last_message_preview,
+  createdAt:          r.created_at,
+});
+
+const toMessage = r => ({
+  id:          r.id,
+  channelId:   r.channel_id,
+  senderId:    r.sender_id,
+  senderName:  r.sender_name,
+  senderKind:  r.sender_kind,
+  text:        r.text,
+  attachments: r.attachments || [],
+  createdAt:   r.created_at,
+});
+
+export const chatDB = {
+  getChannels: async () => {
+    const { data, error } = await supabase
+      .from('chat_channels').select('*').order('last_message_at', { ascending: false, nullsFirst: false });
+    if (error) throw error;
+    return (data || []).map(toChannel);
+  },
+  createChannel: async ({ name, type, members, createdBy }) => {
+    const { data, error } = await supabase
+      .from('chat_channels').insert({ name: name || null, type, members: members || [], created_by: createdBy || null }).select().single();
+    if (error) throw error;
+    return toChannel(data);
+  },
+  updateMembers: async (id, members) => {
+    const { data, error } = await supabase
+      .from('chat_channels').update({ members }).eq('id', id).select().single();
+    if (error) throw error;
+    return toChannel(data);
+  },
+  deleteChannel: async (id) => {
+    const { error } = await supabase.from('chat_channels').delete().eq('id', id);
+    if (error) throw error;
+  },
+  getMessages: async (channelId) => {
+    const { data, error } = await supabase
+      .from('chat_messages').select('*').eq('channel_id', channelId).order('created_at', { ascending: true });
+    if (error) throw error;
+    return (data || []).map(toMessage);
+  },
+  sendMessage: async ({ channelId, senderId, senderName, senderKind, text, attachments }) => {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .insert({ channel_id: channelId, sender_id: senderId, sender_name: senderName, sender_kind: senderKind, text: text || null, attachments: attachments || [] })
+      .select().single();
+    if (error) throw error;
+    const preview = text?.trim() ? text.trim().slice(0, 80) : (attachments?.length ? `📎 ${attachments.length} attachment${attachments.length > 1 ? 's' : ''}` : '');
+    await supabase.from('chat_channels').update({ last_message_at: data.created_at, last_message_preview: preview }).eq('id', channelId);
+    return toMessage(data);
+  },
+  deleteMessage: async (id) => {
+    const { error } = await supabase.from('chat_messages').delete().eq('id', id);
+    if (error) throw error;
+  },
+  // One subscription for every incoming message across all of the user's
+  // channels — callers filter by channel_id themselves (membership can
+  // change, and per-channel subscriptions would need constant re-wiring).
+  subscribeToAll: (onInsert) => {
+    const sub = supabase
+      .channel('chat_messages_all')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' },
+        payload => onInsert(toMessage(payload.new)))
+      .subscribe();
+    return () => supabase.removeChannel(sub);
+  },
+};
+
+// ─────────────────────────────────────────────
 // AUDIT LOG
 // ─────────────────────────────────────────────
 const toAudit = r => ({

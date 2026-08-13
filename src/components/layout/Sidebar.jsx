@@ -4,7 +4,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import codelixLogo from '../../assets/codelix.svg';
 import {
   LayoutDashboard, Users, IndianRupee, UserCheck,
-  FolderKanban, KeyRound, Newspaper, Archive,
+  FolderKanban, KeyRound, SquareKanban, Archive, MessageSquare, Settings as SettingsIcon,
 } from 'lucide-react';
 
 const partnerNavItems = [
@@ -13,12 +13,16 @@ const partnerNavItems = [
   { icon: IndianRupee,     label: 'Transactions',     to: '/transactions' },
   { icon: UserCheck,       label: 'Employees',        to: '/employees' },
   { icon: FolderKanban,    label: 'Projects',         to: '/projects' },
+  { icon: SquareKanban,    label: 'Tasks / Todo',     to: '/tasks' },
+  { icon: MessageSquare,   label: 'Chat',             to: '/chat' },
   { icon: KeyRound,        label: 'Credentials',      to: '/credentials' },
   { icon: Archive,         label: 'Past Projects',    to: '/existing-projects' },
+  { icon: SettingsIcon,    label: 'Settings',         to: '/settings' },
 ];
 
 const employeeNavItems = [
-  { icon: Newspaper, label: 'Project Updates', to: '/updates' },
+  { icon: SquareKanban,  label: 'My Tasks', to: '/tasks' },
+  { icon: MessageSquare, label: 'Chat',     to: '/chat' },
 ];
 
 // Derive a display name from a partner email, e.g. "bhargav.codelix@gmail.com" → "Bhargav"

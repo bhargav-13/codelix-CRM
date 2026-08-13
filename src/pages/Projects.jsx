@@ -5,7 +5,7 @@ import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { PageLoader } from '../components/ui/CodelixLoader';
-import { projectsDB, employeesDB, auditDB } from '../lib/db';
+import { projectsDB, existingProjectsDB, employeesDB, auditDB } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
 import { NumInput } from '../lib/numInput';
 import { PROJECT_TYPES, PROJECT_STATUSES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
@@ -360,6 +360,9 @@ export default function Projects(){
       setProjs(ps);
       setEmployees(emps.filter(e => e.status === 'Active'));
       setAuditLog(auditData);
+      // Sweep: migrate any project that's already fully paid but never got
+      // moved (e.g. an earlier attempt failed and was never retried).
+      for (const p of ps) await moveToPastIfComplete(p);
     } catch(e) { console.error(e); }
     setLoading(false);
   }, []);
@@ -382,6 +385,7 @@ export default function Projects(){
         setProjs(ps=>ps.map(p=>p.id===editProj.id?updated:p));
         await auditDB.log({ entity:'project', entityId:editProj.id, action:'Edited', description:updated.projectName, by:currentUser });
         setAuditLog(l=>[{ id:Date.now(), entity:'project', entityId:editProj.id, action:'Edited', description:updated.projectName, by:currentUser, createdAt:new Date().toISOString() },...l]);
+        await moveToPastIfComplete(updated);
       } else {
         const created=await projectsDB.create({...form,valuation:+form.valuation,payments:[],milestones:form.milestones||[]});
         setProjs(ps=>[...ps,created]);
@@ -406,6 +410,33 @@ export default function Projects(){
     } catch(e){ console.error(e); await fetchProjs(); }
   }
 
+  // When a project's payments reach 100% of its valuation, graduate it out of
+  // the active Projects list into Past Projects automatically.
+  async function moveToPastIfComplete(proj){
+    if(!proj||!(+proj.valuation>0))return false;
+    const paid=(proj.payments||[]).reduce((s,p)=>s+(+p.amount||0),0);
+    const pct=(paid/+proj.valuation)*100;
+    if(pct<100)return false;
+    try{
+      await existingProjectsDB.create({
+        projectName: proj.projectName,
+        clientName:  proj.clientName,
+        companyName: proj.companyName,
+        projectType: proj.projectType,
+        finalValue:  proj.valuation,
+        billingType: proj.billingType,
+        status: 'Delivered',
+        notes: `Auto-moved from Projects on ${new Date().toLocaleDateString('en-IN')} after reaching 100% payment (${fmt(paid)} of ${fmt(proj.valuation)} received across ${(proj.payments||[]).length} payment${(proj.payments||[]).length===1?'':'s'}). Handled by: ${proj.handledBy||'—'}.`,
+      });
+      await projectsDB.delete(proj.id);
+      setProjs(ps=>ps.filter(p=>p.id!==proj.id));
+      setDetail(d=>d&&d.id===proj.id?null:d);
+      await auditDB.log({ entity:'project', entityId:proj.id, action:'Completed', description:`${proj.projectName} — fully paid, moved to Past Projects`, by:currentUser });
+      setAuditLog(l=>[{ id:Date.now(), entity:'project', entityId:proj.id, action:'Completed', description:`${proj.projectName} — fully paid, moved to Past Projects`, by:currentUser, createdAt:new Date().toISOString() },...l]);
+      return true;
+    } catch(e){ console.error(e); return false; }
+  }
+
   async function addPayment(){
     if(!payForm.amount||saving)return;
     setSaving(true);
@@ -416,6 +447,7 @@ export default function Projects(){
       const updated=await projectsDB.addPayment(payProjId,newPayments);
       setProjs(ps=>ps.map(p=>p.id===payProjId?updated:p));
       setDetail(d=>d&&d.id===payProjId?updated:d);
+      await moveToPastIfComplete(updated);
     } catch(e){ console.error(e); }
     setSaving(false);
     setShowPay(false);setPayForm(emptyPay);
@@ -429,6 +461,7 @@ export default function Projects(){
       const updated=await projectsDB.addPayment(proj.id,newPayments);
       setProjs(ps=>ps.map(p=>p.id===proj.id?updated:p));
       setDetail(updated);
+      await moveToPastIfComplete(updated);
     } catch(e){ console.error(e); }
   }
 

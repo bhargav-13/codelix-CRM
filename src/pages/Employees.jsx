@@ -11,7 +11,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { NumInput } from '../lib/numInput';
 import { supabaseAdmin, hasServiceRole } from '../lib/supabase';
 import { DEPARTMENTS, EMPLOYMENT_TYPES, SALARY_TYPES, PAYMENT_METHODS } from '../data/mockData';
-import { Plus, Edit2, Trash2, Filter, History, AlertCircle, Banknote, ChevronDown, ChevronRight, Phone, Mail, MapPin, Calendar, Clock, X, KeyRound, Copy, CheckCheck, ArrowRight } from 'lucide-react';
+import { Plus, Edit2, Trash2, Filter, History, AlertCircle, Banknote, ChevronDown, ChevronRight, Phone, Mail, MapPin, Calendar, Clock, X, KeyRound, Copy, CheckCheck, ArrowRight, Power } from 'lucide-react';
 
 const DEFAULT_PASSWORD = 'Codelix@1234';
 const today = new Date().toISOString().split('T')[0];
@@ -304,11 +304,32 @@ export default function Employees(){
     try{ await navigator.clipboard.writeText(DEFAULT_PASSWORD); setCopied(true); setTimeout(()=>setCopied(false),2000); } catch{}
   }
 
+  async function toggleStatus(id){
+    const e=emps.find(x=>x.id===id);
+    if(!e)return;
+    const newStatus=e.status==='Active'?'Inactive':'Active';
+    setEmps(es=>es.map(x=>x.id===id?{...x,status:newStatus}:x));
+    try{
+      const updated=await employeesDB.update(id,{...e,status:newStatus});
+      setEmps(es=>es.map(x=>x.id===id?updated:x));
+      await auditDB.log({ entity:'employee', entityId:id, action:newStatus==='Active'?'Activated':'Deactivated', description:e.name, by:currentUser });
+      setAuditLog(l=>[{ id:Date.now(), entity:'employee', entityId:id, action:newStatus==='Active'?'Activated':'Deactivated', description:e.name, by:currentUser, createdAt:new Date().toISOString() },...l]);
+    } catch(err){ console.error(err); setEmps(es=>es.map(x=>x.id===id?e:x)); }
+  }
+
   async function del(id){
     const e=emps.find(x=>x.id===id);
     setEmps(es=>es.filter(x=>x.id!==id));
     if(detail?.id===id)setDetail(null);
     try{
+      // Revoke login access too — otherwise a deleted employee keeps a
+      // working account that (having no matching employee row) would be
+      // treated as a partner with full app access on next sign-in.
+      if(e?.email && hasServiceRole){
+        const { data } = await supabaseAdmin.auth.admin.listUsers();
+        const match = data?.users?.find(u=>u.email===e.email);
+        if(match) await supabaseAdmin.auth.admin.deleteUser(match.id);
+      }
       await employeesDB.delete(id);
       if(e){
         await auditDB.log({ entity:'employee', entityId:id, action:'Deleted', description:e.name, by:currentUser });
@@ -423,6 +444,9 @@ export default function Employees(){
                         </div>
                       </div>
                       <div onClick={ev=>ev.stopPropagation()} style={{display:'flex',gap:3}}>
+                        {e.status!=='Left'&&(
+                          <button onClick={()=>toggleStatus(e.id)} title={e.status==='Active'?'Deactivate':'Activate'} style={{width:26,height:26,borderRadius:7,background:e.status==='Active'?'rgba(255,149,0,0.08)':'rgba(52,199,89,0.08)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Power size={12} color={e.status==='Active'?'#FF9500':'#34C759'}/></button>
+                        )}
                         <button onClick={()=>{setEditEmp(e);setForm(e);setShowAdd(true);}} style={{width:26,height:26,borderRadius:7,background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Edit2 size={12} color="#6E6E73"/></button>
                         <button onClick={()=>setDeleteId(e.id)} style={{width:26,height:26,borderRadius:7,background:'rgba(255,59,48,0.08)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Trash2 size={12} color="#FF3B30"/></button>
                       </div>
