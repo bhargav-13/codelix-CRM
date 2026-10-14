@@ -3,8 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Mail, Lock, Eye, EyeOff, AlertCircle, Loader2 } from 'lucide-react';
 
 export default function Login() {
-  const { login, signUp } = useAuth();
-  const [mode, setMode]       = useState('signin');   // 'signin' | 'signup'
+  const { login } = useAuth();
   const [email, setEmail]     = useState('');
   const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
@@ -17,9 +16,7 @@ export default function Login() {
     setError('');
     setLoading(true);
 
-    const { error: err } = mode === 'signin'
-      ? await login(email.trim(), password)
-      : await signUp(email.trim(), password);
+    const { error: err } = await login(email.trim(), password);
 
     if (err) {
       setError(err.message || 'Something went wrong. Please try again.');
@@ -70,7 +67,7 @@ export default function Login() {
             Codelix CRM
           </h1>
           <p style={{ fontSize:13.5, color:'#8E8E93', marginTop:6 }}>
-            {mode === 'signin' ? 'Sign in to your account' : 'Create your account'}
+            Sign in to your account
           </p>
         </div>
 
@@ -127,7 +124,7 @@ export default function Login() {
                 type={showPass ? 'text' : 'password'}
                 value={password}
                 onChange={e => { setPassword(e.target.value); setError(''); }}
-                placeholder={mode === 'signin' ? '••••••••' : 'Min. 6 characters'}
+                placeholder="••••••••"
                 required
                 style={{
                   width:'100%', boxSizing:'border-box',
@@ -172,30 +169,11 @@ export default function Login() {
             }}
           >
             {loading
-              ? <><Loader2 size={16} style={{ animation:'spin 0.8s linear infinite' }}/> {mode === 'signin' ? 'Signing in…' : 'Creating account…'}</>
-              : mode === 'signin' ? 'Sign In' : 'Create Account'
+              ? <><Loader2 size={16} style={{ animation:'spin 0.8s linear infinite' }}/> Signing in…</>
+              : 'Sign In'
             }
           </button>
         </form>
-
-        {/* Mode toggle */}
-        <div style={{ textAlign:'center', marginTop:22, paddingTop:18, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
-          {mode === 'signin' ? (
-            <p style={{ fontSize:13, color:'#8E8E93', margin:0 }}>
-              First time partner?{' '}
-              <button onClick={() => { setMode('signup'); setError(''); }} style={{ background:'none', border:'none', cursor:'pointer', color:'#0071E3', fontWeight:600, fontSize:13, padding:0, fontFamily:'inherit' }}>
-                Create account
-              </button>
-            </p>
-          ) : (
-            <p style={{ fontSize:13, color:'#8E8E93', margin:0 }}>
-              Already have an account?{' '}
-              <button onClick={() => { setMode('signin'); setError(''); }} style={{ background:'none', border:'none', cursor:'pointer', color:'#0071E3', fontWeight:600, fontSize:13, padding:0, fontFamily:'inherit' }}>
-                Sign in
-              </button>
-            </p>
-          )}
-        </div>
       </div>
 
       {/* Spinner keyframe */}
