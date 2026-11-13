@@ -9,6 +9,7 @@ import { PageLoader } from '../components/ui/CodelixLoader';
 import { transactionsDB, settingsDB, employeesDB, auditDB } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
 import { fmtInput, NumInput } from '../lib/numInput';
+import { computeBalances } from '../lib/finance';
 import { TRANSACTION_SOURCES, EXPENSE_CATEGORIES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
 import {
   Plus, Filter, ArrowUpRight, ArrowDownRight, Edit2, Trash2,
@@ -767,20 +768,8 @@ export default function Transactions() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // ── Balances ───────────────────────────────────────────────
-  const bal = useMemo(() => {
-    let pC=0, pD=0, bC=0, bD=0;
-    txs.forEach(t => {
-      if (t.accountType === 'Partner Personal') return; // reimbursement settlements — no balance effect
-      if (t.accountType === 'Cash + Savings Account' || t.accountType === "Founder's Personal") {
-        t.type === 'Credit' ? pC += +t.amount : pD += +t.amount;
-      } else {
-        t.type === 'Credit' ? bC += +t.amount : bD += +t.amount;
-      }
-    });
-    const personal = openBal.cash + pC - pD;
-    const bank     = openBal.bank + bC - bD;
-    return { personal, bank, total: personal + bank, totalCredit: pC + bC, totalDebit: pD + bD };
-  }, [txs, openBal]);
+  // Shared with the Dashboard and P&L page (src/lib/finance.js)
+  const bal = useMemo(() => computeBalances(txs, openBal), [txs, openBal]);
 
   // ── Partner outstanding (computed from transactions) ───────
   const partnerOutstanding = useMemo(() => {

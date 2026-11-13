@@ -4,25 +4,26 @@ import { useAuth } from '../../contexts/AuthContext';
 import codelixLogo from '../../assets/codelix.svg';
 import {
   LayoutDashboard, Users, IndianRupee, UserCheck,
-  FolderKanban, KeyRound, SquareKanban, Archive, MessageSquare, Settings as SettingsIcon,
+  FolderKanban, KeyRound, SquareKanban, Archive, MessageSquare, ShieldCheck, LineChart,
 } from 'lucide-react';
 
 const partnerNavItems = [
   { icon: LayoutDashboard, label: 'Dashboard',       to: '/' },
+  { icon: LineChart,       label: 'P&L Reports',      to: '/reports' },
   { icon: Users,           label: 'CRM',              to: '/crm' },
   { icon: IndianRupee,     label: 'Transactions',     to: '/transactions' },
   { icon: UserCheck,       label: 'Employees',        to: '/employees' },
   { icon: FolderKanban,    label: 'Projects',         to: '/projects' },
-  { icon: SquareKanban,    label: 'Tasks / Todo',     to: '/tasks' },
+  { icon: SquareKanban,    label: 'Work',             to: '/tasks' },
   { icon: MessageSquare,   label: 'Chat',             to: '/chat' },
   { icon: KeyRound,        label: 'Credentials',      to: '/credentials' },
   { icon: Archive,         label: 'Past Projects',    to: '/existing-projects' },
-  { icon: SettingsIcon,    label: 'Settings',         to: '/settings' },
+  { icon: ShieldCheck,     label: 'Users & Access',   to: '/access' },
 ];
 
 const employeeNavItems = [
-  { icon: SquareKanban,  label: 'My Tasks', to: '/tasks' },
-  { icon: MessageSquare, label: 'Chat',     to: '/chat' },
+  { icon: SquareKanban,  label: 'My Work', to: '/tasks', modules: ['tasks', 'projects', 'timesheet'] },
+  { icon: MessageSquare, label: 'Chat',    to: '/chat',  modules: ['chat'] },
 ];
 
 // Derive a display name from a partner email, e.g. "bhargav.codelix@gmail.com" → "Bhargav"
@@ -33,14 +34,16 @@ function nameFromEmail(email = '') {
 
 export default function Sidebar() {
   const { sidebarOpen, closeSidebar } = useLayout();
-  const { user, isEmployee, employeeData } = useAuth();
+  const { user, isEmployee, isAccessAdmin, employeeData, can, displayName: fullName } = useAuth();
 
-  const navItems = isEmployee ? employeeNavItems : partnerNavItems;
+  const navItems = isEmployee
+    ? employeeNavItems.filter(i => i.modules.some(m => can(m)))
+    : partnerNavItems.filter(i => i.to !== '/access' || isAccessAdmin);
 
   // User footer info
   const displayName = isEmployee
     ? (employeeData?.name ?? user?.email ?? '—')
-    : nameFromEmail(user?.email);
+    : (fullName || nameFromEmail(user?.email));
   const displayRole = isEmployee
     ? (employeeData?.role ?? 'Employee')
     : 'Partner';

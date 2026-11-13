@@ -5,23 +5,21 @@ import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import Badge, { getStatusColor } from '../components/ui/Badge';
 import { PageLoader } from '../components/ui/CodelixLoader';
-import { employeesDB, auditDB } from '../lib/db';
-import { supabaseAdmin, hasServiceRole } from '../lib/supabase';
+import { employeesDB, auditDB, adminUsersAPI } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
 import { Power, Trash2, KeyRound, Copy, CheckCheck, ShieldCheck, ShieldOff, Loader2, History } from 'lucide-react';
 
-const DEFAULT_PASSWORD = 'Codelix@1234';
-
 export default function Settings() {
-  const { user, employeeData } = useAuth();
-  const currentUser = employeeData?.name || user?.email || 'Unknown';
+  const { user, displayName } = useAuth();
+  const currentUser = displayName || user?.email || 'Unknown';
   const [emps, setEmps] = useState([]);
-  const [authUsers, setAuthUsers] = useState([]); // [{ id, email }]
+  const [logins, setLogins] = useState([]);       // app_users rows from the admin-users function
+  const [loginsError, setLoginsError] = useState('');
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState(null);
   const [deleteEmp, setDeleteEmp] = useState(null);
-  const [credsResult, setCredsResult] = useState(null); // { name, email, action, error }
+  const [credsResult, setCredsResult] = useState(null); // { name, email, action, error, password }
   const [copied, setCopied] = useState(false);
   const [auditLog, setAuditLog] = useState([]);
   const [showAudit, setShowAudit] = useState(false);
@@ -32,17 +30,20 @@ export default function Settings() {
       const [empData, auditData] = await Promise.all([employeesDB.getAll(), auditDB.getAll('employee')]);
       setEmps(empData);
       setAuditLog(auditData);
-      if (hasServiceRole) {
-        const { data, error } = await supabaseAdmin.auth.admin.listUsers();
-        if (!error) setAuthUsers(data.users.map(u => ({ id: u.id, email: u.email })));
-      }
     } catch (e) { console.error(e); }
+    try {
+      setLogins(await adminUsersAPI.list());
+      setLoginsError('');
+    } catch (e) {
+      console.error(e);
+      setLoginsError(e.message || 'Could not load logins');
+    }
     setLoading(false);
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  const authFor = email => email ? authUsers.find(u => u.email === email) : null;
+  const authFor = emp => logins.find(l => l.employee_id === emp.id) || null;
 
   async function logAction(entityId, action, description) {
     await auditDB.log({ entity: 'employee', entityId, action, description, by: currentUser });
@@ -60,38 +61,33 @@ export default function Settings() {
     setBusyId(null);
   }
 
+  // Create a login (new employees start with NO module access) or reset the
+  // password. Either way a one-time temporary password is generated on the
+  // server and the employee must change it on first sign-in.
   async function manageLogin(emp) {
-    if (!emp.email || !hasServiceRole) return;
+    if (!emp.email) return;
     setBusyId(emp.id);
-    const existing = authFor(emp.email);
+    const existing = authFor(emp);
     try {
-      if (existing) {
-        const { error } = await supabaseAdmin.auth.admin.updateUserById(existing.id, { password: DEFAULT_PASSWORD });
-        setCredsResult({ name: emp.name, email: emp.email, action: 'reset', error: error?.message || null });
-        if (!error) await logAction(emp.id, 'Password Reset', emp.name);
-      } else {
-        const { data, error } = await supabaseAdmin.auth.admin.createUser({ email: emp.email, password: DEFAULT_PASSWORD, email_confirm: true });
-        setCredsResult({ name: emp.name, email: emp.email, action: 'created', error: error?.message || null });
-        if (!error && data?.user) {
-          setAuthUsers(a => [...a, { id: data.user.id, email: emp.email }]);
-          await logAction(emp.id, 'Login Created', emp.name);
-        }
-      }
-    } catch (e) { console.error(e); }
+      const password = existing ? await adminUsersAPI.reset(emp.id) : await adminUsersAPI.create(emp.id);
+      setCredsResult({ name: emp.name, email: emp.email, action: existing ? 'reset' : 'created', error: null, password });
+      await logAction(emp.id, existing ? 'Password Reset' : 'Login Created', emp.name);
+      setLogins(await adminUsersAPI.list());
+    } catch (e) {
+      console.error(e);
+      setCredsResult({ name: emp.name, email: emp.email, action: existing ? 'reset' : 'created', error: e.message, password: null });
+    }
     setBusyId(null);
   }
 
   async function revokeLogin(emp) {
-    const existing = authFor(emp.email);
-    if (!existing || !hasServiceRole) return;
+    if (!authFor(emp)) return;
     setBusyId(emp.id);
     try {
-      const { error } = await supabaseAdmin.auth.admin.deleteUser(existing.id);
-      if (!error) {
-        setAuthUsers(a => a.filter(u => u.id !== existing.id));
-        await logAction(emp.id, 'Login Revoked', emp.name);
-      }
-    } catch (e) { console.error(e); }
+      await adminUsersAPI.revoke(emp.id);
+      setLogins(l => l.filter(x => x.employee_id !== emp.id));
+      await logAction(emp.id, 'Login Revoked', emp.name);
+    } catch (e) { console.error(e); alert(e.message); }
     setBusyId(null);
   }
 
@@ -100,16 +96,16 @@ export default function Settings() {
     const emp = deleteEmp;
     setEmps(es => es.filter(x => x.id !== emp.id));
     try {
-      const existing = authFor(emp.email);
-      if (existing && hasServiceRole) await supabaseAdmin.auth.admin.deleteUser(existing.id);
+      if (authFor(emp)) await adminUsersAPI.revoke(emp.id);
       await employeesDB.delete(emp.id);
-      if (existing) setAuthUsers(a => a.filter(u => u.id !== existing.id));
+      setLogins(l => l.filter(x => x.employee_id !== emp.id));
       await logAction(emp.id, 'Deleted', `${emp.name} — record and login access removed`);
     } catch (e) { console.error(e); await fetchAll(); }
   }
 
   async function copyPassword() {
-    try { await navigator.clipboard.writeText(DEFAULT_PASSWORD); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* clipboard unavailable */ }
+    if (!credsResult?.password) return;
+    try { await navigator.clipboard.writeText(credsResult.password); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* clipboard unavailable */ }
   }
 
   const filtered = useMemo(() => emps.filter(e => {
@@ -125,9 +121,9 @@ export default function Settings() {
 
       {loading ? <PageLoader /> : (
         <div className="page-body">
-          {!hasServiceRole && (
+          {loginsError && (
             <div style={{ padding: '10px 14px', borderRadius: 10, background: 'rgba(255,149,0,0.07)', border: '1px solid rgba(255,149,0,0.15)', fontSize: 12.5, color: '#FF9500' }}>
-              Login management is disabled — add <code style={{ background: 'rgba(0,0,0,0.06)', padding: '1px 5px', borderRadius: 4 }}>VITE_SUPABASE_SERVICE_ROLE_KEY</code> to your <code style={{ background: 'rgba(0,0,0,0.06)', padding: '1px 5px', borderRadius: 4 }}>.env</code> to enable Create/Reset/Revoke login.
+              Login management unavailable: {loginsError}. Make sure the <code style={{ background: 'rgba(0,0,0,0.06)', padding: '1px 5px', borderRadius: 4 }}>admin-users</code> Edge Function is deployed.
             </div>
           )}
           <div style={{ maxWidth: 320 }}><SearchBar value={search} onChange={setSearch} placeholder="Search employees…" /></div>
@@ -136,7 +132,7 @@ export default function Settings() {
             {filtered.length === 0
               ? <div style={{ textAlign: 'center', padding: '56px', color: '#AEAEB2', fontSize: 13 }}>No employees found</div>
               : filtered.map(e => {
-                  const login = authFor(e.email);
+                  const login = authFor(e);
                   const busy = busyId === e.id;
                   const initials = e.name.split(' ').map(n => n[0]).join('').slice(0, 2);
                   return (
@@ -160,12 +156,12 @@ export default function Settings() {
                             <Power size={12} color={e.status === 'Active' ? '#FF9500' : '#34C759'} /> {e.status === 'Active' ? 'Deactivate' : 'Activate'}
                           </button>
                         )}
-                        {e.email && hasServiceRole && (
+                        {e.email && !loginsError && (
                           <button onClick={() => manageLogin(e)} disabled={busy} title={login ? 'Reset Password' : 'Create Login'} className="mac-btn mac-btn-secondary" style={{ fontSize: 12 }}>
                             {busy ? <Loader2 size={12} style={{ animation: 'spin 0.8s linear infinite' }} /> : <KeyRound size={12} />} {login ? 'Reset Password' : 'Create Login'}
                           </button>
                         )}
-                        {login && hasServiceRole && (
+                        {login && (
                           <button onClick={() => revokeLogin(e)} disabled={busy} title="Revoke login access" style={{ width: 30, height: 30, borderRadius: 8, background: 'rgba(255,149,0,0.08)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                             <ShieldOff size={13} color="#FF9500" />
                           </button>
@@ -205,7 +201,7 @@ export default function Settings() {
                   </div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#1D1D1F' }}>{credsResult.action === 'reset' ? `Password reset for ${credsResult.name}` : `Account created for ${credsResult.name}`}</div>
-                    <div style={{ fontSize: 11.5, color: '#6E6E73', marginTop: 1 }}>Share these credentials with the employee</div>
+                    <div style={{ fontSize: 11.5, color: '#6E6E73', marginTop: 1 }}>Shown only once. They must change it at first sign-in.{credsResult.action === 'created' ? ' New logins have no module access until you grant it.' : ''}</div>
                   </div>
                 </div>
                 <div>
@@ -213,9 +209,9 @@ export default function Settings() {
                   <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.07)', fontSize: 13.5, color: '#1D1D1F' }}>{credsResult.email}</div>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>Password</label>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#8E8E93', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 5 }}>Temporary Password</label>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ flex: 1, padding: '10px 12px', borderRadius: 10, background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.07)', fontSize: 14, color: '#1D1D1F', fontFamily: 'monospace', letterSpacing: '0.5px' }}>{DEFAULT_PASSWORD}</div>
+                    <div style={{ flex: 1, padding: '10px 12px', borderRadius: 10, background: 'rgba(0,0,0,0.03)', border: '1px solid rgba(0,0,0,0.07)', fontSize: 14, color: '#1D1D1F', fontFamily: 'monospace', letterSpacing: '0.5px' }}>{credsResult.password}</div>
                     <button onClick={copyPassword} style={{ width: 36, height: 36, borderRadius: 10, background: copied ? 'rgba(52,199,89,0.1)' : 'rgba(0,0,0,0.05)', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                       {copied ? <CheckCheck size={14} color="#34C759" /> : <Copy size={14} color="#6E6E73" />}
                     </button>

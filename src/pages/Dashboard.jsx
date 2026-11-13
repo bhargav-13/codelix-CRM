@@ -4,6 +4,8 @@ import Header from '../components/layout/Header';
 import Badge, { getStatusColor } from '../components/ui/Badge';
 import { PageLoader } from '../components/ui/CodelixLoader';
 import { clientsDB, transactionsDB, employeesDB, projectsDB, settingsDB } from '../lib/db';
+import { computeBalances } from '../lib/finance';
+import FinanceOverview from '../components/dashboard/FinanceOverview';
 import {
   Users, FolderKanban, UserCheck,
   ArrowUpRight, ArrowDownRight, AlertCircle, CalendarClock, Clock,
@@ -58,27 +60,7 @@ export default function Dashboard() {
           projectsDB.getAll(),
           settingsDB.get('opening_balances'),
         ]);
-        const openBal = obData || { cash: 0, bank: 0 };
-        let pC=0,pD=0,bC=0,bD=0;
-        txs.forEach(t => {
-          if (t.accountType === 'Partner Personal') return; // excluded — personal_exp / reimbursement settlements
-          const isCash = t.accountType === 'Cash + Savings Account' || t.accountType === "Founder's Personal";
-          if (isCash) { t.type==='Credit' ? pC+=+t.amount : pD+=+t.amount; }
-          else        { t.type==='Credit' ? bC+=+t.amount : bD+=+t.amount; }
-        });
-        const pendingReimburse = (() => {
-          const spent = txs.filter(t => t.subType === 'personal_exp').reduce((s,t) => s+(+t.amount||0), 0);
-          const paid  = txs.filter(t => t.subType === 'reimbursement').reduce((s,t) => s+(+t.amount||0), 0);
-          return Math.max(0, spent - paid);
-        })();
-        const bal = {
-          cash: openBal.cash+pC-pD,
-          bank: openBal.bank+bC-bD,
-          total: openBal.cash+pC-pD+openBal.bank+bC-bD,
-          totalCredit: pC+bC,
-          totalDebit: pD+bD,
-          pendingReimburse,
-        };
+        const bal = computeBalances(txs, obData || { cash: 0, bank: 0 });
         setData({ clients, txs, employees, projects, bal });
       } catch(e) { console.error(e); }
       setLoading(false);
@@ -133,6 +115,9 @@ export default function Dashboard() {
           <StatCard label="Team Members" value={activeEmployees.length} sub={pendingSalaries.length>0?`${pendingSalaries.length} salary pending`:'All paid'}
             gradient="linear-gradient(135deg,#E0FFF0,#C0FFE0)" icon={UserCheck} iconColor="#34C759" />
         </div>
+
+        {/* Profit & loss overview */}
+        <FinanceOverview txs={txs} projects={projects} />
 
         {/* Alert Pills */}
         {(overdueFollowups.length>0 || todayFollowups.length>0 || pendingSalaries.length>0) && (

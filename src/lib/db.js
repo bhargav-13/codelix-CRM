@@ -637,6 +637,67 @@ export const tasksDB = {
 };
 
 // ─────────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────────
+const toNotif = r => ({
+  id:            r.id,
+  recipientId:   r.recipient_id,
+  recipientKind: r.recipient_kind,
+  type:          r.type,
+  title:         r.title,
+  body:          r.body,
+  taskId:        r.task_id,
+  read:          r.read,
+  createdAt:     r.created_at,
+});
+
+export const notificationsDB = {
+  // Fetch the most recent notifications for one recipient (partner name or employee id)
+  getFor: async (recipientKind, recipientId, limit = 30) => {
+    const { data, error } = await supabase
+      .from('notifications').select('*')
+      .eq('recipient_kind', recipientKind).eq('recipient_id', recipientId)
+      .order('created_at', { ascending: false }).limit(limit);
+    if (error) throw error;
+    return (data || []).map(toNotif);
+  },
+  // Create one notification per recipient (partners + employees) in one insert
+  createMany: async (notifs) => {
+    if (!notifs.length) return [];
+    const rows = notifs.map(n => ({
+      recipient_id:   n.recipientId,
+      recipient_kind: n.recipientKind,
+      type:           n.type || 'task',
+      title:          n.title,
+      body:           n.body || null,
+      task_id:        n.taskId || null,
+    }));
+    // No .select(): the sender may not read other people's notifications (RLS),
+    // and asking for the rows back would make the whole insert fail.
+    const { error } = await supabase.from('notifications').insert(rows);
+    if (error) throw error;
+    return rows.length;
+  },
+  markRead: async (id) => {
+    const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id);
+    if (error) throw error;
+  },
+  markAllRead: async (recipientKind, recipientId) => {
+    const { error } = await supabase.from('notifications')
+      .update({ read: true }).eq('recipient_kind', recipientKind).eq('recipient_id', recipientId).eq('read', false);
+    if (error) throw error;
+  },
+  subscribeFor: (recipientKind, recipientId, onInsert) => {
+    const sub = supabase
+      .channel(`notifications_${recipientKind}_${recipientId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `recipient_id=eq.${recipientId}` },
+        payload => { if (payload.new.recipient_kind === recipientKind) onInsert(toNotif(payload.new)); })
+      .subscribe();
+    return () => supabase.removeChannel(sub);
+  },
+};
+
+// ─────────────────────────────────────────────
 // CHAT (DMs + Groups)
 // ─────────────────────────────────────────────
 const toChannel = r => ({
@@ -768,3 +829,45 @@ export async function uploadProjectFile(file) {
     .from('project-updates').getPublicUrl(safeName);
   return { name: file.name, url: publicUrl, type: file.type, size: file.size, path: safeName };
 }
+
+// ─────────────────────────────────────────────
+// DIRECTORY  (names only — safe for employees; no salary / bank data)
+// ─────────────────────────────────────────────
+export const directoryDB = {
+  team: async () => {
+    const { data, error } = await supabase.rpc('team_directory');
+    if (error) throw error;
+    return (data || []).map(r => ({ id: r.id, name: r.name, role: r.role, status: r.status }));
+  },
+  projects: async () => {
+    const { data, error } = await supabase.rpc('project_directory');
+    if (error) throw error;
+    return (data || []).map(r => ({
+      id: r.id, projectName: r.project_name, clientName: r.client_name, key: r.key || null,
+      status: r.status || null, startDate: r.start_date || '', dueDate: r.due_date || '', members: r.members || [],
+    }));
+  },
+};
+
+// ─────────────────────────────────────────────
+// USER LOGINS  (via the `admin-users` Edge Function — access admins only)
+// The admin key never reaches the browser.
+// ─────────────────────────────────────────────
+async function callAdminUsers(body) {
+  const { data, error } = await supabase.functions.invoke('admin-users', { body });
+  if (error) {
+    // Surface the function's own message (e.g. "Only Bhargav or Manas…")
+    let msg = error.message;
+    try { const j = await error.context?.json?.(); if (j?.error) msg = j.error; } catch { /* not JSON */ }
+    throw new Error(msg);
+  }
+  if (data?.error) throw new Error(data.error);
+  return data;
+}
+
+export const adminUsersAPI = {
+  list:   async ()           => (await callAdminUsers({ action: 'list' })).users || [],
+  create: async (employeeId) => (await callAdminUsers({ action: 'create', employeeId })).tempPassword,
+  reset:  async (employeeId) => (await callAdminUsers({ action: 'reset',  employeeId })).tempPassword,
+  revoke: async (employeeId) => callAdminUsers({ action: 'revoke', employeeId }),
+};

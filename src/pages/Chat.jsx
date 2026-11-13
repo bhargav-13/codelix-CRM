@@ -4,7 +4,7 @@ import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { PageLoader } from '../components/ui/CodelixLoader';
-import { chatDB, employeesDB, uploadProjectFile } from '../lib/db';
+import { chatDB, directoryDB, uploadProjectFile } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
 import { PARTNERS } from '../data/mockData';
 import {
@@ -78,7 +78,7 @@ export default function Chat() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [emps, chans] = await Promise.all([employeesDB.getAll(), chatDB.getChannels()]);
+      const [emps, chans] = await Promise.all([directoryDB.team(), chatDB.getChannels()]);
       const allPeople = [
         ...PARTNERS.map(p => ({ id: p, name: p, kind: 'partner' })),
         ...emps.filter(e => e.status === 'Active').map(e => ({ id: e.id, name: e.name, kind: 'employee' })),

@@ -9,11 +9,9 @@ import { PageLoader } from '../components/ui/CodelixLoader';
 import { employeesDB, transactionsDB, auditDB } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
 import { NumInput } from '../lib/numInput';
-import { supabaseAdmin, hasServiceRole } from '../lib/supabase';
 import { DEPARTMENTS, EMPLOYMENT_TYPES, SALARY_TYPES, PAYMENT_METHODS } from '../data/mockData';
 import { Plus, Edit2, Trash2, Filter, History, AlertCircle, Banknote, ChevronDown, ChevronRight, Phone, Mail, MapPin, Calendar, Clock, X, KeyRound, Copy, CheckCheck, ArrowRight, Power } from 'lucide-react';
 
-const DEFAULT_PASSWORD = 'Codelix@1234';
 const today = new Date().toISOString().split('T')[0];
 const fmt = n => n ? '₹' + Number(n).toLocaleString('en-IN') : '₹0';
 
@@ -227,8 +225,6 @@ export default function Employees(){
   const [salError,setSalError] = useState('');
   const [auditLog,setAuditLog] = useState([]);
   const [showAudit,setShowAudit] = useState(false);
-  const [createdCreds,setCreatedCreds] = useState(null); // { name, email } — shown after employee creation
-  const [copied,setCopied]     = useState(false);
 
   const s=(k,v)=>setForm(f=>({...f,[k]:v}));
 
@@ -269,40 +265,14 @@ export default function Employees(){
         await auditDB.log({ entity:'employee', entityId:created.id, action:'Created', description:created.name, by:currentUser });
         setAuditLog(l=>[{ id:Date.now(), entity:'employee', entityId:created.id, action:'Created', description:created.name, by:currentUser, createdAt:new Date().toISOString() },...l]);
 
-        // ── Create login account if email provided ──────────────────
-        // Uses admin.createUser() (service role key) which:
-        //   • Creates the account immediately — no confirmation email sent
-        //   • email_confirm:true marks it as confirmed right away
-        //   • Never touches the current partner session
-        if(form.email){
-          let authError = null;
-          if(hasServiceRole){
-            // Preferred: no email, instant confirmation
-            const { error } = await supabaseAdmin.auth.admin.createUser({
-              email: form.email,
-              password: DEFAULT_PASSWORD,
-              email_confirm: true,
-            });
-            authError = error?.message || null;
-          } else {
-            // Fallback if service role key not in .env
-            const { error } = await supabaseAdmin.auth.signUp({
-              email: form.email,
-              password: DEFAULT_PASSWORD,
-            });
-            authError = error?.message || null;
-          }
-          setCreatedCreds({ name: form.name, email: form.email, authError });
-        }
+        // Logins are created by an access admin (Bhargav / Manas) in Settings —
+        // new employees have no app access until then.
       }
     } catch(e){ console.error(e); }
     setSaving(false);
     setShowAdd(false);setEditEmp(null);setForm(emptyEmp);
   }
 
-  async function copyPassword(){
-    try{ await navigator.clipboard.writeText(DEFAULT_PASSWORD); setCopied(true); setTimeout(()=>setCopied(false),2000); } catch{}
-  }
 
   async function toggleStatus(id){
     const e=emps.find(x=>x.id===id);
@@ -322,14 +292,8 @@ export default function Employees(){
     setEmps(es=>es.filter(x=>x.id!==id));
     if(detail?.id===id)setDetail(null);
     try{
-      // Revoke login access too — otherwise a deleted employee keeps a
-      // working account that (having no matching employee row) would be
-      // treated as a partner with full app access on next sign-in.
-      if(e?.email && hasServiceRole){
-        const { data } = await supabaseAdmin.auth.admin.listUsers();
-        const match = data?.users?.find(u=>u.email===e.email);
-        if(match) await supabaseAdmin.auth.admin.deleteUser(match.id);
-      }
+      // Deleting the employee also removes their app_users row (ON DELETE
+      // CASCADE), so their login loses all access immediately.
       await employeesDB.delete(id);
       if(e){
         await auditDB.log({ entity:'employee', entityId:id, action:'Deleted', description:e.name, by:currentUser });
@@ -537,60 +501,6 @@ export default function Employees(){
 
       <ConfirmDialog isOpen={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>del(deleteId)} title="Delete Employee" message="This will permanently delete the employee and all salary records."/>
 
-      {/* ── Login Credentials Created ──────────────────────────────── */}
-      <Modal isOpen={!!createdCreds} onClose={()=>setCreatedCreds(null)} title="Login Account Created" size="sm">
-        {createdCreds && (
-          <div style={{display:'flex',flexDirection:'column',gap:16}}>
-            {/* Success banner */}
-            <div style={{display:'flex',alignItems:'center',gap:10,padding:'12px 14px',borderRadius:12,background:'rgba(52,199,89,0.08)',border:'1px solid rgba(52,199,89,0.18)'}}>
-              <div style={{width:32,height:32,borderRadius:9,background:'linear-gradient(135deg,#34C759,#30D158)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                <KeyRound size={14} color="#fff"/>
-              </div>
-              <div>
-                <div style={{fontSize:13,fontWeight:600,color:'#1D1D1F'}}>Account created for {createdCreds.name}</div>
-                <div style={{fontSize:11.5,color:'#6E6E73',marginTop:1}}>Share these credentials with the employee</div>
-              </div>
-            </div>
-
-            {/* Email */}
-            <div>
-              <label style={{display:'block',fontSize:11,fontWeight:600,color:'#8E8E93',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:5}}>Email</label>
-              <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(0,0,0,0.03)',border:'1px solid rgba(0,0,0,0.07)',fontSize:13.5,color:'#1D1D1F',fontWeight:450}}>
-                {createdCreds.email}
-              </div>
-            </div>
-
-            {/* Password */}
-            <div>
-              <label style={{display:'block',fontSize:11,fontWeight:600,color:'#8E8E93',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:5}}>Default Password</label>
-              <div style={{display:'flex',alignItems:'center',gap:8}}>
-                <div style={{flex:1,padding:'10px 12px',borderRadius:10,background:'rgba(0,0,0,0.03)',border:'1px solid rgba(0,0,0,0.07)',fontSize:14,color:'#1D1D1F',fontFamily:'monospace',letterSpacing:'0.5px'}}>
-                  {DEFAULT_PASSWORD}
-                </div>
-                <button onClick={copyPassword} style={{width:36,height:36,borderRadius:10,background: copied?'rgba(52,199,89,0.1)':'rgba(0,0,0,0.05)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all 0.15s'}}>
-                  {copied ? <CheckCheck size={14} color="#34C759"/> : <Copy size={14} color="#6E6E73"/>}
-                </button>
-              </div>
-            </div>
-
-            {/* Note */}
-            {createdCreds?.authError ? (
-              <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(255,59,48,0.06)',border:'1px solid rgba(255,59,48,0.15)',fontSize:12,color:'#FF3B30',lineHeight:1.5}}>
-                <strong>Login account failed:</strong> {createdCreds.authError}
-                {!hasServiceRole && <><br/><br/>Add <code style={{background:'rgba(0,0,0,0.06)',padding:'1px 5px',borderRadius:4}}>VITE_SUPABASE_SERVICE_ROLE_KEY</code> to your <code style={{background:'rgba(0,0,0,0.06)',padding:'1px 5px',borderRadius:4}}>.env</code> file (Supabase → Settings → API → service_role key) to fix this permanently.</>}
-              </div>
-            ) : (
-              <div style={{padding:'10px 12px',borderRadius:10,background:'rgba(52,199,89,0.06)',border:'1px solid rgba(52,199,89,0.15)',fontSize:12,color:'#34C759',lineHeight:1.5}}>
-                ✓ Login account created. Ask the employee to change their password after first login.
-              </div>
-            )}
-
-            <div style={{paddingTop:4}}>
-              <button onClick={()=>setCreatedCreds(null)} className="mac-btn mac-btn-primary" style={{width:'100%',fontSize:13}}>Done</button>
-            </div>
-          </div>
-        )}
-      </Modal>
     </div>
   );
 }

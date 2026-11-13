@@ -5,7 +5,7 @@ import Modal from '../components/ui/Modal';
 import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { PageLoader } from '../components/ui/CodelixLoader';
-import { tasksDB, employeesDB, projectsDB, uploadProjectFile } from '../lib/db';
+import { tasksDB, directoryDB, notificationsDB, uploadProjectFile } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
 import { PARTNERS } from '../data/mockData';
 import {
@@ -419,7 +419,7 @@ function DetailRow({ label, children }) {
   );
 }
 
-function TaskDetail({ task, people, projects, canManage, currentUser, onEdit, onDelete, onPatch, onStatus, onClose }) {
+function TaskDetail({ task, people, projects, canManage, canManageThis, currentUser, onEdit, onDelete, onPatch, onStatus, onClose }) {
   const [comment, setComment] = useState('');
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef();
@@ -571,9 +571,9 @@ function TaskDetail({ task, people, projects, canManage, currentUser, onEdit, on
 
       {/* footer */}
       <div style={{ display:'flex', gap:8, paddingTop:14, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
-        {canManage && <button onClick={() => onDelete(task.id)} className="mac-btn mac-btn-danger" style={{ fontSize:13 }}><Trash2 size={13}/> Delete</button>}
+        {canManageThis && <button onClick={() => onDelete(task.id)} className="mac-btn mac-btn-danger" style={{ fontSize:13 }}><Trash2 size={13}/> Delete</button>}
         <div style={{ flex:1 }}/>
-        {canManage && <button onClick={() => onEdit(task)} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}><Edit2 size={13}/> Edit</button>}
+        {canManageThis && <button onClick={() => onEdit(task)} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}><Edit2 size={13}/> Edit</button>}
         <button onClick={onClose} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>Done</button>
       </div>
     </div>
@@ -586,7 +586,9 @@ export default function Tasks() {
   const { user, employeeData, isEmployee } = useAuth();
   const currentUser = employeeData?.name
     || (user?.email ? user.email.split('@')[0].split('.')[0].replace(/^\w/, c => c.toUpperCase()) : 'Unknown');
-  const canManage = !isEmployee;   // partners create/edit/delete; employees view + move + comment
+  const canManage = !isEmployee;   // partners can edit/delete any task, and comment-moderate
+  const canCreate = true;          // everyone (partners + employees) can create tasks
+  const canManageTask = (t) => canManage || t?.reporter === currentUser; // owner can edit/delete their own
 
   const [tasks, setTasks]         = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -621,7 +623,7 @@ export default function Tasks() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    const [tRes, eRes, pRes] = await Promise.allSettled([tasksDB.getAll(), employeesDB.getAll(), projectsDB.getAll()]);
+    const [tRes, eRes, pRes] = await Promise.allSettled([tasksDB.getAll(), directoryDB.team(), directoryDB.projects()]);
     if (tRes.status === 'rejected') console.error('tasks fetch:', tRes.reason);
     setTasks(tRes.status === 'fulfilled' ? tRes.value : []);
     setEmployees((eRes.status === 'fulfilled' ? eRes.value : []).filter(e => e.status === 'Active'));
@@ -631,11 +633,14 @@ export default function Tasks() {
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
-  // employee sees only tasks assigned to them
+  // employee sees tasks assigned to them, plus tasks they created themselves
   const scoped = useMemo(() => {
     if (!isEmployee || !employeeData?.id) return tasks;
-    return tasks.filter(t => (t.assignees || []).some(a => a.kind === 'employee' && a.id === employeeData.id));
-  }, [tasks, isEmployee, employeeData?.id]);
+    return tasks.filter(t =>
+      (t.assignees || []).some(a => a.kind === 'employee' && a.id === employeeData.id) ||
+      t.reporter === currentUser
+    );
+  }, [tasks, isEmployee, employeeData?.id, currentUser]);
 
   const filtered = useMemo(() => scoped.filter(t => {
     const q = search.toLowerCase();
@@ -654,6 +659,35 @@ export default function Tasks() {
   }, [filtered]);
 
   const nextTaskNo = useMemo(() => tasks.reduce((m, t) => Math.max(m, t.taskNo || 0), 0) + 1, [tasks]);
+
+  // Notify everyone with a stake in a task (its assignees + its reporter)
+  // except whoever just triggered the change.
+  async function notifyTask(task, title, body) {
+    try {
+      // Reporter is stored as a display name (first name for partners, full
+      // name for employees — see `currentUser` above). Match it against the
+      // employee list first; anything else is treated as a partner name,
+      // which is how partner identity is keyed everywhere in this file.
+      const reporterEmployee = task.reporter ? employees.find(e => e.name === task.reporter) : null;
+      const stakeholders = [
+        ...(task.assignees || []).map(a => ({ kind: a.kind, id: a.kind === 'partner' ? a.name : a.id })),
+        ...(task.reporter ? [reporterEmployee ? { kind: 'employee', id: reporterEmployee.id } : { kind: 'partner', id: task.reporter }] : []),
+      ];
+      // De-dupe and drop the actor themself
+      const seen = new Set();
+      const recipients = stakeholders.filter(r => {
+        const key = `${r.kind}:${r.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        const isActor = r.kind === 'partner' ? r.id === currentUser : (isEmployee && r.id === employeeData?.id);
+        return !isActor;
+      });
+      if (recipients.length === 0) return;
+      await notificationsDB.createMany(recipients.map(r => ({
+        recipientKind: r.kind, recipientId: r.id, type: 'task', title, body, taskId: task.id,
+      })));
+    } catch (e) { console.error('notify task:', e); }
+  }
 
   // ── DnD ──────────────────────────────────────────────────────────────
   const dnd = {
@@ -687,10 +721,12 @@ export default function Tasks() {
         const updated = await tasksDB.update(editTask.id, form);
         setTasks(ts => ts.map(t => t.id === editTask.id ? updated : t));
         if (detail?.id === editTask.id) setDetail(updated);
+        notifyTask(updated, `Task updated: ${updated.title}`, `${currentUser} updated ${taskKey(updated)}`);
       } else {
         const colCount = tasks.filter(t => t.status === form.status).length;
         const created = await tasksDB.create({ ...form, taskNo: nextTaskNo, reporter: currentUser, sortOrder: (colCount + 1) * 1000 });
         setTasks(ts => [...ts, created]);
+        notifyTask(created, `New task: ${created.title}`, `${currentUser} assigned you ${taskKey(created)}`);
       }
       setShowForm(false); setEditTask(null); setForm(emptyTask);
     } catch (e) {
@@ -707,13 +743,20 @@ export default function Tasks() {
     try {
       const created = await tasksDB.create(optimistic);
       setTasks(ts => ts.map(t => t.id === optimistic.id ? created : t));
+      notifyTask(created, `New task: ${created.title}`, `${currentUser} added ${taskKey(created)}`);
     } catch (e) { console.error(e); setTasks(ts => ts.filter(t => t.id !== optimistic.id)); alert('Could not add task — is the tasks table set up?'); }
   }
 
   async function patchTask(id, patch) {
     setTasks(ts => ts.map(t => t.id === id ? { ...t, ...patch } : t));
     setDetail(d => d && d.id === id ? { ...d, ...patch } : d);
-    try { await tasksDB.patch(id, patch); }
+    try {
+      const updated = await tasksDB.patch(id, patch);
+      // Only notify for meaningful updates (comments/attachments) — avoid
+      // noisy notifications for internal-only fields.
+      if (patch.comments) notifyTask(updated, `New comment on: ${updated.title}`, `${currentUser} commented on ${taskKey(updated)}`);
+      else if (patch.attachments) notifyTask(updated, `New attachment on: ${updated.title}`, `${currentUser} added a file to ${taskKey(updated)}`);
+    }
     catch (e) { console.error(e); fetchAll(); }
   }
 
@@ -722,7 +765,10 @@ export default function Tasks() {
     const sortOrder = (colCount + 1) * 1000;
     setTasks(ts => ts.map(x => x.id === t.id ? { ...x, status, sortOrder } : x));
     setDetail(d => d && d.id === t.id ? { ...d, status, sortOrder } : d);
-    try { await tasksDB.move(t.id, status, sortOrder); }
+    try {
+      const updated = await tasksDB.move(t.id, status, sortOrder);
+      notifyTask(updated, `Status changed: ${updated.title}`, `${currentUser} moved ${taskKey(updated)} to "${status}"`);
+    }
     catch (e) { console.error(e); fetchAll(); }
   }
 
@@ -749,7 +795,7 @@ export default function Tasks() {
               <button className={`tab-item ${view === 'board' ? 'active' : ''}`} onClick={() => setView('board')} style={{ display:'flex', alignItems:'center', gap:5 }}><LayoutGrid size={13}/> Board</button>
               <button className={`tab-item ${view === 'list' ? 'active' : ''}`} onClick={() => setView('list')} style={{ display:'flex', alignItems:'center', gap:5 }}><List size={13}/> List</button>
             </div>
-            {canManage && <button onClick={openNew} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}><Plus size={14}/> New Task</button>}
+            {canCreate && <button onClick={openNew} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}><Plus size={14}/> New Task</button>}
           </div>
         }
       />
@@ -798,7 +844,7 @@ export default function Tasks() {
             <div style={{ flex:1, minHeight:0, display:'flex', gap:14, padding:'2px 24px 20px', overflowX:'auto', overflowY:'hidden' }}>
               {TASK_STATUSES.map(status => (
                 <Column key={status} status={status} tasks={byStatus[status]} onOpen={setDetail}
-                  dnd={dnd} onQuickAdd={quickAdd} canManage={canManage} canDrag />
+                  dnd={dnd} onQuickAdd={quickAdd} canManage={canCreate} canDrag />
               ))}
             </div>
           ) : (
@@ -825,7 +871,7 @@ export default function Tasks() {
 
       {/* detail modal */}
       <Modal isOpen={!!detail} onClose={() => setDetail(null)} title="Task Details" size="xl">
-        {detail && <TaskDetail task={detail} people={people} projects={projects} canManage={canManage} currentUser={currentUser}
+        {detail && <TaskDetail task={detail} people={people} projects={projects} canManage={canManage} canManageThis={canManageTask(detail)} currentUser={currentUser}
           onEdit={openEdit} onDelete={id => setDeleteId(id)} onPatch={patchTask} onStatus={changeStatus} onClose={() => setDetail(null)}/>}
       </Modal>
 
