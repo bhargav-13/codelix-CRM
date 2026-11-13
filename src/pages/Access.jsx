@@ -7,6 +7,11 @@ import Badge from '../components/ui/Badge';
 import { PageLoader } from '../components/ui/CodelixLoader';
 import { employeesDB, auditDB, adminUsersAPI } from '../lib/db';
 import { MODULES, TEMPLATES, normalizePerms, togglePerm, samePerms, matchTemplate, permSummary, accessDB } from '../lib/access';
+
+// Turn a failed Edge Function call into something actionable
+const fnError = e => /Failed to send a request|Failed to fetch|404|not found/i.test(e?.message || '')
+  ? 'The admin-users Edge Function is not deployed yet (Supabase → Edge Functions). Logins and permissions still show; only create / reset / revoke need it.'
+  : (e?.message || 'Something went wrong');
 import { useAuth } from '../contexts/AuthContext';
 import {
   Power, Trash2, KeyRound, Copy, CheckCheck, ShieldCheck, ShieldOff, Loader2, History,
@@ -44,7 +49,7 @@ export default function Access() {
       setEmps(e);
       setAudit(a.filter(x => x.entity === 'access' || x.entity === 'employee'));
     } catch (err) { console.error(err); }
-    try { setLogins(await adminUsersAPI.list()); setLoginsError(''); }
+    try { setLogins(await accessDB.listLogins()); setLoginsError(''); }
     catch (err) { console.error(err); setLoginsError(err.message || 'Could not load logins'); }
     setLoading(false);
   }, []);
@@ -101,9 +106,9 @@ export default function Access() {
       const password = existing ? await adminUsersAPI.reset(emp.id) : await adminUsersAPI.create(emp.id);
       setCreds({ name: emp.name, email: emp.email, action: existing ? 'reset' : 'created', password });
       await log(emp.id, existing ? 'Password reset' : 'Login created', emp.name);
-      setLogins(await adminUsersAPI.list());
+      setLogins(await accessDB.listLogins());
     } catch (e) {
-      setCreds({ name: emp.name, email: emp.email, action: existing ? 'reset' : 'created', error: e.message });
+      setCreds({ name: emp.name, email: emp.email, action: existing ? 'reset' : 'created', error: fnError(e) });
     }
     setBusy('');
   }
@@ -133,7 +138,7 @@ export default function Access() {
       } else {
         await log(emp.id, 'Login revoked', emp.name);
       }
-    } catch (e) { alert(e.message); await fetchAll(); }
+    } catch (e) { alert(fnError(e)); await fetchAll(); }
     setBusy(''); setConfirm(null);
   }
 
@@ -156,7 +161,7 @@ export default function Access() {
         {loginsError && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '10px 14px', borderRadius: 10, background: 'rgba(255,149,0,0.08)', fontSize: 12.5, color: '#B25E00' }}>
             <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>Login management unavailable: {loginsError}. Check that the <code>admin-users</code> Edge Function is deployed.</span>
+            <span>Could not load logins: {loginsError}</span>
           </div>
         )}
 
@@ -232,7 +237,7 @@ export default function Access() {
                     <button onClick={() => toggleActive(sel)} disabled={!!busy} className="mac-btn mac-btn-secondary" style={{ fontSize: 12.5 }}>
                       <Power size={12} color={sel.status === 'Active' ? '#FF9500' : '#34C759'} /> {sel.status === 'Active' ? 'Deactivate' : 'Activate'}
                     </button>
-                    {sel.email && !loginsError && (
+                    {sel.email && (
                       <button onClick={() => loginAction(sel)} disabled={!!busy} className="mac-btn mac-btn-secondary" style={{ fontSize: 12.5 }}>
                         {busy === 'login' ? <Loader2 size={12} className="spin" /> : <KeyRound size={12} />} {selLogin ? 'Reset password' : 'Create login'}
                       </button>

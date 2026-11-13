@@ -58,6 +58,15 @@ export function permSummary(perms) {
 
 // Only access admins pass the database rule on app_users.
 export const accessDB = {
+  // Partners can read every app_users row (RLS), so listing logins does not
+  // need the admin-users Edge Function — only create/reset/revoke do.
+  listLogins: async () => {
+    const { data, error } = await supabase.from('app_users')
+      .select('user_id, email, role, display_name, employee_id, is_access_admin, permissions, must_change_password, created_at')
+      .order('created_at');
+    if (error) throw error;
+    return data || [];
+  },
   setPermissions: async (employeeId, permissions) => {
     const { data, error } = await supabase.from('app_users')
       .update({ permissions: normalizePerms(permissions) })
