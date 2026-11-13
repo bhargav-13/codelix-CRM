@@ -91,7 +91,7 @@ export default function NoAccess() {
               <div style={{ fontSize: 12.5, fontWeight: 550, color: '#1D1D1F', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {user?.email}
               </div>
-              <div style={{ fontSize: 11, color: '#AEAEB2', marginTop: 1 }}>Signed in as Employee</div>
+              <div style={{ fontSize: 11, color: '#AEAEB2', marginTop: 1 }}>Signed in</div>
             </div>
           </div>
         </div>

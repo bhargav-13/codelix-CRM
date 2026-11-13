@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useLayout } from '../../contexts/LayoutContext';
 import { useAuth } from '../../contexts/AuthContext';
+import { useChat } from '../../contexts/ChatContext';
 import codelixLogo from '../../assets/codelix.svg';
 import {
   LayoutDashboard, Users, IndianRupee, UserCheck,
@@ -36,6 +37,7 @@ export default function Sidebar() {
   const { sidebarOpen, closeSidebar } = useLayout();
   const { user, isEmployee, isAccessAdmin, employeeData, can, displayName: fullName } = useAuth();
 
+  const { totalUnread } = useChat();
   const navItems = isEmployee
     ? employeeNavItems.filter(i => i.modules.some(m => can(m)))
     : partnerNavItems.filter(i => i.to !== '/access' || isAccessAdmin);
@@ -99,6 +101,11 @@ export default function Sidebar() {
           >
             <Icon size={15} strokeWidth={1.9} style={{ flexShrink: 0 }} />
             <span>{label}</span>
+            {to === '/chat' && totalUnread > 0 && (
+              <span style={{ marginLeft: 'auto', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, background: '#0071E3', color: '#fff', fontSize: 10.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                {totalUnread > 99 ? '99+' : totalUnread}
+              </span>
+            )}
           </NavLink>
         ))}
       </nav>

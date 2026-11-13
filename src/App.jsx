@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext';
+import { ChatProvider } from './contexts/ChatContext';
 import Layout from './components/layout/Layout';
 import CodelixLoader from './components/ui/CodelixLoader';
 import Login from './pages/Login';
@@ -43,12 +44,14 @@ function AppContent() {
     if (allowed.length === 0) return <NoAccess />;
     return (
       <NotificationProvider>
+      <ChatProvider>
         <Layout>
           <Routes>
             {allowed.map(m => <Route key={m.key} path={m.path} element={m.element} />)}
             <Route path="*" element={<Navigate to={allowed[0].path} replace />} />
           </Routes>
         </Layout>
+      </ChatProvider>
       </NotificationProvider>
     );
   }
@@ -56,6 +59,7 @@ function AppContent() {
   // ── Partner: full app (Settings / user access: access admins only) ─
   return (
     <NotificationProvider>
+      <ChatProvider>
       <Layout>
         <Routes>
           <Route path="/"             element={<Dashboard />} />
@@ -73,6 +77,7 @@ function AppContent() {
           <Route path="*"             element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>
+      </ChatProvider>
     </NotificationProvider>
   );
 }
