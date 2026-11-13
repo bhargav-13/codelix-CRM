@@ -1,4 +1,6 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { PageLoader } from './components/ui/CodelixLoader';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { ChatProvider } from './contexts/ChatContext';
@@ -7,17 +9,17 @@ import CodelixLoader from './components/ui/CodelixLoader';
 import Login from './pages/Login';
 import NoAccess from './pages/NoAccess';
 import ChangePassword from './pages/ChangePassword';
-import Dashboard from './pages/Dashboard';
-import Reports from './pages/Reports';
-import CRM from './pages/CRM';
-import Transactions from './pages/Transactions';
-import Employees from './pages/Employees';
-import Projects from './pages/Projects';
-import Credentials from './pages/Credentials';
-import Work from './pages/Work';
-import ExistingProjects from './pages/ExistingProjects';
-import Chat from './pages/Chat';
-import Access from './pages/Access';
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Reports = lazy(() => import('./pages/Reports'));
+const CRM = lazy(() => import('./pages/CRM'));
+const Transactions = lazy(() => import('./pages/Transactions'));
+const Employees = lazy(() => import('./pages/Employees'));
+const Projects = lazy(() => import('./pages/Projects'));
+const Credentials = lazy(() => import('./pages/Credentials'));
+const Work = lazy(() => import('./pages/Work'));
+const ExistingProjects = lazy(() => import('./pages/ExistingProjects'));
+const Chat = lazy(() => import('./pages/Chat'));
+const Access = lazy(() => import('./pages/Access'));
 
 // Modules an employee can be granted (keys match app_users.permissions)
 // The work hub opens if they may see tasks, project boards or their timesheet.
@@ -46,10 +48,12 @@ function AppContent() {
       <NotificationProvider>
       <ChatProvider>
         <Layout>
+          <Suspense fallback={<PageLoader />}>
           <Routes>
             {allowed.map(m => <Route key={m.key} path={m.path} element={m.element} />)}
             <Route path="*" element={<Navigate to={allowed[0].path} replace />} />
           </Routes>
+          </Suspense>
         </Layout>
       </ChatProvider>
       </NotificationProvider>
@@ -61,6 +65,7 @@ function AppContent() {
     <NotificationProvider>
       <ChatProvider>
       <Layout>
+        <Suspense fallback={<PageLoader />}>
         <Routes>
           <Route path="/"             element={<Dashboard />} />
           <Route path="/reports"      element={<Reports />} />
@@ -76,6 +81,7 @@ function AppContent() {
           <Route path="/settings"     element={<Navigate to={isAccessAdmin ? '/access' : '/'} replace />} />
           <Route path="*"             element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </Layout>
       </ChatProvider>
     </NotificationProvider>

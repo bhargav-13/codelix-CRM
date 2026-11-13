@@ -262,8 +262,9 @@ input, select, textarea, button { font-family: inherit; }
   /* Header padding */
   .page-header { padding: 12px 16px !important; }
 
-  /* Grids collapse to 1 column */
-  .rg-4, .rg-3, .rg-2 { grid-template-columns: 1fr; }
+  /* Grids collapse — minmax(0,…) so long text can't push cards off-screen */
+  .rg-3, .rg-2 { grid-template-columns: minmax(0, 1fr); }
+  .rg-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 
   /* Modal full-screen on mobile */
   .modal-overlay { padding: 0; align-items: flex-end; }
@@ -288,3 +289,58 @@ input, select, textarea, button { font-family: inherit; }
 }
 
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ═══════════════════════════════════════════════════
+   LAYOUT HARDENING (all sizes)
+═══════════════════════════════════════════════════ */
+.page-body > *, .mac-card, .rg-4 > *, .rg-3 > *, .rg-2 > * { min-width: 0; }
+.mac-card { overflow-wrap: break-word; }
+
+/* Header regions (see Header.jsx) */
+.hdr-main { flex: 1 1 auto; }
+.hdr-actions { display: flex; align-items: center; gap: 8px; }
+
+@media (max-width: 640px) {
+  .page-header { row-gap: 10px !important; }
+  .hdr-main { order: 1; flex: 1 1 0; }
+  .hdr-user { order: 2; }
+  .hdr-actions {
+    order: 3; flex: 1 0 100%;
+    overflow-x: auto; padding-bottom: 2px; scrollbar-width: none;
+  }
+  .hdr-actions::-webkit-scrollbar { display: none; }
+  .hdr-actions > * { flex-shrink: 0; }
+}
+
+/* Stat tiles: one per row on small phones */
+@media (max-width: 420px) {
+  .rg-4 { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Pages that use inline 3- or 4-column stat grids */
+@media (max-width: 768px) {
+  .page-body [style*="repeat(3,minmax(0,1fr))"],
+  .page-body [style*="repeat(3, minmax(0, 1fr))"],
+  .page-body [style*="grid-template-columns: repeat(3, 1fr)"],
+  .page-body [style*="grid-template-columns: repeat(3,1fr)"] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  /* Forms in pop-ups: one field per row on phones */
+  .modal-content [style*="grid-template-columns: 1fr 1fr"],
+  .modal-content [style*="grid-template-columns: repeat(2"] { grid-template-columns: minmax(0, 1fr) !important; }
+  /* Stop iOS zooming into inputs when focused */
+  input, select, textarea { font-size: 16px !important; }
+  /* Pop-ups: room for the home bar */
+  .modal-content { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+/* Touch screens: no hover, so always show hover-only actions and make them tappable */
+@media (hover: none) {
+  .card-actions { opacity: 1 !important; }
+  .card-actions button { width: 34px !important; height: 34px !important; }
+}
+
+/* Responsive table → card list switch (used by Transactions / CRM) */
+.only-mobile { display: none; }
+@media (max-width: 768px) {
+  .only-desktop { display: none !important; }
+  .only-mobile { display: block; }
+}

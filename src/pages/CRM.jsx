@@ -337,7 +337,39 @@ export default function CRM() {
               ))}
             </div>
           )}
-          <div className="mac-card" style={{ overflow:'hidden' }}>
+          {/* Phones: card list (follow-up / status / call at a glance) */}
+          <div className="mac-card only-mobile" style={{ overflow:'hidden' }}>
+            {filtered.length===0
+              ? <div style={{ textAlign:'center', padding:'40px 16px', color:'#AEAEB2', fontSize:13 }}>No clients found</div>
+              : filtered.map(c=>{
+                const isOverdue = c.nextFollowup && c.nextFollowup<today && c.status!=='Closed Won' && c.status!=='Closed Lost';
+                return (
+                  <div key={c.id} onClick={()=>setDetailClient(c)} style={{ display:'flex', gap:10, padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer' }}>
+                    <div style={{ width:36,height:36,borderRadius:10,background:'linear-gradient(135deg,rgba(0,113,227,0.12),rgba(10,132,255,0.08))',display:'flex',alignItems:'center',justifyContent:'center',color:'#0071E3',fontSize:11.5,fontWeight:700,flexShrink:0 }}>
+                      {c.clientName.split(' ').map(n=>n[0]).join('').slice(0,2)}
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}>
+                        <span style={{ fontSize:13.5, fontWeight:600, color:'#1D1D1F', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.clientName}</span>
+                        <span style={{ fontSize:13, fontWeight:600, color:'#1D1D1F', whiteSpace:'nowrap' }}>{c.proposalValue ? fmt(c.proposalValue) : ''}</span>
+                      </div>
+                      <div style={{ fontSize:11.5, color:'#8E8E93', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{[c.companyName, c.projectType, c.source].filter(Boolean).join(' · ')}</div>
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:6, flexWrap:'wrap' }} onClick={e=>e.stopPropagation()}>
+                        <StatusCell c={c} onUpdate={v=>updateStatus(c.id,v)} />
+                        <Badge color={getStatusColor(c.priority)}>{c.priority}</Badge>
+                        {c.nextFollowup && <span style={{ fontSize:11.5, fontWeight:550, color:isOverdue?'#FF3B30':'#6E6E73' }}>{isOverdue?'⚠ ':''}Follow-up {c.nextFollowup}</span>}
+                      </div>
+                    </div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:6 }} onClick={e=>e.stopPropagation()}>
+                      {c.contact && <a href={`tel:${c.contact}`} aria-label={`Call ${c.clientName}`} style={{ width:34,height:34,borderRadius:9,background:'rgba(52,199,89,0.1)',display:'flex',alignItems:'center',justifyContent:'center' }}><Phone size={14} color="#248A3D" /></a>}
+                      <button aria-label="Add follow-up" onClick={()=>{setFollowupCId(c.id);setShowFollowup(true);}} style={{ width:34,height:34,borderRadius:9,background:'rgba(0,113,227,0.09)',border:'none',display:'flex',alignItems:'center',justifyContent:'center' }}><MessageSquarePlus size={14} color="#0071E3" /></button>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+
+          <div className="mac-card only-desktop" style={{ overflow:'hidden' }}>
             <div style={{ overflowX:'auto' }}>
               <table style={{ width:'100%', borderCollapse:'collapse' }}>
                 <thead style={{ background:'rgba(0,0,0,0.018)' }}>

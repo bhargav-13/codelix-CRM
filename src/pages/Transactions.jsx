@@ -973,8 +973,40 @@ export default function Transactions() {
             </div>
           )}
 
-          {/* Transactions table */}
-          <div className="mac-card" style={{ overflow:'hidden' }}>
+          {/* Transactions — card list on phones (amount always visible) */}
+          <div className="mac-card only-mobile" style={{ overflow:'hidden' }}>
+            {filtered.length === 0
+              ? <div style={{ textAlign:'center', padding:'40px 16px', color:'#AEAEB2', fontSize:13 }}>No transactions found</div>
+              : filtered.map(t => {
+                const meta = SUB_TYPE_META[t.subType] || (t.type === 'Credit' ? SUB_TYPE_META.income : SUB_TYPE_META.expense);
+                const credit = t.type === 'Credit';
+                return (
+                  <div key={t.id} className="tx-card" onClick={() => { setEditTx(t); setForm(rowToForm(t)); setShowAdd(true); }}>
+                    <div style={{ width:34, height:34, borderRadius:'50%', flexShrink:0, background: credit?'rgba(52,199,89,0.1)':'rgba(255,59,48,0.1)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                      {credit ? <ArrowUpRight size={15} color="#34C759"/> : <ArrowDownRight size={15} color="#FF3B30"/>}
+                    </div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', gap:8, alignItems:'baseline' }}>
+                        <span style={{ fontSize:13.5, fontWeight:550, color:'#1D1D1F', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{txDesc(t)}</span>
+                        <span style={{ fontSize:14, fontWeight:680, color: credit?'#248A3D':'#D70015', whiteSpace:'nowrap', flexShrink:0 }}>{credit?'+':'−'}{fmt(t.amount)}</span>
+                      </div>
+                      <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:4, flexWrap:'wrap', fontSize:11.5, color:'#8E8E93' }}>
+                        <span>{(t.date || '').slice(0, 10)}</span>
+                        <Badge color={meta.color}>{meta.label}</Badge>
+                        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.accountType}{t.paymentMethod ? ` · ${t.paymentMethod}` : ''}</span>
+                      </div>
+                    </div>
+                    <button onClick={e => { e.stopPropagation(); setDeleteId(t.id); }} aria-label="Delete transaction" style={{ width:34, height:34, borderRadius:9, background:'rgba(255,59,48,0.08)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                      <Trash2 size={14} color="#FF3B30"/>
+                    </button>
+                  </div>
+                );
+              })}
+            <style>{`.tx-card{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(0,0,0,0.05);cursor:pointer}.tx-card:active{background:rgba(0,0,0,0.03)}`}</style>
+          </div>
+
+          {/* Transactions table (tablet / desktop) */}
+          <div className="mac-card only-desktop" style={{ overflow:'hidden' }}>
             <div style={{ overflowX:'auto' }}>
               <table style={{ width:'100%', borderCollapse:'collapse' }}>
                 <thead style={{ background:'rgba(0,0,0,0.018)' }}>

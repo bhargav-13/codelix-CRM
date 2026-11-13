@@ -27,13 +27,14 @@ function barPath(x, y0, w, y1, r = 4) {
  */
 export default function TrendChart({ points, height = 260, onSelect }) {
   const wrapRef = useRef(null);
-  const [width, setWidth] = useState(720);
+  const [width, setWidth] = useState(0);
   const [hover, setHover] = useState(null);
 
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setWidth(Math.max(280, e.contentRect.width)));
+    setWidth(Math.max(260, el.clientWidth));
+    const ro = new ResizeObserver(([e]) => setWidth(Math.max(260, Math.floor(e.contentRect.width))));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -60,7 +61,9 @@ export default function TrendChart({ points, height = 260, onSelect }) {
   const h = hover != null ? points[hover] : null;
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', width: '100%' }}>
+    // overflow hidden + minWidth 0: the wrapper must take its width from the
+    // card, never from the SVG inside it (otherwise it measures itself wider)
+    <div ref={wrapRef} style={{ position: 'relative', width: '100%', minWidth: 0, overflow: 'hidden' }}>
       {/* legend */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8, fontSize: 11.5, color: INK.secondary }}>
         {[['Revenue', SERIES.revenue, 'bar'], ['Expenses', SERIES.expense, 'bar'], ['Net profit', SERIES.profit, 'line']].map(([l, c, k]) => (
@@ -73,7 +76,7 @@ export default function TrendChart({ points, height = 260, onSelect }) {
         ))}
       </div>
 
-      <svg width={width} height={height} role="img" aria-label="Revenue, expenses and net profit by period" style={{ display: 'block', overflow: 'visible' }}
+      {width > 0 && <svg width={width} height={height} role="img" aria-label="Revenue, expenses and net profit by period" style={{ display: 'block', overflow: 'visible' }}
         onMouseLeave={() => setHover(null)}>
         {ticks.map(v => (
           <g key={v}>
@@ -107,7 +110,7 @@ export default function TrendChart({ points, height = 260, onSelect }) {
             style={{ cursor: onSelect ? 'pointer' : 'default' }}
             onMouseEnter={() => setHover(i)} onClick={() => onSelect?.(i)} />
         ))}
-      </svg>
+      </svg>}
 
       {h && (
         <div style={{

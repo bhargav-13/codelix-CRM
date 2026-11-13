@@ -101,7 +101,7 @@ function NotificationBell() {
 
 export default function Header({ title, subtitle, actions }) {
   const { toggleSidebar } = useLayout();
-  const { user, logout } = useAuth();
+  const { user, logout, displayName } = useAuth();
 
   return (
     <div
@@ -114,11 +114,11 @@ export default function Header({ title, subtitle, actions }) {
         WebkitBackdropFilter: 'blur(20px)',
         borderBottom: '1px solid rgba(0,0,0,0.07)',
         position: 'sticky', top: 0, zIndex: 10,
-        gap: 12,
+        gap: 12, flexWrap: 'wrap',
       }}
     >
       {/* Left: hamburger (mobile) + title */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+      <div className="hdr-main" style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
         <button
           className="mobile-menu-btn"
           onClick={toggleSidebar}
@@ -149,16 +149,18 @@ export default function Header({ title, subtitle, actions }) {
         </div>
       </div>
 
-      {/* Right: actions + bell + user */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        {actions}
+      {/* Page actions — on phones they move to their own swipeable row */}
+      {actions && <div className="hdr-actions">{actions}</div>}
+
+      {/* Right: bell + user */}
+      <div className="hdr-user" style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
         <NotificationBell />
 
         {/* User avatar + logout */}
         {user && (
           <div style={{ display:'flex', alignItems:'center', gap:6 }}>
             <div
-              title={user.email}
+              title={displayName ? `${displayName} · ${user.email}` : user.email}
               style={{
                 width: 30, height: 30, borderRadius: '50%',
                 background: 'linear-gradient(135deg,#0071E3,#0A84FF)',
@@ -167,7 +169,7 @@ export default function Header({ title, subtitle, actions }) {
                 cursor: 'default',
               }}
             >
-              {(user.email?.[0] || '?').toUpperCase()}
+              {(displayName || user.email || '?').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()}
             </div>
             <button
               onClick={logout}
