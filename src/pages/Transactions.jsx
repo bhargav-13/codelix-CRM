@@ -611,7 +611,12 @@ function PartnersPanel({ rows, monthName, onRecord, onShowEntries, onSalarySetti
   const totalDue  = rows.reduce((s, r) => s + r.outstanding, 0);
   const totalOwed = rows.reduce((s, r) => s + r.reimburseOwed, 0);
   const pending   = rows.filter(r => r.monthly > 0 && r.salaryRemaining > 0).length;
+  // Drawing due minus reimbursement owed: above zero the partner owes, below zero the company owes
+  const net = r => Math.round((r.outstanding - r.reimburseOwed) * 100) / 100;
+  const totalNet = Math.round((totalDue - totalOwed) * 100) / 100;
   const summary = [
+    (totalDue > 0 || totalOwed > 0) && (totalNet > 0 ? `Partners owe ${fmtMoney(totalNet)} net`
+      : totalNet < 0 ? `Company owes partners ${fmtMoney(-totalNet)} net` : 'Drawings and reimbursements cancel out'),
     totalDue > 0 && `${fmtMoney(totalDue)} drawings due`,
     totalOwed > 0 && `${fmtMoney(totalOwed)} to reimburse`,
     pending > 0 && `${pending} ${pending === 1 ? 'salary' : 'salaries'} pending for ${monthName}`,
@@ -638,11 +643,17 @@ function PartnersPanel({ rows, monthName, onRecord, onShowEntries, onSalarySetti
                 { label: 'Show in ledger',    icon: List,           onClick: () => onShowEntries(r.partner) },
               ]} />
             </div>
+            {/* Net position: what the partner took, minus what the company owes them back */}
+            <div className="tx-net">
+              <span className="tx-net-label">{net(r) > 0 ? 'Partner owes the company' : net(r) < 0 ? 'Company owes the partner' : 'Drawings and reimbursement'}</span>
+              <span className={`tx-net-value ${net(r) > 0 ? 'tx-bad' : net(r) < 0 ? 'tx-warn' : 'tx-good'}`}>{net(r) === 0 ? 'Settled' : fmtMoney(Math.abs(net(r)))}</span>
+              <span className="tx-net-parts">
+                <span>Drawing {fmtMoney(r.outstanding)}</span>
+                <span aria-hidden="true">−</span>
+                <span>Reimburse {fmtMoney(r.reimburseOwed)}</span>
+              </span>
+            </div>
             <dl className="kv">
-              <dt>Drawings</dt>
-              <dd className={r.outstanding > 0 ? 'tx-bad' : 'tx-good'}>{r.outstanding > 0 ? `${fmtMoney(r.outstanding)} due` : 'Settled'}</dd>
-              <dt>Reimbursement</dt>
-              <dd className={r.reimburseOwed > 0 ? 'tx-warn' : 'tx-good'}>{r.reimburseOwed > 0 ? `${fmtMoney(r.reimburseOwed)} owed` : 'Clear'}</dd>
               <dt>Salary · {monthName.split(' ')[0]}</dt>
               <dd className={!r.monthly ? 'faint' : r.salaryRemaining === 0 ? 'tx-good' : r.salaryPaid > 0 ? 'tx-warn' : 'tx-bad'}>
                 {!r.monthly ? 'Not set'
