@@ -1025,3 +1025,10 @@ a.person-link:hover { color: var(--brand); text-decoration: underline; text-unde
   .sidebar-toggle, .sidebar-overlay, .toast-stack, .save-bar { display: none !important; }
   .page-header { position: static; backdrop-filter: none; }
 }
+
+/* Sidebar: "Soon" tag on a page whose feature is not built yet */
+.nav-soon {
+  margin-left: auto; padding: 2px 7px; border-radius: var(--r-pill);
+  background: var(--color-purple-alpha-10); color: var(--color-feature-dark);
+  font-size: 10.5px; font-weight: 600; line-height: 1.4; letter-spacing: 0.02em;
+}

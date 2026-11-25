@@ -73,7 +73,7 @@ export default function Sidebar() {
           {sections.map(section => (
             <div key={section.title} className="sidebar-group" role="group" aria-label={section.title}>
               <div className="sidebar-section" aria-hidden="true"><span>{section.title}</span></div>
-              {section.items.map(({ icon: Icon, label, to }) => {
+              {section.items.map(({ icon: Icon, label, to, soon }) => {
                 const unread = to === '/chat' && totalUnread > 0 ? totalUnread : 0;
                 return (
                   <Tooltip key={to} content={unread ? `${label} · ${unread} unread` : label} side="right" sideOffset={14} disabled={!rail} delay={120}>
@@ -87,6 +87,7 @@ export default function Sidebar() {
                       <Icon size={20} aria-hidden="true" />
                       <span className="sidebar-fade">{label}</span>
                       {unread > 0 && <span className="nav-count" aria-hidden="true">{unread > 99 ? '99+' : unread}</span>}
+                      {soon && <span className="nav-soon sidebar-fade">Soon</span>}
                     </Link>
                   </Tooltip>
                 );

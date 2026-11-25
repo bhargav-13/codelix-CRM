@@ -3,7 +3,7 @@
 // (The phone slide-in drawer state stays in contexts/LayoutContext.)
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
-  RiArchiveLine, RiCalendarCheckLine, RiChat3Line, RiFlightTakeoffLine, RiFolder3Line, RiGroupLine, RiHandCoinLine,
+  RiArchiveLine, RiCalendarCheckLine, RiChat3Line, RiFileCopy2Line, RiFileList3Line, RiFlightTakeoffLine, RiFolder3Line, RiGroupLine, RiHandCoinLine,
   RiKanbanView, RiKey2Line, RiLayoutGridLine, RiLineChartLine, RiMoneyRupeeCircleLine, RiShieldCheckLine, RiTeamLine,
 } from '@remixicon/react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -23,6 +23,11 @@ const PARTNER_NAV = [
     { icon: RiFolder3Line, label: 'Projects', to: '/projects', keywords: 'work payments' },
     { icon: RiArchiveLine, label: 'Past Projects', to: '/existing-projects', keywords: 'archive existing old' },
     { icon: RiMoneyRupeeCircleLine, label: 'Transactions', to: '/transactions', keywords: 'money cash bank credit debit expenses' },
+  ] },
+  // `soon: true` shows a "Soon" tag beside the label: the page exists but its feature is not built yet
+  { title: 'Documents', items: [
+    { icon: RiFileList3Line, label: 'Client documents', to: '/documents', keywords: 'letters files proposal sow nda agreement upload' },
+    { icon: RiFileCopy2Line, label: 'Templates', to: '/templates', soon: true, keywords: 'proposal letter sow scope of work welcome nda thank you milestones payment schedule' },
   ] },
   { title: 'Team', items: [
     { icon: RiKanbanView, label: 'Work', to: '/tasks', keywords: 'tasks board backlog sprint issues timesheet' },
