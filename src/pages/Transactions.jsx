@@ -1,66 +1,132 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useSyncExternalStore, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Header from '../components/layout/Header';
-import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { PageLoader } from '../components/ui/CodelixLoader';
-import { transactionsDB, settingsDB, employeesDB, auditDB } from '../lib/db';
+import {
+  useToast, Drawer, Field, FormGrid, FormSection, Toolbar, Chips, StatTiles, SkeletonRows,
+  EmptyPanel, ErrorPanel, RowMenu, Avatar, fmtMoney, fmtDate, todayLocal,
+} from '../components/ui/kit';
+import { transactionsDB, settingsDB, auditDB } from '../lib/db';
+import { Checkbox } from '../components/ui/Checkbox';
 import { useAuth } from '../contexts/AuthContext';
 import { fmtInput, NumInput } from '../lib/numInput';
-import { computeBalances } from '../lib/finance';
-import { TRANSACTION_SOURCES, EXPENSE_CATEGORIES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
+import { computeBalances, currentMonth, monthLabel, txMonth, isOpeningEntry } from '../lib/finance';
+import { TRANSACTION_SOURCES, EXPENSE_CATEGORIES, PAYMENT_METHODS } from '../data/mockData';
+import { usePeople } from '../lib/people';
 import {
-  Plus, Filter, ArrowUpRight, ArrowDownRight, Edit2, Trash2,
-  Wallet, History, AlertTriangle, IndianRupee, HandCoins, RotateCcw,
-  Banknote, Settings2, CheckCircle2, Clock, Users, ChevronDown, ChevronUp, ExternalLink,
-  CreditCard, ArrowRightLeft,
+  Plus, Wallet, Landmark, Banknote, TrendingUp, TrendingDown, History, Settings2, Download,
+  Pencil, Trash2, ArrowDownLeft, ArrowUpRight, HandCoins, RotateCcw, CreditCard, ArrowRightLeft,
+  AlertTriangle, Info, ExternalLink, Receipt, List, Repeat, Building2, X,
 } from 'lucide-react';
+import './Transactions.css';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const ACCOUNT_TYPES = ['Cash + Savings Account', 'Company Bank'];
+const BANK = 'Company Bank';
+const CASH = 'Cash + Savings Account';
+const POCKET = 'Partner Personal';
+const ACCOUNT_TYPES = [CASH, BANK];
+const ACCOUNT_LABEL = { [BANK]: 'Bank', [CASH]: 'Cash + Savings', [POCKET]: 'Partner’s pocket' };
+const accountLabel = a => ACCOUNT_LABEL[a] || a || '—';
+const ZERO_BAL = { cash: 0, bank: 0 };
 
-const TX_TYPES = [
-  { id: 'income',       label: 'Income',            icon: ArrowUpRight,   color: '#34C759', bg: 'rgba(52,199,89,0.09)',   desc: 'Client payment / revenue' },
-  { id: 'expense',      label: 'Expense',            icon: ArrowDownRight, color: '#FF3B30', bg: 'rgba(255,59,48,0.09)',  desc: 'Bills, tools, rent' },
-  { id: 'drawing',      label: 'Partner Drawing',    icon: HandCoins,      color: '#FF9500', bg: 'rgba(255,149,0,0.09)',  desc: 'Partner takes from company' },
-  { id: 'return',       label: 'Drawing Return',     icon: RotateCcw,      color: '#0071E3', bg: 'rgba(0,113,227,0.09)',  desc: 'Partner returns money' },
-  { id: 'p_salary',     label: 'Partner Salary',     icon: Banknote,       color: '#AF52DE', bg: 'rgba(175,82,222,0.09)', desc: 'Monthly partner payment' },
-  { id: 'e_salary',     label: 'Employee Salary',    icon: Users,          color: '#636366', bg: 'rgba(99,99,102,0.09)',  desc: 'Staff salary payment' },
-  { id: 'personal_exp', label: 'Personal Expense',   icon: CreditCard,     color: '#FF2D55', bg: 'rgba(255,45,85,0.09)',  desc: 'Partner paid from personal' },
-  { id: 'reimburse',    label: 'Reimburse Partner',  icon: ArrowRightLeft, color: '#00C7BE', bg: 'rgba(0,199,190,0.09)', desc: 'Pay partner back' },
+// What happened, in plain words → the form's txType (maps to sub_type in formToRow)
+const KINDS = [
+  { id: 'income',       label: 'Money received',           hint: 'Client payment, other income', icon: ArrowDownLeft },
+  { id: 'expense',      label: 'Expense',                  hint: 'Bills, tools, rent',           icon: ArrowUpRight },
+  { id: 'drawing',      label: 'Partner took money',       hint: 'Drawing from the company',     icon: HandCoins },
+  { id: 'return',       label: 'Partner returned money',   hint: 'Pays a drawing back',          icon: RotateCcw },
+  { id: 'p_salary',     label: 'Partner salary',           hint: 'Monthly partner payment',      icon: Banknote },
+  { id: 'personal_exp', label: 'Partner paid from pocket', hint: 'Company owes them',            icon: CreditCard },
+  { id: 'reimburse',    label: 'Reimburse partner',        hint: 'Pay a partner back',           icon: ArrowRightLeft },
+  { id: 'transfer',     label: 'Move between accounts',    hint: 'Bank ↔ Cash — not income or cost', icon: Repeat },
+  { id: 'other_money',  label: 'Loan, capital, asset, deposit', hint: 'Kept out of profit',      icon: Building2 },
 ];
 
-const SUB_TYPE_META = {
-  income:          { label: 'Income',         color: 'green'  },
-  expense:         { label: 'Expense',         color: 'red'    },
-  drawing:         { label: 'Drawing',         color: 'orange' },
-  drawing_return:  { label: 'Return',          color: 'blue'   },
-  partner_salary:  { label: 'Partner Salary',  color: 'purple' },
-  employee_salary: { label: 'Emp. Salary',     color: 'gray'   },
-  personal_exp:    { label: 'Personal Exp.',   color: 'red'    },
-  reimbursement:   { label: 'Reimbursed',      color: 'blue'   },
-};
+// Money that moves but is neither income nor a cost: never counted in profit and loss
+const OTHER_KINDS = [
+  { value: 'loan_received',    label: 'Loan received',             type: 'Credit' },
+  { value: 'loan_repaid',      label: 'Loan repayment',            type: 'Debit' },
+  { value: 'capital_added',    label: 'Capital put in by a partner', type: 'Credit' },
+  { value: 'asset_purchase',   label: 'Equipment / asset bought (laptop, furniture…)', type: 'Debit' },
+  { value: 'deposit_paid',     label: 'Deposit paid (rent, security)', type: 'Debit' },
+  { value: 'deposit_returned', label: 'Deposit returned to us',    type: 'Credit' },
+  { value: 'loan_given',       label: 'Money given to staff / others, to be returned', type: 'Debit' },
+  { value: 'loan_returned',    label: 'Given money returned to us', type: 'Credit' },
+  { value: 'gst_paid',         label: 'GST paid to the government', type: 'Debit' },
+];
+// Other income is rarely real revenue (money handed back, refunds), so it starts unticked
+const CATEGORY_KEY = 'expense_categories';   // settings key: the categories partners added
+function mergeCategories(...lists) {
+  const seen = new Map();
+  lists.flat().forEach(c => { const n = String(c || '').trim(); if (n && !seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n); });
+  const all = [...seen.values()].filter(c => c !== 'Other');
+  return [...all, 'Other'];
+}
+const revenueByDefault = source => source !== 'Other Income';
+const OTHER_KIND = Object.fromEntries(OTHER_KINDS.map(k => [k.value, k]));
 
-const PARTNER_COLORS = {
-  'Bhargav Thesiya':   { gradient: 'linear-gradient(135deg,#0071E3,#0A84FF)', text: '#0071E3' },
-  'Manas Vadodaria':   { gradient: 'linear-gradient(135deg,#34C759,#30D158)', text: '#34C759' },
-  'Kushal Mungalpara': { gradient: 'linear-gradient(135deg,#FF9500,#FFB340)', text: '#FF9500' },
-  'Prince Padariya':   { gradient: 'linear-gradient(135deg,#AF52DE,#BF5AF2)', text: '#AF52DE' },
+const SUB_TYPE_LABEL = {
+  income:          'Income',
+  expense:         'Expense',
+  drawing:         'Partner drawing',
+  drawing_return:  'Drawing return',
+  partner_salary:  'Partner salary',
+  employee_salary: 'Employee salary',
+  personal_exp:    'Paid by partner',
+  reimbursement:   'Reimbursement',
+  employee_advance: 'Salary advance',
+  advance_recovery: 'Salary settled from advance',
+  transfer:        'Transfer',
+  ...Object.fromEntries(OTHER_KINDS.map(k => [k.value, k.label.replace(/ \(.*\)$/, '')])),
 };
+// Entries written by another screen: changed only there, so the two never disagree
+const managedBy = t => (t?.projectPaymentId ? 'project'
+  : t && (t.employeeId || ['employee_salary', 'employee_advance', 'advance_recovery'].includes(t.subType)) ? 'employee'
+  : null);
+const typeLabel = t => SUB_TYPE_LABEL[t.subType] || (t.type === 'Credit' ? 'Income' : 'Expense');
 
-const DEFAULT_SALARY = { 'Bhargav Thesiya': 0, 'Manas Vadodaria': 0, 'Kushal Mungalpara': 0, 'Prince Padariya': 0 };
+const DEFAULT_SALARY = {};   // { [partner name]: monthly salary } — partners come from the people directory
+
+const DIRECTION_CHIPS = [
+  { value: 'all', label: 'All' },
+  { value: 'in',  label: 'Money in' },
+  { value: 'out', label: 'Money out' },
+];
+const NO_FILTERS = { search: '', dir: 'all', account: '', subType: '', month: '' };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const fmt = n => '₹' + Number(n).toLocaleString('en-IN');
-const today = () => new Date().toISOString().split('T')[0];
+const signed = n => (n < 0 ? '−' : n > 0 ? '+' : '') + fmtMoney(Math.abs(n));
+const plain  = n => (n < 0 ? '−' : '') + fmtMoney(Math.abs(n));
+const sumAmt = rows => rows.reduce((s, t) => s + (+t.amount || 0), 0);
 
-const currentMonthLabel = () =>
-  new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+// Salary month label, e.g. "November 2026". Partner-salary entries are matched
+// on this exact string, so every label on this page comes from this one function.
+const salaryMonthLabel = d => d.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+const currentMonthLabel = () => salaryMonthLabel(new Date());
+// Next month, this month, then the 11 before it (+ the entry's own label when older)
+function salaryMonthOptions(extra) {
+  const now = new Date();
+  const out = [];
+  for (let i = 1; i >= -11; i--) {
+    const value = salaryMonthLabel(new Date(now.getFullYear(), now.getMonth() + i, 1));
+    out.push({ value, label: i === 1 ? `${value} (next month)` : i === 0 ? `${value} (this month)` : value });
+  }
+  if (extra && !out.some(o => o.value === extra)) out.push({ value: extra, label: extra });
+  return out;
+}
 
+// Must parse to a finite number above zero: rejects "", ".", "1.2.3" and 0
+const parseAmount = v => {
+  const s = String(v ?? '').trim();
+  if (!/^(\d+\.?\d*|\.\d+)$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
+
+// One-line name of an entry — used for search, audit-log text and titles
 function txDesc(t) {
   if (!t) return '—';
   if (t.subType === 'drawing')         return `${t.person || ''} Drawing`;
@@ -72,20 +138,36 @@ function txDesc(t) {
   return t.remark || (t.type === 'Credit' ? t.source : t.category) || '—';
 }
 
+const txMain  = t => t.remark || (t.type === 'Credit' ? t.source : t.category) || txDesc(t);
+const txParty = t => t.clientName || t.paidTo || t.person || '';
+const txSub   = t => [
+  typeLabel(t),
+  t.type === 'Credit' && t.countInProfit === false ? 'Not revenue' : null,
+  t.remark ? (t.type === 'Credit' ? t.source : t.category) : null,
+  t.monthLabel,
+  t.paymentMethod,
+].filter(Boolean).join(' · ');
+
+const accountMatches = (t, a) => !a || t.accountType === a || (a === CASH && t.accountType === "Founder's Personal");
+
 const initForm = (txType = 'income') => ({
   txType,
-  accountType: 'Company Bank',
+  accountType: BANK,
   amount: '',
-  date: today(),
+  autoAmount: '',          // last amount the form filled in by itself (partner salary)
+  date: todayLocal(),
   paymentMethod: 'Bank Transfer',
   remark: '',
   source: 'Client Payment',
+  countInProfit: true,     // money received: does it count as revenue?
   clientName: '',
   category: 'Other',
   paidTo: '',
-  person: PARTNERS[0],
+  person: '',              // a partner's name; the form fills in the first partner
   monthLabel: currentMonthLabel(),
   reimburseFrom: 'none',
+  transferTo: CASH,
+  otherKind: 'loan_received',
 });
 
 const formToRow = (form) => {
@@ -105,7 +187,7 @@ const formToRow = (form) => {
   switch (form.txType) {
     case 'income':
       return { ...base, type: 'Credit', accountType: form.accountType, subType: 'income',
-        source: form.source, clientName: form.clientName };
+        source: form.source, clientName: form.clientName, countInProfit: form.countInProfit !== false };
     case 'expense':
       return { ...base, type: 'Debit', accountType: form.accountType, subType: 'expense',
         category: form.category, paidTo: form.paidTo };
@@ -119,1087 +201,1104 @@ const formToRow = (form) => {
       return { ...base, type: 'Debit', accountType: form.accountType, subType: 'partner_salary',
         person: form.person, monthLabel: form.monthLabel,
         remark: form.remark || `${form.person} Salary — ${form.monthLabel}` };
-    case 'e_salary':
-      return { ...base, type: 'Debit', accountType: 'Company Bank', subType: 'employee_salary',
-        person: form.person, monthLabel: form.monthLabel,
-        remark: form.remark || `${form.person} Salary — ${form.monthLabel}` };
     case 'personal_exp':
-      return { ...base, type: 'Debit', accountType: 'Partner Personal', subType: 'personal_exp',
+      return { ...base, type: 'Debit', accountType: POCKET, subType: 'personal_exp',
         person: form.person, category: form.category, paidTo: form.paidTo,
         remark: form.remark || `${form.person} Personal Expense` };
     case 'reimburse':
       return { ...base, type: 'Debit',
-        accountType: form.reimburseFrom === 'none' ? 'Partner Personal' : form.reimburseFrom,
+        accountType: form.reimburseFrom === 'none' ? POCKET : form.reimburseFrom,
         subType: 'reimbursement',
         person: form.person, remark: form.remark || `Reimbursement — ${form.person}` };
+    case 'other_money': {
+      const k = OTHER_KIND[form.otherKind] || OTHER_KINDS[0];
+      return { ...base, type: k.type, accountType: form.accountType, subType: k.value, category: k.label,
+        paidTo: form.paidTo || null, remark: form.remark || k.label };
+    }
     default:
       return { ...base, type: 'Credit', accountType: form.accountType, subType: form.txType };
   }
 };
 
+// Employee-salary rows never reach this: they are managed from the Employees page
 const rowToForm = (t) => {
   const txType =
-    t.subType === 'income'          ? 'income'
-    : t.subType === 'expense'       ? 'expense'
-    : t.subType === 'drawing'       ? 'drawing'
-    : t.subType === 'drawing_return'? 'return'
-    : t.subType === 'partner_salary'? 'p_salary'
-    : t.subType === 'employee_salary'? 'e_salary'
-    : t.subType === 'personal_exp'  ? 'personal_exp'
-    : t.subType === 'reimbursement' ? 'reimburse'
-    : t.type === 'Credit'           ? 'income'
+    t.subType === 'income'           ? 'income'
+    : t.subType === 'expense'        ? 'expense'
+    : t.subType === 'drawing'        ? 'drawing'
+    : t.subType === 'drawing_return' ? 'return'
+    : t.subType === 'partner_salary' ? 'p_salary'
+    : t.subType === 'personal_exp'   ? 'personal_exp'
+    : t.subType === 'reimbursement'  ? 'reimburse'
+    : OTHER_KIND[t.subType]          ? 'other_money'
+    : t.type === 'Credit'            ? 'income'
     : 'expense';
   return {
     txType,
     // Remap old "Founder's Personal" to new name for any legacy records
-    accountType:  (t.accountType === "Founder's Personal" ? 'Cash + Savings Account' : t.accountType) || 'Company Bank',
+    accountType:  (t.accountType === "Founder's Personal" ? CASH : t.accountType) || BANK,
     amount:       String(t.amount || ''),
-    date:         (t.date || today()).slice(0, 10),
+    date:         (t.date || todayLocal()).slice(0, 10),
     paymentMethod: t.paymentMethod || 'Bank Transfer',
     remark:       t.remark       || '',
     source:       t.source       || 'Client Payment',
+    countInProfit: t.countInProfit !== false,
     clientName:   t.clientName   || '',
     category:     t.category     || 'Other',
     paidTo:       t.paidTo       || '',
-    person:       t.person       || PARTNERS[0],
+    person:       t.person       || '',
     monthLabel:   t.monthLabel   || currentMonthLabel(),
+    otherKind:    OTHER_KIND[t.subType] ? t.subType : 'loan_received',
+    transferTo:   CASH,
     reimburseFrom: t.subType === 'reimbursement'
-      ? (t.accountType === 'Partner Personal' ? 'none' : (t.accountType || 'none'))
+      ? (t.accountType === POCKET ? 'none' : (t.accountType || 'none'))
       : 'none',
   };
 };
 
-// ─── Small shared components ──────────────────────────────────────────────────
+function validate(form) {
+  const errors = {};
+  if (parseAmount(form.amount) == null) errors.amount = 'Enter an amount greater than 0';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(form.date || '')) errors.date = 'Choose a date';
+  return errors;
+}
 
-const FF = ({ label, children, required }) => (
-  <div>
-    <label style={{ display:'block', fontSize:11.5, fontWeight:550, color:'#6E6E73', marginBottom:5, textTransform:'uppercase', letterSpacing:'0.4px' }}>
-      {label}{required && <span style={{ color:'#FF3B30', marginLeft:2 }}>*</span>}
-    </label>
-    {children}
-  </div>
-);
+// Render only the phone list or only the desktop table, never both
+const PHONE_MQ = '(max-width: 768px)';
+const subscribePhone = cb => {
+  const m = window.matchMedia(PHONE_MQ);
+  m.addEventListener('change', cb);
+  return () => m.removeEventListener('change', cb);
+};
+const useIsPhone = () => useSyncExternalStore(subscribePhone, () => window.matchMedia(PHONE_MQ).matches, () => false);
 
-const TH = ({ c }) => (
-  <th style={{ textAlign:'left', padding:'10px 16px', fontSize:11, fontWeight:600, color:'#8E8E93', textTransform:'uppercase', letterSpacing:'0.5px', whiteSpace:'nowrap', borderBottom:'1px solid rgba(0,0,0,0.07)' }}>{c}</th>
-);
-const TD = ({ children, s = {} }) => (
-  <td style={{ padding:'11px 16px', verticalAlign:'middle', ...s }}>{children}</td>
-);
+// ─── Form building blocks ────────────────────────────────────────────────────
 
-// ─── TypeSelector ─────────────────────────────────────────────────────────────
-
-function TypeSelector({ value, onChange }) {
+// A labelled group of buttons (Field wraps its control in a <label>, which must hold one control only)
+function Group({ label, required, hint, children }) {
   return (
-    <div>
-      <label style={{ display:'block', fontSize:11.5, fontWeight:550, color:'#6E6E73', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.4px' }}>
-        Transaction Type <span style={{ color:'#FF3B30' }}>*</span>
-      </label>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:8 }}>
-        {TX_TYPES.map(({ id, label, icon: Icon, color, bg, desc }) => {
-          const active = value === id;
-          return (
-            <button
-              key={id}
-              onClick={() => onChange(id)}
-              style={{
-                padding:'11px 10px', borderRadius:12, textAlign:'left', cursor:'pointer',
-                border:`1.5px solid ${active ? color : 'rgba(0,0,0,0.08)'}`,
-                background: active ? bg : 'rgba(0,0,0,0.015)',
-                transition:'all 0.14s ease',
-              }}
-            >
-              <div style={{ width:28, height:28, borderRadius:8, background: active ? color : 'rgba(0,0,0,0.07)', display:'flex', alignItems:'center', justifyContent:'center', marginBottom:6 }}>
-                <Icon size={14} color={active ? '#fff' : '#6E6E73'}/>
-              </div>
-              <div style={{ fontSize:12, fontWeight:640, color: active ? color : '#1D1D1F', lineHeight:1.2 }}>{label}</div>
-              <div style={{ fontSize:10, color:'#AEAEB2', marginTop:2, lineHeight:1.3 }}>{desc}</div>
-            </button>
-          );
-        })}
-      </div>
+    <div className="field" role="radiogroup" aria-label={label}>
+      <span className="field-label">{label}{required && <span className="field-req" aria-hidden="true"> *</span>}</span>
+      {children}
+      {hint && <span className="field-hint">{hint}</span>}
     </div>
   );
 }
 
-// ─── PartnerPicker ────────────────────────────────────────────────────────────
-
-function PartnerPicker({ value, onChange, metaMap = {} }) {
+function Segmented({ options, value, onChange }) {
   return (
-    <FF label="Partner" required>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:8 }}>
-        {PARTNERS.map(p => {
-          const col    = PARTNER_COLORS[p];
-          const active = value === p;
-          const meta   = metaMap[p];
-          return (
-            <button
-              key={p}
-              onClick={() => onChange(p)}
-              style={{ padding:'9px 6px', borderRadius:10, textAlign:'center', cursor:'pointer', transition:'all 0.14s',
-                border:`1.5px solid ${active ? col.text : 'rgba(0,0,0,0.08)'}`,
-                background: active ? col.text + '18' : '#fff',
-              }}
-            >
-              <div style={{ fontSize:12.5, fontWeight:640, color: active ? col.text : '#3C3C43' }}>{p}</div>
-              {meta && <div style={{ fontSize:10, color: meta.color || '#AEAEB2', marginTop:2 }}>{meta.label}</div>}
-            </button>
-          );
-        })}
-      </div>
-    </FF>
+    <div className="tab-bar tx-seg">
+      {options.map(o => (
+        <button key={o.value} type="button" role="radio" aria-checked={value === o.value}
+          className={`tab-item ${value === o.value ? 'active' : ''}`} onClick={() => onChange(o.value)}>{o.label}</button>
+      ))}
+    </div>
   );
 }
 
-// ─── TxFields — contextual fields per type ────────────────────────────────────
-
-function TxFields({ form, onChange, partnerOutstanding, partnerReimburseOwed, salaryConfig, partnerSalaryPaid, employees }) {
-  const s = (k, v) => onChange({ ...form, [k]: v });
-
-  // Reused sub-blocks (as JSX values, not components, to avoid remount)
-  const accountToggle = (
-    <FF label="Account" required>
-      <div className="tab-bar">
-        {ACCOUNT_TYPES.map(t => (
-          <button key={t} onClick={() => s('accountType', t)} className={`tab-item ${form.accountType === t ? 'active' : ''}`} style={{ flex:1, fontSize:11.5 }}>{t}</button>
+// meta: { [partner]: { label, tone } }
+// The ledger stores the partner's name; a name no longer in the directory stays selectable.
+function PartnerPicker({ value, onChange, meta, partners }) {
+  const names = value && !partners.includes(value) ? [value, ...partners] : partners;
+  return (
+    <Group label="Partner" required>
+      <div className="tx-picks">
+        {names.map(p => (
+          <button key={p} type="button" role="radio" aria-checked={value === p} className="tx-pick" onClick={() => onChange(p)}>
+            <span className="tx-pick-name">{p}</span>
+            {meta?.[p] && <span className={`tx-pick-meta ${meta[p].tone ? `tx-${meta[p].tone}` : ''}`}>{meta[p].label}</span>}
+          </button>
         ))}
       </div>
-    </FF>
+    </Group>
   );
-
-  const amountDate = (dateLabel = 'Date') => (
-    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-      <FF label="Amount (₹)" required>
-        <NumInput className="mac-input" value={form.amount} onChange={v => s('amount', v)} placeholder="0"/>
-      </FF>
-      <FF label={dateLabel} required>
-        <input className="mac-input" type="date" value={form.date} onChange={e => s('date', e.target.value)}/>
-      </FF>
-    </div>
-  );
-
-  // ── Income ──────────────────────────────────────────────
-  if (form.txType === 'income') return (
-    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      {accountToggle}
-      {amountDate()}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-        <FF label="Source">
-          <select className="mac-select" value={form.source} onChange={e => s('source', e.target.value)}>
-            {TRANSACTION_SOURCES.map(x => <option key={x}>{x}</option>)}
-          </select>
-        </FF>
-        <FF label="Payment Method">
-          <select className="mac-select" value={form.paymentMethod} onChange={e => s('paymentMethod', e.target.value)}>
-            {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
-          </select>
-        </FF>
-      </div>
-      <FF label="Client Name">
-        <input className="mac-input" value={form.clientName} onChange={e => s('clientName', e.target.value)} placeholder="Optional"/>
-      </FF>
-      <FF label="Remark">
-        <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional note"/>
-      </FF>
-    </div>
-  );
-
-  // ── Expense ──────────────────────────────────────────────
-  if (form.txType === 'expense') return (
-    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      {accountToggle}
-      {amountDate()}
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-        <FF label="Category">
-          <select className="mac-select" value={form.category} onChange={e => s('category', e.target.value)}>
-            {EXPENSE_CATEGORIES.map(x => <option key={x}>{x}</option>)}
-          </select>
-        </FF>
-        <FF label="Payment Method">
-          <select className="mac-select" value={form.paymentMethod} onChange={e => s('paymentMethod', e.target.value)}>
-            {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
-          </select>
-        </FF>
-      </div>
-      <FF label="Paid To">
-        <input className="mac-input" value={form.paidTo} onChange={e => s('paidTo', e.target.value)} placeholder="Person / Vendor"/>
-      </FF>
-      <FF label="Remark">
-        <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional note"/>
-      </FF>
-    </div>
-  );
-
-  // ── Partner Drawing ──────────────────────────────────────
-  if (form.txType === 'drawing') {
-    const outstanding = partnerOutstanding[form.person] || 0;
-    const meta = Object.fromEntries(PARTNERS.map(p => {
-      const out = partnerOutstanding[p] || 0;
-      return [p, out > 0 ? { label: fmt(out) + ' due', color: '#FF9500' } : { label: 'Clear ✓', color: '#34C759' }];
-    }));
-    return (
-      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-        <PartnerPicker value={form.person} onChange={v => s('person', v)} metaMap={meta}/>
-        {outstanding > 0 && (
-          <div style={{ padding:'8px 12px', borderRadius:10, background:'rgba(255,149,0,0.06)', border:'1px solid rgba(255,149,0,0.15)', fontSize:12, color:'#FF9500' }}>
-            ⚠ {form.person} already has <strong>{fmt(outstanding)}</strong> outstanding
-          </div>
-        )}
-        {accountToggle}
-        {amountDate()}
-        <FF label="Purpose / Notes">
-          <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="e.g. Travel, Emergency, Personal"/>
-        </FF>
-      </div>
-    );
-  }
-
-  // ── Drawing Return ───────────────────────────────────────
-  if (form.txType === 'return') {
-    const outstanding = partnerOutstanding[form.person] || 0;
-    const meta = Object.fromEntries(PARTNERS.map(p => {
-      const out = partnerOutstanding[p] || 0;
-      return [p, out > 0 ? { label: fmt(out) + ' due', color: '#FF3B30' } : { label: 'Settled ✓', color: '#34C759' }];
-    }));
-    return (
-      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-        <PartnerPicker value={form.person} onChange={v => s('person', v)} metaMap={meta}/>
-        {outstanding > 0 ? (
-          <div style={{ padding:'8px 12px', borderRadius:10, background:'rgba(255,59,48,0.06)', border:'1px solid rgba(255,59,48,0.12)', fontSize:12, color:'#FF3B30' }}>
-            {form.person} has <strong>{fmt(outstanding)}</strong> outstanding to return
-          </div>
-        ) : (
-          <div style={{ padding:'8px 12px', borderRadius:10, background:'rgba(52,199,89,0.06)', border:'1px solid rgba(52,199,89,0.12)', fontSize:12, color:'#34C759' }}>
-            ✓ {form.person} has no outstanding drawings
-          </div>
-        )}
-        {accountToggle}
-        {amountDate()}
-        <FF label="Notes">
-          <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional"/>
-        </FF>
-      </div>
-    );
-  }
-
-  // ── Partner Salary ───────────────────────────────────────
-  if (form.txType === 'p_salary') {
-    const monthly   = salaryConfig[form.person] || 0;
-    const paidSoFar = (partnerSalaryPaid || {})[form.person] || 0;
-    const remaining = Math.max(0, monthly - paidSoFar);
-    const isOverpay = +form.amount > remaining && remaining > 0;
-    const meta = Object.fromEntries(PARTNERS.map(p => {
-      const mo  = salaryConfig[p] || 0;
-      const paid= (partnerSalaryPaid || {})[p] || 0;
-      const rem = Math.max(0, mo - paid);
-      if (!mo)       return [p, { label: 'Not set',           color: '#AEAEB2' }];
-      if (rem === 0) return [p, { label: 'Fully paid ✓',      color: '#34C759' }];
-      if (paid > 0)  return [p, { label: fmt(rem) + ' left',  color: '#FF9500' }];
-      return           [p, { label: fmt(mo) + ' pending',    color: '#FF3B30' }];
-    }));
-    return (
-      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-        <PartnerPicker
-          value={form.person}
-          onChange={p => {
-            const rem = Math.max(0, (salaryConfig[p] || 0) - ((partnerSalaryPaid || {})[p] || 0));
-            onChange({ ...form, person: p, amount: rem ? String(rem) : '' });
-          }}
-          metaMap={meta}
-        />
-        {accountToggle}
-        <FF label="Month" required>
-          <input className="mac-input" value={form.monthLabel} onChange={e => s('monthLabel', e.target.value)} placeholder={currentMonthLabel()}/>
-        </FF>
-
-        {/* Salary progress for selected partner */}
-        {monthly > 0 && (
-          <div style={{ padding:'10px 14px', borderRadius:12, background: remaining === 0 ? 'rgba(52,199,89,0.06)' : 'rgba(255,149,0,0.06)', border: `1px solid ${remaining === 0 ? 'rgba(52,199,89,0.15)' : 'rgba(255,149,0,0.15)'}` }}>
-            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6, fontSize:12 }}>
-              <span style={{ color:'#6E6E73' }}>Paid this month</span>
-              <span style={{ fontWeight:650, color: remaining === 0 ? '#34C759' : '#FF9500' }}>{fmt(paidSoFar)} / {fmt(monthly)}</span>
-            </div>
-            <div style={{ height:5, borderRadius:99, background:'rgba(0,0,0,0.07)', overflow:'hidden' }}>
-              <div style={{ height:'100%', borderRadius:99, width:`${Math.min(100, (paidSoFar/monthly)*100)}%`, background: remaining === 0 ? '#34C759' : '#FF9500', transition:'width 0.3s' }}/>
-            </div>
-            {remaining > 0 && <div style={{ fontSize:11, color:'#FF9500', marginTop:5 }}>{fmt(remaining)} remaining this month</div>}
-            {remaining === 0 && <div style={{ fontSize:11, color:'#34C759', marginTop:5 }}>✓ Fully paid for {form.monthLabel}</div>}
-          </div>
-        )}
-
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-          <FF label="Amount (₹)" required>
-            <NumInput
-              className="mac-input"
-              value={form.amount}
-              onChange={v => s('amount', v)}
-              placeholder={remaining ? fmtInput(remaining) : '0'}
-              style={{ borderColor: isOverpay ? '#FF3B30' : undefined }}
-            />
-            {isOverpay && <div style={{ fontSize:11, color:'#FF3B30', marginTop:4 }}>Exceeds remaining {fmt(remaining)}</div>}
-          </FF>
-          <FF label="Date Paid" required>
-            <input className="mac-input" type="date" value={form.date} onChange={e => s('date', e.target.value)}/>
-          </FF>
-        </div>
-        <FF label="Payment Method">
-          <select className="mac-select" value={form.paymentMethod} onChange={e => s('paymentMethod', e.target.value)}>
-            {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
-          </select>
-        </FF>
-        <FF label="Notes">
-          <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional"/>
-        </FF>
-      </div>
-    );
-  }
-
-  // ── Partner Personal Expense ─────────────────────────────────────────────────
-  if (form.txType === 'personal_exp') {
-    const owedMeta = Object.fromEntries(PARTNERS.map(p => {
-      const owed = (partnerReimburseOwed || {})[p] || 0;
-      return [p, owed > 0 ? { label: fmt(owed) + ' pending', color: '#FF2D55' } : { label: 'Clear ✓', color: '#34C759' }];
-    }));
-    return (
-      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-        <div style={{ padding:'10px 14px', borderRadius:12, background:'rgba(255,45,85,0.06)', border:'1px solid rgba(255,45,85,0.15)', fontSize:12.5, color:'#FF2D55', lineHeight:1.6 }}>
-          Use this when a partner paid a company expense from their <strong>personal funds</strong>. The company will owe them a reimbursement.
-        </div>
-        <PartnerPicker value={form.person} onChange={v => s('person', v)} metaMap={owedMeta}/>
-        {amountDate('Date Paid')}
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-          <FF label="Category">
-            <select className="mac-select" value={form.category} onChange={e => s('category', e.target.value)}>
-              {EXPENSE_CATEGORIES.map(x => <option key={x}>{x}</option>)}
-            </select>
-          </FF>
-          <FF label="Payment Method">
-            <select className="mac-select" value={form.paymentMethod} onChange={e => s('paymentMethod', e.target.value)}>
-              {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
-            </select>
-          </FF>
-        </div>
-        <FF label="Paid To (Vendor / Purpose)">
-          <input className="mac-input" value={form.paidTo} onChange={e => s('paidTo', e.target.value)} placeholder="e.g. Electrician, Amazon, Emergency repair"/>
-        </FF>
-        <FF label="Remark">
-          <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional note"/>
-        </FF>
-      </div>
-    );
-  }
-
-  // ── Reimburse Partner ────────────────────────────────────────────────────────
-  if (form.txType === 'reimburse') {
-    const owed = (partnerReimburseOwed || {})[form.person] || 0;
-    const owedMeta = Object.fromEntries(PARTNERS.map(p => {
-      const o = (partnerReimburseOwed || {})[p] || 0;
-      return [p, o > 0 ? { label: fmt(o) + ' owed', color: '#FF2D55' } : { label: 'All clear ✓', color: '#34C759' }];
-    }));
-    return (
-      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-        <PartnerPicker value={form.person} onChange={v => s('person', v)} metaMap={owedMeta}/>
-        {owed > 0 ? (
-          <div style={{ padding:'8px 12px', borderRadius:10, background:'rgba(255,45,85,0.06)', border:'1px solid rgba(255,45,85,0.12)', fontSize:12, color:'#FF2D55' }}>
-            Company owes <strong>{form.person}</strong> <strong>{fmt(owed)}</strong> in pending reimbursements
-          </div>
-        ) : (
-          <div style={{ padding:'8px 12px', borderRadius:10, background:'rgba(52,199,89,0.06)', border:'1px solid rgba(52,199,89,0.12)', fontSize:12, color:'#34C759' }}>
-            ✓ No pending reimbursements for {form.person}
-          </div>
-        )}
-        <FF label="Paid From" required>
-          <div className="tab-bar">
-            {[...ACCOUNT_TYPES, 'None'].map(t => (
-              <button key={t} onClick={() => s('reimburseFrom', t === 'None' ? 'none' : t)} className={`tab-item ${(form.reimburseFrom === 'none' ? 'None' : form.reimburseFrom) === t ? 'active' : ''}`} style={{ flex:1, fontSize:11.5 }}>{t}</button>
-            ))}
-          </div>
-          {form.reimburseFrom === 'none' ? (
-            <div style={{ fontSize:11, color:'#AEAEB2', marginTop:5 }}>No account balance will be affected — just clears the owed amount.</div>
-          ) : (
-            <div style={{ fontSize:11, color:'#FF2D55', marginTop:5 }}>This will decrease the {form.reimburseFrom} balance by the amount paid.</div>
-          )}
-        </FF>
-        {amountDate('Date Paid')}
-        <FF label="Payment Method">
-          <select className="mac-select" value={form.paymentMethod} onChange={e => s('paymentMethod', e.target.value)}>
-            {PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}
-          </select>
-        </FF>
-        <FF label="Notes">
-          <input className="mac-input" value={form.remark} onChange={e => s('remark', e.target.value)} placeholder="Optional"/>
-        </FF>
-      </div>
-    );
-  }
-
-  // ── Employee Salary — redirect to Employees page ────────────────────────────
-  if (form.txType === 'e_salary') {
-    return (
-      <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-        <div style={{
-          padding:'20px 18px', borderRadius:14,
-          background:'linear-gradient(135deg,rgba(99,99,102,0.07),rgba(99,99,102,0.04))',
-          border:'1.5px solid rgba(99,99,102,0.15)',
-          display:'flex', flexDirection:'column', alignItems:'center', textAlign:'center', gap:12,
-        }}>
-          <div style={{ width:48, height:48, borderRadius:14, background:'rgba(99,99,102,0.1)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-            <Users size={22} color="#636366"/>
-          </div>
-          <div>
-            <div style={{ fontSize:14, fontWeight:660, color:'#1D1D1F', marginBottom:4 }}>Employee Salary Payments</div>
-            <div style={{ fontSize:12.5, color:'#6E6E73', lineHeight:1.6, maxWidth:340 }}>
-              Salary payments are managed directly from the <strong>Employees</strong> page.
-              When you pay a salary there, it is <strong>automatically recorded</strong> as a transaction here.
-            </div>
-          </div>
-          <div style={{ display:'flex', flexDirection:'column', gap:6, width:'100%', marginTop:4 }}>
-            <div style={{ padding:'9px 12px', borderRadius:10, background:'rgba(52,199,89,0.07)', border:'1px solid rgba(52,199,89,0.15)', fontSize:12, color:'#34C759', display:'flex', alignItems:'center', gap:8 }}>
-              <CheckCircle2 size={13}/>
-              Salary budget tracking per employee
-            </div>
-            <div style={{ padding:'9px 12px', borderRadius:10, background:'rgba(52,199,89,0.07)', border:'1px solid rgba(52,199,89,0.15)', fontSize:12, color:'#34C759', display:'flex', alignItems:'center', gap:8 }}>
-              <CheckCircle2 size={13}/>
-              Overpayment prevention with remaining balance check
-            </div>
-            <div style={{ padding:'9px 12px', borderRadius:10, background:'rgba(52,199,89,0.07)', border:'1px solid rgba(52,199,89,0.15)', fontSize:12, color:'#34C759', display:'flex', alignItems:'center', gap:8 }}>
-              <CheckCircle2 size={13}/>
-              Auto-creates expense transaction on save
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
 }
 
-// ─── PartnerOverview ──────────────────────────────────────────────────────────
+const Options = ({ list }) => list.map(x => <option key={x}>{x}</option>);
 
-function PartnerOverview({ txs, salaryConfig, onSetSalaries }) {
-  const [open, setOpen] = useState(true);
+const ACCOUNT_OPTIONS = ACCOUNT_TYPES.map(a => ({ value: a, label: a }));
+const REIMBURSE_OPTIONS = [...ACCOUNT_OPTIONS, { value: 'none', label: 'None' }];
 
-  const curMonth = currentMonthLabel();
+// ─── Add / edit form ─────────────────────────────────────────────────────────
 
-  const overview = useMemo(() => PARTNERS.map(p => {
-    const taken         = txs.filter(t => t.subType === 'drawing'        && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-    const returned      = txs.filter(t => t.subType === 'drawing_return' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-    const outstanding   = Math.max(0, taken - returned);
-    const personalSpent = txs.filter(t => t.subType === 'personal_exp'  && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-    const reimbursed    = txs.filter(t => t.subType === 'reimbursement' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-    const reimburseOwed = Math.max(0, personalSpent - reimbursed);
-    const monthly       = salaryConfig[p] || 0;
-    const salaryPaidAmt = txs.filter(t => t.subType === 'partner_salary' && t.person === p && t.monthLabel === curMonth).reduce((s, t) => s + (+t.amount || 0), 0);
-    const salaryRemaining = Math.max(0, monthly - salaryPaidAmt);
-    return { partner: p, outstanding, reimburseOwed, monthly, salaryPaidAmt, salaryRemaining };
-  }), [txs, salaryConfig]); // eslint-disable-line react-hooks/exhaustive-deps
+function TxForm({ form, setForm, errors, editing, stats, onSubmit, onEmployees }) {
+  const { partners, partnerOutstanding, partnerReimburseOwed, salaryConfig, salaryPaidFor, categories, addCategory } = stats;
+  const [newCat, setNewCat] = useState(null);           // null = closed, string = the name being typed
+  const [addingCat, setAddingCat] = useState(false);
+  const saveCat = async () => {
+    if (!newCat?.trim() || addingCat) return;
+    setAddingCat(true);
+    const name = await addCategory(newCat);
+    setAddingCat(false);
+    if (name) { setForm(f => ({ ...f, category: name })); setNewCat(null); }
+  };
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const kind = form.txType;
 
-  const totalOutstanding   = overview.reduce((s, p) => s + p.outstanding, 0);
-  const totalReimburseOwed = overview.reduce((s, p) => s + p.reimburseOwed, 0);
-  const pendingSalaries    = overview.filter(p => p.monthly > 0 && p.salaryRemaining > 0);
-  const curMonthShort      = curMonth.split(' ')[0];
+  const salaryLeft = (person, label) => Math.max(0, (salaryConfig[person] || 0) - salaryPaidFor(person, label));
+  // Suggest the unpaid salary, but never overwrite an amount the user typed
+  const withSalarySuggestion = (prev, next) => {
+    if (prev.amount !== '' && prev.amount !== prev.autoAmount) return next;
+    const left = salaryLeft(next.person, next.monthLabel);
+    const auto = left ? String(left) : '';
+    return { ...next, amount: auto, autoAmount: auto };
+  };
+  const setSalary = patch => setForm(f => withSalarySuggestion(f, { ...f, ...patch }));
+  const chooseKind = id => setForm(f => {
+    const typed = f.amount === f.autoAmount ? '' : f.amount;
+    const next = { ...initForm(id), person: f.person || partners[0] || '', date: f.date, amount: typed };
+    return id === 'p_salary' ? withSalarySuggestion({ amount: typed, autoAmount: '' }, next) : next;
+  });
+
+  const account = (
+    <Group label="Account" required>
+      <Segmented options={ACCOUNT_OPTIONS} value={form.accountType} onChange={v => set('accountType', v)} />
+    </Group>
+  );
+  const method = (
+    <Field label="Payment method">
+      {id => <select id={id} className="mac-select" value={form.paymentMethod} onChange={e => set('paymentMethod', e.target.value)}><Options list={PAYMENT_METHODS} /></select>}
+    </Field>
+  );
+  const categoryList = form.category && !categories.includes(form.category) ? [form.category, ...categories] : categories;
+  const category = (
+    <div className="field">
+      <label className="field-label" htmlFor="tx-category">Category</label>
+      {newCat === null ? (
+        <div className="tx-cat">
+          <select id="tx-category" className="mac-select" value={form.category} onChange={e => set('category', e.target.value)}><Options list={categoryList} /></select>
+          <button type="button" className="mac-btn mac-btn-secondary tx-cat-add" onClick={() => setNewCat('')} aria-label="Add a new category" title="Add a new category"><Plus size={15} /></button>
+        </div>
+      ) : (
+        <div className="tx-cat">
+          <input id="tx-category" className="mac-input" autoFocus value={newCat} maxLength={40} placeholder="New category name"
+            onChange={e => setNewCat(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveCat(); } else if (e.key === 'Escape') { e.stopPropagation(); setNewCat(null); } }} />
+          <button type="button" className="mac-btn mac-btn-primary" onClick={saveCat} disabled={!newCat.trim() || addingCat} style={{ paddingInline: 12 }}>Add</button>
+          <button type="button" className="mac-btn mac-btn-secondary tx-cat-add" onClick={() => setNewCat(null)} aria-label="Cancel" title="Cancel"><X size={15} /></button>
+        </div>
+      )}
+      {newCat !== null && <span className="field-hint">Saved for all partners.</span>}
+    </div>
+  );
+  const text = (label, key, placeholder) => (
+    <Field label={label}>
+      {id => <input id={id} className="mac-input" value={form[key]} onChange={e => set(key, e.target.value)} placeholder={placeholder} />}
+    </Field>
+  );
+
+  // Partner salary: progress for the month chosen in the form
+  const monthly   = salaryConfig[form.person] || 0;
+  const paidSoFar = kind === 'p_salary' ? salaryPaidFor(form.person, form.monthLabel) : 0;
+  const remaining = Math.max(0, monthly - paidSoFar);
+  const overpay   = kind === 'p_salary' && monthly > 0 && (parseAmount(form.amount) || 0) > remaining;
+
+  const dueMeta = (map, word, toneDue, clear) => Object.fromEntries(partners.map(p => {
+    const v = map[p] || 0;
+    return [p, v > 0 ? { label: `${fmtMoney(v)} ${word}`, tone: toneDue } : { label: clear, tone: 'good' }];
+  }));
+
+  let details = null;
+  if (kind === 'transfer') details = (
+    <>
+      <Group label="From" required>
+        <Segmented options={ACCOUNT_OPTIONS} value={form.accountType}
+          onChange={v => setForm(f => ({ ...f, accountType: v, transferTo: v === BANK ? CASH : BANK }))} />
+      </Group>
+      <div className="tx-note"><Info size={14} /><span>Moves to <strong>{accountLabel(form.accountType === BANK ? CASH : BANK)}</strong>. Balances change on both sides; profit does not.</span></div>
+      <FormSection title="Details">
+        {method}
+        {text('Remark', 'remark', 'e.g. Cash withdrawn for office expenses')}
+      </FormSection>
+    </>
+  );
+  else if (kind === 'other_money') details = (
+    <>
+      <Field label="What is it?" required hint="Money that comes or goes without being income or a cost. It changes your balances but never your profit.">
+        {id => <select id={id} className="mac-select" value={form.otherKind} onChange={e => set('otherKind', e.target.value)}>
+          {OTHER_KINDS.map(k => <option key={k.value} value={k.value}>{k.label} — money {k.type === 'Credit' ? 'in' : 'out'}</option>)}
+        </select>}
+      </Field>
+      {account}
+      <FormSection title="Details">
+        <FormGrid>{method}{text(OTHER_KIND[form.otherKind]?.type === 'Credit' ? 'From' : 'Paid to', 'paidTo', 'Bank, lender, landlord, vendor…')}</FormGrid>
+        {text('Remark', 'remark', 'Optional note')}
+      </FormSection>
+    </>
+  );
+  else if (kind === 'income') details = (
+    <>
+      {account}
+      <div className="tx-note"><Info size={14} /><span>A client paying for a project? Record it on the project (Projects → Add payment) — it appears here as income automatically, so it is never counted twice.</span></div>
+      <FormSection title="Details">
+        <FormGrid>
+          <Field label="Source">
+            {id => <select id={id} className="mac-select" value={form.source} onChange={e => setForm(f => ({ ...f, source: e.target.value, countInProfit: revenueByDefault(e.target.value) }))}><Options list={TRANSACTION_SOURCES} /></select>}
+          </Field>
+          {method}
+        </FormGrid>
+        {text('Client name', 'clientName', 'Optional')}
+        {text('Remark', 'remark', 'Optional note')}
+        <label className="tx-check">
+          <Checkbox checked={form.countInProfit !== false} onCheckedChange={v => set('countInProfit', v === true)} />
+          <span>
+            <strong>Count this as revenue</strong>
+            <span className="tx-check-hint">
+              {form.countInProfit !== false
+                ? 'It adds to revenue and profit.'
+                : 'It raises the balance only. Use this for money handed back to you or a refund of your own money.'}
+            </span>
+          </span>
+        </label>
+      </FormSection>
+    </>
+  );
+  else if (kind === 'expense') details = (
+    <>
+      {account}
+      <FormSection title="Details">
+        <FormGrid>{category}{method}</FormGrid>
+        {text('Paid to', 'paidTo', 'Person / vendor')}
+        {text('Remark', 'remark', 'Optional note')}
+      </FormSection>
+    </>
+  );
+  else if (kind === 'drawing') {
+    const due = partnerOutstanding[form.person] || 0;
+    details = (
+      <>
+        <PartnerPicker partners={partners} value={form.person} onChange={v => set('person', v)} meta={dueMeta(partnerOutstanding, 'due', 'warn', 'Clear')} />
+        {due > 0 && <div className="tx-note warn"><AlertTriangle size={14} /><span>{form.person} already has <strong>{fmtMoney(due)}</strong> outstanding.</span></div>}
+        {account}
+        {text('Purpose / notes', 'remark', 'e.g. Travel, emergency, personal')}
+      </>
+    );
+  }
+  else if (kind === 'return') {
+    const due = partnerOutstanding[form.person] || 0;
+    details = (
+      <>
+        <PartnerPicker partners={partners} value={form.person} onChange={v => set('person', v)} meta={dueMeta(partnerOutstanding, 'due', 'bad', 'Settled')} />
+        {due > 0
+          ? <div className="tx-note warn"><Info size={14} /><span>{form.person} has <strong>{fmtMoney(due)}</strong> outstanding to return.</span></div>
+          : <div className="tx-note good"><Info size={14} /><span>{form.person} has no outstanding drawings.</span></div>}
+        {account}
+        {text('Notes', 'remark', 'Optional')}
+      </>
+    );
+  }
+  else if (kind === 'p_salary') {
+    const meta = Object.fromEntries(partners.map(p => {
+      const mo = salaryConfig[p] || 0;
+      const paid = salaryPaidFor(p, form.monthLabel);
+      const left = Math.max(0, mo - paid);
+      if (!mo)        return [p, { label: 'Salary not set' }];
+      if (left === 0) return [p, { label: 'Fully paid', tone: 'good' }];
+      if (paid > 0)   return [p, { label: `${fmtMoney(left)} left`, tone: 'warn' }];
+      return [p, { label: `${fmtMoney(mo)} pending`, tone: 'bad' }];
+    }));
+    details = (
+      <>
+        <PartnerPicker partners={partners} value={form.person} onChange={p => setSalary({ person: p })} meta={meta} />
+        <Field label="Salary month" required>
+          {id => (
+            <select id={id} className="mac-select" value={form.monthLabel} onChange={e => setSalary({ monthLabel: e.target.value })}>
+              {salaryMonthOptions(form.monthLabel).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          )}
+        </Field>
+        {monthly > 0 ? (
+          <div className={`tx-note ${remaining === 0 ? 'good' : 'warn'}`} style={{ flexDirection: 'column', gap: 6 }}>
+            <span style={{ display: 'flex', justifyContent: 'space-between', gap: 10, width: '100%' }}>
+              <span>Paid for {form.monthLabel}</span>
+              <strong>{fmtMoney(paidSoFar)} / {fmtMoney(monthly)}</strong>
+            </span>
+            <span className={`tx-progress ${remaining === 0 ? 'done' : ''}`} style={{ width: '100%' }}>
+              <span style={{ width: `${Math.min(100, (paidSoFar / monthly) * 100)}%` }} />
+            </span>
+            <span>{remaining > 0 ? `${fmtMoney(remaining)} still to pay for ${form.monthLabel}` : `Fully paid for ${form.monthLabel}`}</span>
+          </div>
+        ) : (
+          <div className="tx-note"><Info size={14} /><span>No monthly salary is set for {form.person}. Set it under More → Partner salary settings to track what is left to pay.</span></div>
+        )}
+        {account}
+        <FormSection title="Details">
+          {method}
+          {text('Notes', 'remark', 'Optional')}
+        </FormSection>
+      </>
+    );
+  }
+  else if (kind === 'personal_exp') details = (
+    <>
+      <div className="tx-note brand"><Info size={14} /><span>Use this when a partner paid a company expense from their <strong>own money</strong>. It does not change bank or cash; the company will owe them a reimbursement.</span></div>
+      <PartnerPicker partners={partners} value={form.person} onChange={v => set('person', v)} meta={dueMeta(partnerReimburseOwed, 'pending', 'warn', 'Clear')} />
+      <FormSection title="Details">
+        <FormGrid>{category}{method}</FormGrid>
+        {text('Paid to (vendor / purpose)', 'paidTo', 'e.g. Electrician, Amazon, emergency repair')}
+        {text('Remark', 'remark', 'Optional note')}
+      </FormSection>
+    </>
+  );
+  else if (kind === 'reimburse') {
+    const owed = partnerReimburseOwed[form.person] || 0;
+    details = (
+      <>
+        <PartnerPicker partners={partners} value={form.person} onChange={v => set('person', v)} meta={dueMeta(partnerReimburseOwed, 'owed', 'warn', 'All clear')} />
+        {owed > 0
+          ? <div className="tx-note warn"><Info size={14} /><span>The company owes {form.person} <strong>{fmtMoney(owed)}</strong> in pending reimbursements.</span></div>
+          : <div className="tx-note good"><Info size={14} /><span>No pending reimbursements for {form.person}.</span></div>}
+        <Group label="Paid from" required
+          hint={form.reimburseFrom === 'none'
+            ? 'No account balance changes — this only clears the amount owed.'
+            : `This lowers the ${form.reimburseFrom} balance by the amount paid.`}>
+          <Segmented options={REIMBURSE_OPTIONS} value={form.reimburseFrom} onChange={v => set('reimburseFrom', v)} />
+        </Group>
+        <FormSection title="Details">
+          {method}
+          {text('Notes', 'remark', 'Optional')}
+        </FormSection>
+      </>
+    );
+  }
+
+  const kindMeta = KINDS.find(k => k.id === kind);
 
   return (
-    <div style={{ background:'#fff', borderRadius:16, border:'1px solid rgba(0,0,0,0.07)', overflow:'hidden', boxShadow:'0 1px 4px rgba(0,0,0,0.04)' }}>
-      {/* Header row */}
-      <div
-        onClick={() => setOpen(o => !o)}
-        style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'13px 18px', cursor:'pointer', borderBottom: open ? '1px solid rgba(0,0,0,0.07)' : 'none', userSelect:'none' }}
-      >
-        <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-          <span style={{ fontSize:13, fontWeight:640, color:'#1D1D1F' }}>Partner Overview</span>
-          {totalOutstanding > 0 && (
-            <span style={{ fontSize:11, fontWeight:500, color:'#FF3B30', background:'rgba(255,59,48,0.08)', padding:'2px 9px', borderRadius:20 }}>
-              {fmt(totalOutstanding)} drawing due
-            </span>
-          )}
-          {totalReimburseOwed > 0 && (
-            <span style={{ fontSize:11, fontWeight:500, color:'#FF2D55', background:'rgba(255,45,85,0.08)', padding:'2px 9px', borderRadius:20 }}>
-              {fmt(totalReimburseOwed)} to reimburse
-            </span>
-          )}
-          {pendingSalaries.length > 0 && (
-            <span style={{ fontSize:11, fontWeight:500, color:'#FF9500', background:'rgba(255,149,0,0.08)', padding:'2px 9px', borderRadius:20 }}>
-              {pendingSalaries.filter(p => p.salaryPaidAmt === 0).length > 0 && `${pendingSalaries.filter(p => p.salaryPaidAmt === 0).length} unpaid`}
-              {pendingSalaries.filter(p => p.salaryPaidAmt === 0).length > 0 && pendingSalaries.filter(p => p.salaryPaidAmt > 0).length > 0 && ' · '}
-              {pendingSalaries.filter(p => p.salaryPaidAmt > 0).length > 0 && `${pendingSalaries.filter(p => p.salaryPaidAmt > 0).length} partial`}
-              {' salary'}
-            </span>
-          )}
-          {totalOutstanding === 0 && totalReimburseOwed === 0 && pendingSalaries.length === 0 && (
-            <span style={{ fontSize:11, fontWeight:500, color:'#34C759', background:'rgba(52,199,89,0.08)', padding:'2px 9px', borderRadius:20 }}>
-              All clear ✓
-            </span>
-          )}
+    <form id="tx-form" onSubmit={onSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {editing ? (
+        <div className="tx-note"><Info size={14} /><span>Editing a <strong>{kindMeta?.label || 'transaction'}</strong> entry. To change what kind of entry this is, delete it and add a new one.</span></div>
+      ) : (
+        <div className="field">
+          <span className="field-label">What happened?<span className="field-req" aria-hidden="true"> *</span></span>
+          <div className="tx-kinds" role="radiogroup" aria-label="What happened?">
+            {KINDS.map(({ id, label, hint, icon: Icon }) => (
+              <button key={id} type="button" role="radio" aria-checked={kind === id} className="tx-kind" onClick={() => chooseKind(id)}>
+                <Icon size={17} />
+                <span style={{ minWidth: 0 }}>
+                  <span className="tx-kind-label">{label}</span>
+                  <span className="tx-kind-hint">{hint}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          <span className="field-hint">
+            Paying staff? Employee salaries are recorded from{' '}
+            <button type="button" className="tx-link" onClick={onEmployees}>Employees</button> and appear here automatically.
+          </span>
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <button
-            onClick={e => { e.stopPropagation(); onSetSalaries(); }}
-            style={{ padding:'4px 10px', borderRadius:8, background:'rgba(0,0,0,0.05)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', gap:5, fontSize:12, color:'#6E6E73', fontWeight:500 }}
-          >
-            <Settings2 size={11}/> Set Salaries
-          </button>
-          {open ? <ChevronUp size={14} color="#AEAEB2"/> : <ChevronDown size={14} color="#AEAEB2"/>}
-        </div>
+      )}
+
+      <FormGrid>
+        <Field label="Amount (₹)" required error={errors.amount}
+          hint={overpay ? <span className="tx-warn">More than the {fmtMoney(remaining)} left for {form.monthLabel}</span> : null}>
+          <NumInput className="mac-input" value={form.amount} onChange={v => set('amount', v)}
+            placeholder={kind === 'p_salary' && remaining ? fmtInput(remaining) : '0'} />
+        </Field>
+        <Field label={kind === 'transfer' ? 'Date moved' : kind === 'income' || kind === 'return' || (kind === 'other_money' && OTHER_KIND[form.otherKind]?.type === 'Credit') ? 'Date received' : 'Date paid'} required error={errors.date}>
+          {id => <input id={id} className="mac-input" type="date" value={form.date} onChange={e => set('date', e.target.value)} />}
+        </Field>
+      </FormGrid>
+
+      {details}
+    </form>
+  );
+}
+
+// ─── Partners view ───────────────────────────────────────────────────────────
+
+function PartnersPanel({ rows, monthName, onRecord, onShowEntries, onSalarySettings }) {
+  const totalDue  = rows.reduce((s, r) => s + r.outstanding, 0);
+  const totalOwed = rows.reduce((s, r) => s + r.reimburseOwed, 0);
+  const pending   = rows.filter(r => r.monthly > 0 && r.salaryRemaining > 0).length;
+  const summary = [
+    totalDue > 0 && `${fmtMoney(totalDue)} drawings due`,
+    totalOwed > 0 && `${fmtMoney(totalOwed)} to reimburse`,
+    pending > 0 && `${pending} ${pending === 1 ? 'salary' : 'salaries'} pending for ${monthName}`,
+  ].filter(Boolean);
+
+  return (
+    <>
+      <div className="tx-partners-bar">
+        <span>{summary.length ? summary.join(' · ') : 'All clear — nothing due, owed or pending.'}</span>
+        <button className="mac-btn mac-btn-secondary" onClick={onSalarySettings}><Settings2 size={14} /> Salary settings</button>
       </div>
+      <div className="tx-partners">
+        {rows.map(r => (
+          <div key={r.partner} className="mac-card tx-partner">
+            <div className="tx-partner-head">
+              <Avatar name={r.partner} size={36} />
+              <span className="cell-main">{r.partner}</span>
+              <RowMenu label={`Record for ${r.partner}`} items={[
+                { label: 'Took money',        icon: HandCoins,      onClick: () => onRecord('drawing', r.partner) },
+                { label: 'Returned money',    icon: RotateCcw,      onClick: () => onRecord('return', r.partner) },
+                { label: 'Pay salary',        icon: Banknote,       onClick: () => onRecord('p_salary', r.partner) },
+                { label: 'Paid from pocket',  icon: CreditCard,     onClick: () => onRecord('personal_exp', r.partner) },
+                { label: 'Reimburse',         icon: ArrowRightLeft, onClick: () => onRecord('reimburse', r.partner) },
+                { label: 'Show in ledger',    icon: List,           onClick: () => onShowEntries(r.partner) },
+              ]} />
+            </div>
+            <dl className="kv">
+              <dt>Drawings</dt>
+              <dd className={r.outstanding > 0 ? 'tx-bad' : 'tx-good'}>{r.outstanding > 0 ? `${fmtMoney(r.outstanding)} due` : 'Settled'}</dd>
+              <dt>Reimbursement</dt>
+              <dd className={r.reimburseOwed > 0 ? 'tx-warn' : 'tx-good'}>{r.reimburseOwed > 0 ? `${fmtMoney(r.reimburseOwed)} owed` : 'Clear'}</dd>
+              <dt>Salary · {monthName.split(' ')[0]}</dt>
+              <dd className={!r.monthly ? 'faint' : r.salaryRemaining === 0 ? 'tx-good' : r.salaryPaid > 0 ? 'tx-warn' : 'tx-bad'}>
+                {!r.monthly ? 'Not set'
+                  : r.salaryRemaining === 0 ? `Paid ${fmtMoney(r.monthly)}`
+                  : r.salaryPaid > 0 ? `${fmtMoney(r.salaryPaid)} / ${fmtMoney(r.monthly)}`
+                  : `${fmtMoney(r.monthly)} pending`}
+              </dd>
+            </dl>
+            {r.monthly > 0 && (
+              <span className={`tx-progress ${r.salaryRemaining === 0 ? 'done' : ''}`}>
+                <span style={{ width: `${Math.min(100, (r.salaryPaid / r.monthly) * 100)}%` }} />
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
 
-      {/* Partner cards row */}
-      {open && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', overflowX:'auto' }}>
-          {overview.map(({ partner, outstanding, reimburseOwed, monthly, salaryPaidAmt, salaryRemaining }, i) => {
-            const col = PARTNER_COLORS[partner];
-            return (
-              <div key={partner} style={{ padding:'14px 18px', borderRight: i < 3 ? '1px solid rgba(0,0,0,0.07)' : 'none' }}>
-                {/* Avatar + name */}
-                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
-                  <div style={{ width:32, height:32, borderRadius:9, background:col.gradient, display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:11, fontWeight:700, flexShrink:0 }}>
-                    {partner.slice(0, 2).toUpperCase()}
-                  </div>
-                  <span style={{ fontSize:13, fontWeight:600, color:'#1D1D1F' }}>{partner}</span>
-                </div>
+// ─── History (audit) entry ───────────────────────────────────────────────────
 
-                {/* Drawing row */}
-                <div style={{ marginBottom:8 }}>
-                  <div style={{ fontSize:10, color:'#AEAEB2', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:2 }}>Drawing</div>
-                  <div style={{ fontSize:13, fontWeight:650, color: outstanding > 0 ? '#FF3B30' : '#34C759' }}>
-                    {outstanding > 0 ? fmt(outstanding) + ' due' : 'Settled ✓'}
-                  </div>
-                </div>
-
-                {/* Reimbursement row */}
-                <div style={{ marginBottom:8 }}>
-                  <div style={{ fontSize:10, color:'#AEAEB2', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:2 }}>Reimburse</div>
-                  <div style={{ fontSize:13, fontWeight:650, color: reimburseOwed > 0 ? '#FF2D55' : '#34C759' }}>
-                    {reimburseOwed > 0 ? fmt(reimburseOwed) + ' owed' : 'Clear ✓'}
-                  </div>
-                </div>
-
-                {/* Salary row */}
-                <div>
-                  <div style={{ fontSize:10, color:'#AEAEB2', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:4 }}>
-                    Salary · {curMonthShort}
-                  </div>
-                  {monthly > 0 ? (() => {
-                    if (salaryRemaining === 0) return (
-                      <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                        <CheckCircle2 size={12} color="#34C759"/>
-                        <span style={{ fontSize:12, color:'#34C759', fontWeight:500 }}>Fully Paid {fmt(monthly)}</span>
-                      </div>
-                    );
-                    if (salaryPaidAmt > 0) return (
-                      <div>
-                        <div style={{ display:'flex', alignItems:'center', gap:4, marginBottom:4 }}>
-                          <Clock size={12} color="#FF9500"/>
-                          <span style={{ fontSize:12, color:'#FF9500', fontWeight:500 }}>{fmt(salaryPaidAmt)} / {fmt(monthly)}</span>
-                        </div>
-                        <div style={{ height:4, borderRadius:99, background:'rgba(0,0,0,0.07)', overflow:'hidden' }}>
-                          <div style={{ height:'100%', borderRadius:99, width:`${(salaryPaidAmt/monthly)*100}%`, background:'#FF9500' }}/>
-                        </div>
-                        <div style={{ fontSize:10, color:'#FF9500', marginTop:3 }}>{fmt(salaryRemaining)} pending</div>
-                      </div>
-                    );
-                    return (
-                      <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                        <Clock size={12} color="#FF3B30"/>
-                        <span style={{ fontSize:12, color:'#FF3B30', fontWeight:500 }}>Pending {fmt(monthly)}</span>
-                      </div>
-                    );
-                  })() : (
-                    <span style={{ fontSize:12, color:'#AEAEB2' }}>Not configured</span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+function AuditItem({ e }) {
+  const tone = e.action === 'Deleted' ? 'bad' : e.action === 'Created' ? 'good' : 'brand';
+  const when = e.createdAt
+    ? new Date(e.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : '';
+  return (
+    <div className="tx-hist-item">
+      <div className="tx-hist-top">
+        <span className={`badge tx-badge ${tone}`}>{e.action}</span>
+        {e.description && <span className="cell-main">{e.description}</span>}
+      </div>
+      <span>{when}{when ? ' · ' : ''}by {e.by || '—'}</span>
+      {e.prevData && e.nextData && (
+        <span>
+          {fmtMoney(e.prevData.amount)} · {accountLabel(e.prevData.accountType)} → <strong>{fmtMoney(e.nextData.amount)} · {accountLabel(e.nextData.accountType)}</strong>
+        </span>
       )}
     </div>
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function Transactions() {
   const navigate = useNavigate();
-  const { user, employeeData } = useAuth();
-  const currentUser = employeeData?.name || user?.email || 'Unknown';
-  const [txs, setTxs]               = useState([]);
-  const [openBal, setOpenBal]       = useState({ cash: 0, bank: 0 });
-  const [loading, setLoading]       = useState(true);
-  const [saving, setSaving]         = useState(false);
-  const [search, setSearch]         = useState('');
-  const [showFilters, setShowFilters] = useState(false);
-  const [filters, setFilters]       = useState({ type: '', accountType: '', subType: '' });
-  const [showAdd, setShowAdd]       = useState(false);
-  const [editTx, setEditTx]         = useState(null);
-  const [form, setForm]             = useState(initForm());
-  const [deleteId, setDeleteId]     = useState(null);
-  const [showOB, setShowOB]         = useState(false);
-  const [obForm, setObForm]         = useState({ cash: 0, bank: 0 });
-  const [auditLog, setAuditLog]     = useState([]);
-  const [showAudit, setShowAudit]   = useState(false);
-  const [tab, setTab]               = useState('all');
-  const [salaryConfig, setSalaryConfig]       = useState(DEFAULT_SALARY);
-  const [salConfigForm, setSalConfigForm]     = useState(DEFAULT_SALARY);
-  const [showSalConfig, setShowSalConfig]     = useState(false);
-  const [employees, setEmployees]   = useState([]);
+  const toast = useToast();
+  const isPhone = useIsPhone();
+  const { user, displayName } = useAuth();
+  const currentUser = displayName || user?.email || 'Unknown';
+  // Partner names for the ledger's free-text `person` field
+  const { people: directory } = usePeople();
+  const partners = useMemo(() => directory.filter(p => p.kind === 'partner' && p.active !== false).map(p => p.name), [directory]);
 
-  // ── Data fetching ──────────────────────────────────────────
-  const fetchAll = useCallback(async () => {
+  const [txs, setTxs]             = useState([]);
+  const [openBal, setOpenBal]     = useState(ZERO_BAL);
+  const [salaryConfig, setSalaryConfig] = useState(DEFAULT_SALARY);
+  const [auditLog, setAuditLog]   = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [savedCats, setSavedCats] = useState([]);       // expense categories the partners added
+
+  const [view, setView]       = useState('ledger');   // ledger | partners
+  const [filters, setFilters] = useState(NO_FILTERS);
+  const [detailId, setDetailId] = useState(null);
+  const [deleteTx, setDeleteTx] = useState(null);
+
+  const [showForm, setShowForm] = useState(false);
+  const [editTx, setEditTx]     = useState(null);
+  const [form, setForm]         = useState(initForm);
+  const [errors, setErrors]     = useState({});
+  const [saving, setSaving]     = useState(false);
+
+  const [showOB, setShowOB]   = useState(false);
+  const [obForm, setObForm]   = useState(ZERO_BAL);
+  const [showSalConfig, setShowSalConfig] = useState(false);
+  const [salConfigForm, setSalConfigForm] = useState(DEFAULT_SALARY);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [showAudit, setShowAudit] = useState(false);
+
+  // ── Data ───────────────────────────────────────────────────
+  const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const [txData, obData, salConf, empData, auditData] = await Promise.all([
+      const [txData, obData, salConf, auditData, cats] = await Promise.all([
         transactionsDB.getAll(),
         settingsDB.get('opening_balances'),
         settingsDB.get('partner_salary_config'),
-        employeesDB.getAll(),
         auditDB.getAll('transaction'),
+        settingsDB.get(CATEGORY_KEY),
       ]);
+      if (Array.isArray(cats)) setSavedCats(cats);
       setTxs(txData);
-      if (obData) { setOpenBal(obData); setObForm(obData); }
-      if (salConf) { setSalaryConfig(salConf); setSalConfigForm(salConf); }
-      setEmployees(empData.filter(e => e.status === 'Active'));
+      if (obData) setOpenBal(obData);
+      if (salConf) setSalaryConfig(salConf);
       setAuditLog(auditData);
-    } catch (e) { console.error(e); }
-    setLoading(false);
+    } catch (e) {
+      console.error(e);
+      setLoadError(e);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { load(); }, [load]);
 
-  // ── Balances ───────────────────────────────────────────────
-  // Shared with the Dashboard and P&L page (src/lib/finance.js)
+  // ── Balances — shared with the Dashboard and P&L page (src/lib/finance.js) ──
   const bal = useMemo(() => computeBalances(txs, openBal), [txs, openBal]);
 
-  // ── Partner outstanding (computed from transactions) ───────
-  const partnerOutstanding = useMemo(() => {
-    const out = {};
-    PARTNERS.forEach(p => {
-      const taken    = txs.filter(t => t.subType === 'drawing'        && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-      const returned = txs.filter(t => t.subType === 'drawing_return' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-      out[p] = Math.max(0, taken - returned);
-    });
-    return out;
-  }, [txs]);
+  const thisMonth = currentMonth();
+  const monthFlow = useMemo(
+    () => computeBalances(txs.filter(t => txMonth(t) === thisMonth && !isOpeningEntry(t)), ZERO_BAL),   // opening balances are not this month's movement
+    [txs, thisMonth],
+  );
+  const monthNet = monthFlow.totalCredit - monthFlow.totalDebit;
 
-  // ── Partner salary paid this month ────────────────────────
-  const partnerSalaryPaid = useMemo(() => {
-    const curMonth = currentMonthLabel();
-    const out = {};
-    PARTNERS.forEach(p => {
-      out[p] = txs.filter(t => t.subType === 'partner_salary' && t.person === p && t.monthLabel === curMonth).reduce((s, t) => s + (+t.amount || 0), 0);
-    });
-    return out;
-  }, [txs]);
+  // ── Partner positions (computed from transactions) ─────────
+  const partnerOutstanding = useMemo(() => Object.fromEntries(partners.map(p => {
+    const taken    = sumAmt(txs.filter(t => t.subType === 'drawing'        && t.person === p));
+    const returned = sumAmt(txs.filter(t => t.subType === 'drawing_return' && t.person === p));
+    return [p, Math.max(0, taken - returned)];
+  })), [txs, partners]);
 
-  // ── Partner reimbursement owed by company ──────────────────
-  const partnerReimburseOwed = useMemo(() => {
-    const out = {};
-    PARTNERS.forEach(p => {
-      const spent    = txs.filter(t => t.subType === 'personal_exp'  && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-      const paid     = txs.filter(t => t.subType === 'reimbursement' && t.person === p).reduce((s, t) => s + (+t.amount || 0), 0);
-      out[p] = Math.max(0, spent - paid);
-    });
-    return out;
-  }, [txs]);
+  const partnerReimburseOwed = useMemo(() => Object.fromEntries(partners.map(p => {
+    const spent = sumAmt(txs.filter(t => t.subType === 'personal_exp'  && t.person === p));
+    const paid  = sumAmt(txs.filter(t => t.subType === 'reimbursement' && t.person === p));
+    return [p, Math.max(0, spent - paid)];
+  })), [txs, partners]);
 
-  // ── Filtered list ──────────────────────────────────────────
+  // Partner salary already paid for a month label; `exceptId` skips the entry being edited
+  const salaryPaidFor = useCallback((person, label, exceptId) => sumAmt(txs.filter(t =>
+    t.subType === 'partner_salary' && t.person === person && t.monthLabel === label && t.id !== exceptId)), [txs]);
+
+  const monthName = currentMonthLabel();
+  const partnerRows = useMemo(() => partners.map(p => {
+    const monthly    = salaryConfig[p] || 0;
+    const salaryPaid = salaryPaidFor(p, monthName);
+    return {
+      partner: p, monthly, salaryPaid,
+      salaryRemaining: Math.max(0, monthly - salaryPaid),
+      outstanding: partnerOutstanding[p], reimburseOwed: partnerReimburseOwed[p],
+    };
+  }), [partners, salaryConfig, salaryPaidFor, monthName, partnerOutstanding, partnerReimburseOwed]);
+
+  // Built-in categories + the ones partners added + any already used in the ledger. "Other" stays last.
+  const categories = useMemo(() => {
+    const used = txs.filter(t => (t.subType === 'expense' || t.subType === 'personal_exp') && !isOpeningEntry(t)).map(t => t.category);
+    return mergeCategories(EXPENSE_CATEGORIES, savedCats, used);
+  }, [txs, savedCats]);
+  // Saved for every partner. Resolves to the name as stored (an existing one when only the case differs).
+  const addCategory = useCallback(async raw => {
+    const name = String(raw || '').split(' ').filter(Boolean).join(' ');
+    if (!name) return null;
+    const existing = categories.find(c => c.toLowerCase() === name.toLowerCase());
+    if (existing) return existing;
+    const next = [...savedCats, name];
+    setSavedCats(next);
+    try { await settingsDB.set(CATEGORY_KEY, next); }
+    catch (e) { setSavedCats(savedCats); toast.error('Could not save the new category', e); return null; }
+    return name;
+  }, [categories, savedCats, toast]);
+
+  const editId = editTx?.id;
+  const formStats = useMemo(() => ({
+    categories, addCategory,
+    partners, partnerOutstanding, partnerReimburseOwed, salaryConfig,
+    salaryPaidFor: (person, label) => salaryPaidFor(person, label, editId),
+  }), [categories, addCategory, partners, partnerOutstanding, partnerReimburseOwed, salaryConfig, salaryPaidFor, editId]);
+
+  // ── Filtered ledger ────────────────────────────────────────
   const filtered = useMemo(() => {
-    const base = tab === 'credit' ? txs.filter(t => t.type === 'Credit')
-               : tab === 'debit'  ? txs.filter(t => t.type === 'Debit')
-               : txs;
-    return base.filter(t => {
-      const q = search.toLowerCase();
-      const matchQ = !q
+    const q = filters.search.trim().toLowerCase();
+    return txs.filter(t => {
+      if (filters.dir === 'in'  && t.type !== 'Credit') return false;
+      if (filters.dir === 'out' && t.type !== 'Debit')  return false;
+      if (!accountMatches(t, filters.account)) return false;
+      if (filters.subType && t.subType !== filters.subType) return false;
+      if (filters.month && txMonth(t) !== filters.month) return false;
+      return !q
         || txDesc(t).toLowerCase().includes(q)
-        || (t.remark       || '').toLowerCase().includes(q)
-        || (t.clientName   || '').toLowerCase().includes(q)
-        || (t.paidTo       || '').toLowerCase().includes(q)
-        || (t.person       || '').toLowerCase().includes(q)
-        || (t.monthLabel   || '').toLowerCase().includes(q);
-      const matchType    = !filters.type       || t.type       === filters.type;
-      const matchAccount = !filters.accountType|| t.accountType === filters.accountType;
-      const matchSub     = !filters.subType    || t.subType    === filters.subType;
-      return matchQ && matchType && matchAccount && matchSub;
+        || (t.remark     || '').toLowerCase().includes(q)
+        || (t.clientName || '').toLowerCase().includes(q)
+        || (t.paidTo     || '').toLowerCase().includes(q)
+        || (t.person     || '').toLowerCase().includes(q)
+        || (t.monthLabel || '').toLowerCase().includes(q);
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
-  }, [txs, search, filters, tab]);
+  }, [txs, filters]);
 
-  // ── CRUD ───────────────────────────────────────────────────
-  async function save() {
-    if (!form.amount || saving) return;
+  // In / out totals follow the balance rules: entries paid from a partner's own pocket are not company money
+  const filteredFlow = useMemo(() => computeBalances(filtered, ZERO_BAL), [filtered]);
+  const pocketCount  = useMemo(() => filtered.filter(t => t.accountType === POCKET).length, [filtered]);
+
+  const groups = useMemo(() => {
+    const out = [];
+    filtered.forEach(t => {
+      const key = txMonth(t);
+      const last = out[out.length - 1];
+      if (last && last.key === key) last.rows.push(t);
+      else out.push({ key, rows: [t] });
+    });
+    return out.map(g => {
+      const flow = computeBalances(g.rows, ZERO_BAL);
+      return { ...g, label: g.key ? monthLabel(g.key, true) : 'No date', net: flow.totalCredit - flow.totalDebit };
+    });
+  }, [filtered]);
+
+  const isFiltered = Object.keys(NO_FILTERS).some(k => filters[k] !== NO_FILTERS[k]);
+  const setFilter = (k, v) => setFilters(f => ({ ...f, [k]: v }));
+  const showLedger = patch => { setFilters({ ...NO_FILTERS, ...patch }); setView('ledger'); };
+
+  // ── Add / edit ─────────────────────────────────────────────
+  const updateForm = updater => { setForm(updater); setErrors({}); };
+
+  function openAdd(kind = 'income', person) {
+    const next = initForm(kind);
+    next.person = person || partners[0] || '';
+    if (kind === 'p_salary') {
+      const left = Math.max(0, (salaryConfig[next.person] || 0) - salaryPaidFor(next.person, next.monthLabel));
+      next.amount = next.autoAmount = left ? String(left) : '';
+    }
+    setEditTx(null); setForm(next); setErrors({}); setShowForm(true);
+  }
+  function openEdit(t) {
+    setDetailId(null);
+    setEditTx(t); setForm(rowToForm(t)); setErrors({}); setShowForm(true);
+  }
+  function closeForm() {
+    if (saving) return;
+    setShowForm(false); setEditTx(null);
+  }
+
+  // Same audit entry in the database and in the open History list
+  function recordAudit(entry) {
+    auditDB.log(entry).catch(console.error);
+    setAuditLog(l => [{ id: Date.now(), createdAt: new Date().toISOString(), ...entry }, ...l]);
+  }
+
+  async function save(e) {
+    e?.preventDefault();
+    if (saving) return;
+    const found = validate(form);
+    setErrors(found);
+    if (Object.keys(found).length) return;
     setSaving(true);
     const row = formToRow(form);
     try {
-      if (editTx) {
+      if (!editTx && form.txType === 'transfer') {
+        const from = form.accountType, to = from === BANK ? CASH : BANK;
+        const rows = await transactionsDB.transfer({ from, to, amount: form.amount, date: form.date, paymentMethod: form.paymentMethod, remark: form.remark });
+        setTxs(ts => [...rows, ...ts]);
+        recordAudit({ entity: 'transaction', entityId: rows[0]?.id, action: 'Created', description: `Moved ${fmtMoney(+form.amount)} from ${accountLabel(from)} to ${accountLabel(to)}`, by: currentUser, nextData: rows });
+        toast.success('Transfer recorded');
+      } else if (editTx) {
         const updated = await transactionsDB.update(editTx.id, row);
         setTxs(ts => ts.map(t => t.id === editTx.id ? updated : t));
-        await auditDB.log({ entity:'transaction', entityId:editTx.id, action:'Edited', description:`${txDesc(updated)} — ${fmt(updated.amount)}`, by:currentUser, prevData:editTx, nextData:updated });
-        setAuditLog(l => [{ id:Date.now(), entity:'transaction', entityId:editTx.id, action:'Edited', description:`${txDesc(updated)} — ${fmt(updated.amount)}`, by:currentUser, createdAt:new Date().toISOString(), prevData:editTx, nextData:updated }, ...l]);
+        recordAudit({ entity: 'transaction', entityId: editTx.id, action: 'Edited', description: `${txDesc(updated)} — ${fmtMoney(updated.amount)}`, by: currentUser, prevData: editTx, nextData: updated });
+        toast.success('Transaction updated');
       } else {
         const created = await transactionsDB.create(row);
         setTxs(ts => [created, ...ts]);
-        await auditDB.log({ entity:'transaction', entityId:created.id, action:'Created', description:`${txDesc(created)} — ${fmt(created.amount)}`, by:currentUser, nextData:created });
-        setAuditLog(l => [{ id:Date.now(), entity:'transaction', entityId:created.id, action:'Created', description:`${txDesc(created)} — ${fmt(created.amount)}`, by:currentUser, createdAt:new Date().toISOString(), nextData:created }, ...l]);
+        recordAudit({ entity: 'transaction', entityId: created.id, action: 'Created', description: `${txDesc(created)} — ${fmtMoney(created.amount)}`, by: currentUser, nextData: created });
+        toast.success('Transaction added');
       }
-    } catch (e) { console.error(e); }
-    setSaving(false);
-    setShowAdd(false); setEditTx(null); setForm(initForm());
+      setShowForm(false); setEditTx(null);
+    } catch (err) {
+      // Keep the form open with everything the user typed
+      toast.error(editTx ? 'Could not save changes' : 'Could not add transaction', err);
+    } finally {
+      setSaving(false);
+    }
   }
 
-  async function del(id) {
-    const tx = txs.find(t => t.id === id);
-    setTxs(ts => ts.filter(t => t.id !== id));
+  async function del(tx) {
+    // Both halves of a transfer go together
+    setTxs(ts => ts.filter(t => t.id !== tx.id && !(tx.pairId && t.pairId === tx.pairId)));
     try {
-      await transactionsDB.delete(id);
-      if (tx) {
-        await auditDB.log({ entity:'transaction', entityId:id, action:'Deleted', description:`${txDesc(tx)} — ${fmt(tx.amount)}`, by:currentUser, prevData:tx });
-        setAuditLog(l => [{ id:Date.now(), entity:'transaction', entityId:id, action:'Deleted', description:`${txDesc(tx)} — ${fmt(tx.amount)}`, by:currentUser, createdAt:new Date().toISOString(), prevData:tx }, ...l]);
-      }
-    } catch (e) { console.error(e); await fetchAll(); }
+      await transactionsDB.delete(tx.id);
+      recordAudit({ entity: 'transaction', entityId: tx.id, action: 'Deleted', description: `${txDesc(tx)} — ${fmtMoney(tx.amount)}`, by: currentUser, prevData: tx });
+      toast.success('Transaction deleted');
+    } catch (err) {
+      setTxs(ts => ts.some(t => t.id === tx.id) ? ts : [tx, ...ts]);
+      toast.error('Could not delete transaction', err);
+    }
   }
 
-  async function saveOB() {
-    setOpenBal(obForm); setShowOB(false);
-    try { await settingsDB.set('opening_balances', obForm); } catch (e) { console.error(e); }
+  // ── Settings: saved first, applied only when the save succeeded ──
+  async function saveOB(e) {
+    e.preventDefault();
+    if (settingsSaving) return;
+    setSettingsSaving(true);
+    try {
+      await settingsDB.set('opening_balances', obForm);
+      setOpenBal(obForm);
+      setShowOB(false);
+      toast.success('Opening balance saved');
+    } catch (err) {
+      toast.error('Could not save opening balance', err);
+    } finally {
+      setSettingsSaving(false);
+    }
   }
 
-  async function saveSalaryConfig() {
-    setSalaryConfig(salConfigForm); setShowSalConfig(false);
-    try { await settingsDB.set('partner_salary_config', salConfigForm); } catch (e) { console.error(e); }
+  async function saveSalaryConfig(e) {
+    e.preventDefault();
+    if (settingsSaving) return;
+    setSettingsSaving(true);
+    try {
+      await settingsDB.set('partner_salary_config', salConfigForm);
+      setSalaryConfig(salConfigForm);
+      setShowSalConfig(false);
+      toast.success('Partner salaries saved');
+    } catch (err) {
+      toast.error('Could not save partner salaries', err);
+    } finally {
+      setSettingsSaving(false);
+    }
   }
 
-  // ── Stat cards ─────────────────────────────────────────────
-  const totalPendingReimburse = Object.values(partnerReimburseOwed).reduce((s, v) => s + v, 0);
-  const statCards = [
-    { label:'Total Balance',        value:fmt(bal.total),              gradient:'linear-gradient(135deg,#0071E3,#0A84FF)', icon:IndianRupee   },
-    { label:'Total Credit',         value:fmt(bal.totalCredit),        gradient:'linear-gradient(135deg,#34C759,#30D158)', icon:ArrowUpRight  },
-    { label:'Total Debit',          value:fmt(bal.totalDebit),         gradient:'linear-gradient(135deg,#FF3B30,#FF6961)', icon:ArrowDownRight },
-    { label:'Cash + Savings',       value:fmt(bal.personal),           gradient:'linear-gradient(135deg,#FF9500,#FFB340)', icon:Wallet        },
-    { label:'Current Bank Balance', value:fmt(bal.bank),               gradient:'linear-gradient(135deg,#5856D6,#7B7AEB)', icon:Banknote      },
-    { label:'Pending Reimburse',    value:fmt(totalPendingReimburse),  gradient:'linear-gradient(135deg,#FF2D55,#FF6680)', icon:CreditCard    },
-  ];
+  const openOB = () => { setObForm(openBal); setShowOB(true); };
+  const openSalConfig = () => { setSalConfigForm(salaryConfig); setShowSalConfig(true); };
+
+  function exportCsv() {
+    const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const head = ['Date', 'Type', 'Description', 'Party', 'Account', 'Payment method', 'Category / source', 'Salary month', 'Money in', 'Money out'];
+    const lines = filtered.map(t => [
+      (t.date || '').slice(0, 10), typeLabel(t), txMain(t), txParty(t), t.accountType || '', t.paymentMethod || '',
+      (t.type === 'Credit' ? t.source : t.category) || '', t.monthLabel || '',
+      t.type === 'Credit' ? +t.amount || 0 : '', t.type === 'Credit' ? '' : +t.amount || 0,
+    ]);
+    const csv = [head, ...lines].map(r => r.map(esc).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
+    a.download = `codelix-transactions-${todayLocal()}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    toast.success(`Exported ${filtered.length} ${filtered.length === 1 ? 'entry' : 'entries'}`);
+  }
 
   // ── Render ─────────────────────────────────────────────────
+  const ready = !loading && !loadError;
+  const detail = detailId != null ? txs.find(t => t.id === detailId) : null;
+  const detailHistory = detail ? auditLog.filter(e => e.entityId === detail.id) : [];
+  const detailOwner = managedBy(detail);              // 'project' | 'employee' | null
+  const detailManaged = detailOwner === 'employee';
+  const detailIsTransfer = !!detail?.pairId;
+
+  const amountOf = t => (
+    <span className={`tx-amt ${t.type === 'Credit' ? 'amount-in' : 'amount-out'}`}>
+      {t.type === 'Credit' ? '+' : '−'}{fmtMoney(t.amount)}
+    </span>
+  );
+  const rowKey = (e, t) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailId(t.id); } };
+
   return (
-    <div>
+    <div className="tx-page">
       <Header
         title="Transactions"
-        subtitle={`Balance: ${fmt(bal.total)} · Personal: ${fmt(bal.personal)} · Bank: ${fmt(bal.bank)}`}
-        actions={
-          <div style={{ display:'flex', gap:8 }}>
-            <button onClick={() => { setObForm(openBal); setShowOB(true); }} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>
-              <Wallet size={13}/> Opening Bal.
-            </button>
-            <button onClick={() => { setForm(initForm()); setEditTx(null); setShowAdd(true); }} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>
-              <Plus size={14}/> Add Transaction
-            </button>
-          </div>
-        }
+        subtitle={loading ? 'Loading the ledger…' : loadError ? 'Could not load the ledger'
+          : `Balance ${plain(bal.total)} · Bank ${plain(bal.bank)} · Cash ${plain(bal.personal)}`}
+        actions={ready && (
+          <>
+            <RowMenu label="More" items={[
+              { label: 'Opening balance',         icon: Wallet,    onClick: openOB },
+              { label: 'Partner salary settings', icon: Settings2, onClick: openSalConfig },
+              { label: 'History',                 icon: History,   onClick: () => setShowAudit(true) },
+              { label: 'Export CSV',              icon: Download,  onClick: exportCsv },
+            ]} />
+            <button onClick={() => openAdd()} className="mac-btn mac-btn-primary"><Plus size={15} /> Add transaction</button>
+          </>
+        )}
       />
 
-      {loading ? <PageLoader /> : (
-        <div className="page-body">
+      <div className="page-body">
+        {loading && <SkeletonRows rows={8} />}
+        {!loading && loadError && <ErrorPanel title="Could not load transactions" error={loadError} onRetry={load} />}
 
-          {/* Low balance alert */}
-          {bal.total < 10000 && (
-            <div style={{ display:'flex', alignItems:'center', gap:8, padding:'9px 14px', borderRadius:10, background:'rgba(255,59,48,0.07)', border:'1px solid rgba(255,59,48,0.13)' }}>
-              <AlertTriangle size={13} color="#FF3B30"/>
-              <span style={{ fontSize:12.5, color:'#FF3B30', fontWeight:500 }}>⚠ Low balance — only {fmt(bal.total)} remaining</span>
-            </div>
-          )}
-
-          {/* Stat cards */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:14 }}>
-            {statCards.map(c => (
-              <div key={c.label} style={{ borderRadius:16, padding:'18px 20px', background:c.gradient, display:'flex', flexDirection:'column', gap:10 }}>
-                <div style={{ width:34, height:34, borderRadius:10, background:'rgba(255,255,255,0.22)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  <c.icon size={16} color="#fff"/>
-                </div>
-                <div>
-                  <div style={{ fontSize:22, fontWeight:700, color:'#fff', letterSpacing:'-0.6px', lineHeight:1.1 }}>{c.value}</div>
-                  <div style={{ fontSize:12, color:'rgba(255,255,255,0.8)', marginTop:2 }}>{c.label}</div>
-                </div>
+        {ready && (
+          <>
+            {bal.total < 10000 && (
+              <div className="tx-note bad" role="status">
+                <AlertTriangle size={14} />
+                <span>Low balance — only <strong>{plain(bal.total)}</strong> left across bank and cash.</span>
               </div>
-            ))}
-          </div>
+            )}
 
-          {/* Partner Overview */}
-          <PartnerOverview
-            txs={txs}
-            salaryConfig={salaryConfig}
-            onSetSalaries={() => { setSalConfigForm(salaryConfig); setShowSalConfig(true); }}
-          />
+            <StatTiles items={[
+              { label: 'Total balance', value: plain(bal.total), icon: Wallet, tone: 'dark',
+                sub: `In ${fmtMoney(bal.totalCredit)} · Out ${fmtMoney(bal.totalDebit)} all time`,
+                onClick: () => showLedger() },
+              { label: 'Bank', value: plain(bal.bank), icon: Landmark, onClick: () => showLedger({ account: BANK }) },
+              { label: 'Cash', value: plain(bal.personal), icon: Banknote, onClick: () => showLedger({ account: CASH }) },
+              { label: 'This month’s net', value: signed(monthNet), icon: monthNet < 0 ? TrendingDown : TrendingUp,
+                tone: monthNet < 0 ? 'bad' : 'good',
+                sub: `In ${fmtMoney(monthFlow.totalCredit)} · Out ${fmtMoney(monthFlow.totalDebit)}`,
+                onClick: () => showLedger({ month: thisMonth }) },
+            ]} />
 
-          {/* Tab bar + search + actions */}
-          <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-            <div className="tab-bar">
-              {[['all','All'],['credit','Credit'],['debit','Debit']].map(([k, l]) => (
-                <button key={k} onClick={() => setTab(k)} className={`tab-item ${tab === k ? 'active' : ''}`}>{l}</button>
+            <div className="tab-bar tx-tabs" role="tablist" aria-label="View">
+              {[['ledger', 'Ledger'], ['partners', 'Partners']].map(([k, l]) => (
+                <button key={k} role="tab" aria-selected={view === k} className={`tab-item ${view === k ? 'active' : ''}`} onClick={() => setView(k)}>{l}</button>
               ))}
             </div>
-            <div style={{ flex:1, maxWidth:260 }}>
-              <SearchBar value={search} onChange={setSearch} placeholder="Search transactions…"/>
-            </div>
-            <button onClick={() => setShowFilters(f => !f)} className={`mac-btn ${showFilters ? 'mac-btn-primary' : 'mac-btn-secondary'}`} style={{ fontSize:13 }}>
-              <Filter size={13}/> Filter
-            </button>
-            <button onClick={() => setShowAudit(true)} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>
-              <History size={13}/> Audit
-            </button>
-          </div>
 
-          {/* Filter panel */}
-          {showFilters && (
-            <div className="mac-card" style={{ padding:'14px 16px', display:'flex', gap:14, flexWrap:'wrap' }}>
-              {[
-                ['Type',     'type',        ['Credit','Debit']],
-                ['Account',  'accountType', ACCOUNT_TYPES],
-              ].map(([lbl, key, opts]) => (
-                <div key={key} style={{ flex:1, minWidth:120 }}>
-                  <label style={{ display:'block', fontSize:10.5, fontWeight:600, color:'#8E8E93', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:5 }}>{lbl}</label>
-                  <select className="mac-select" style={{ fontSize:13 }} value={filters[key]} onChange={e => setFilters(f => ({ ...f, [key]: e.target.value }))}>
-                    <option value="">All</option>
-                    {opts.map(o => <option key={o}>{o}</option>)}
+            {view === 'partners' && (
+              <PartnersPanel
+                rows={partnerRows}
+                monthName={monthName}
+                onRecord={openAdd}
+                onShowEntries={p => showLedger({ search: p })}
+                onSalarySettings={openSalConfig}
+              />
+            )}
+
+            {view === 'ledger' && (
+              <>
+                <Toolbar search={filters.search} onSearch={v => setFilter('search', v)} placeholder="Search transactions…"
+                  right={<>
+                    <span className="tx-count">
+                      {filtered.length} of {txs.length} · in {fmtMoney(filteredFlow.totalCredit)} · out {fmtMoney(filteredFlow.totalDebit)}
+                      {pocketCount > 0 && ` · ${pocketCount} paid from a partner’s pocket not counted`}
+                    </span>
+                    {isFiltered && <button className="mac-btn mac-btn-ghost" onClick={() => setFilters(NO_FILTERS)}>Clear</button>}
+                  </>}>
+                  <Chips label="Direction" options={DIRECTION_CHIPS} value={filters.dir} onChange={v => setFilter('dir', v)} />
+                  <select className="mac-select" aria-label="Account" value={filters.account} onChange={e => setFilter('account', e.target.value)}>
+                    <option value="">All accounts</option>
+                    {[BANK, CASH, POCKET].map(a => <option key={a} value={a}>{accountLabel(a)}</option>)}
                   </select>
-                </div>
-              ))}
-              <div style={{ flex:1, minWidth:150 }}>
-                <label style={{ display:'block', fontSize:10.5, fontWeight:600, color:'#8E8E93', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:5 }}>Category</label>
-                <select className="mac-select" style={{ fontSize:13 }} value={filters.subType} onChange={e => setFilters(f => ({ ...f, subType: e.target.value }))}>
-                  <option value="">All</option>
-                  {Object.entries(SUB_TYPE_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                </select>
-              </div>
-            </div>
-          )}
+                  <select className="mac-select" aria-label="Category" value={filters.subType} onChange={e => setFilter('subType', e.target.value)}>
+                    <option value="">All categories</option>
+                    {Object.entries(SUB_TYPE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                  </select>
+                  <input type="month" className="mac-input" aria-label="Month" value={filters.month} onChange={e => setFilter('month', e.target.value)} />
+                </Toolbar>
 
-          {/* Transactions — card list on phones (amount always visible) */}
-          <div className="mac-card only-mobile" style={{ overflow:'hidden' }}>
-            {filtered.length === 0
-              ? <div style={{ textAlign:'center', padding:'40px 16px', color:'#AEAEB2', fontSize:13 }}>No transactions found</div>
-              : filtered.map(t => {
-                const meta = SUB_TYPE_META[t.subType] || (t.type === 'Credit' ? SUB_TYPE_META.income : SUB_TYPE_META.expense);
-                const credit = t.type === 'Credit';
-                return (
-                  <div key={t.id} className="tx-card" onClick={() => { setEditTx(t); setForm(rowToForm(t)); setShowAdd(true); }}>
-                    <div style={{ width:34, height:34, borderRadius:'50%', flexShrink:0, background: credit?'rgba(52,199,89,0.1)':'rgba(255,59,48,0.1)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                      {credit ? <ArrowUpRight size={15} color="#34C759"/> : <ArrowDownRight size={15} color="#FF3B30"/>}
-                    </div>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:'flex', justifyContent:'space-between', gap:8, alignItems:'baseline' }}>
-                        <span style={{ fontSize:13.5, fontWeight:550, color:'#1D1D1F', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{txDesc(t)}</span>
-                        <span style={{ fontSize:14, fontWeight:680, color: credit?'#248A3D':'#D70015', whiteSpace:'nowrap', flexShrink:0 }}>{credit?'+':'−'}{fmt(t.amount)}</span>
-                      </div>
-                      <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:4, flexWrap:'wrap', fontSize:11.5, color:'#8E8E93' }}>
-                        <span>{(t.date || '').slice(0, 10)}</span>
-                        <Badge color={meta.color}>{meta.label}</Badge>
-                        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.accountType}{t.paymentMethod ? ` · ${t.paymentMethod}` : ''}</span>
-                      </div>
-                    </div>
-                    <button onClick={e => { e.stopPropagation(); setDeleteId(t.id); }} aria-label="Delete transaction" style={{ width:34, height:34, borderRadius:9, background:'rgba(255,59,48,0.08)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-                      <Trash2 size={14} color="#FF3B30"/>
-                    </button>
+                {txs.length === 0 ? (
+                  <EmptyPanel icon={Receipt} title="No transactions yet"
+                    text="Record money received, expenses and partner entries here. Balances update as you add them."
+                    action={<button className="mac-btn mac-btn-primary" onClick={() => openAdd()}><Plus size={15} /> Add transaction</button>} />
+                ) : filtered.length === 0 ? (
+                  <EmptyPanel icon={Receipt} title="Nothing matches your filters"
+                    text="Try a different search, month or account."
+                    action={<button className="mac-btn mac-btn-secondary" onClick={() => setFilters(NO_FILTERS)}>Clear filters</button>} />
+                ) : isPhone ? (
+                  <div className="list-cards">
+                    {groups.map((g, i) => (
+                      <Fragment key={`${g.key}-${i}`}>
+                        <div className="tx-month-head"><span>{g.label}</span><span>{g.rows.length} · net {signed(g.net)}</span></div>
+                        {g.rows.map(t => (
+                          <button key={t.id} className="list-card" onClick={() => setDetailId(t.id)}>
+                            <span className="tx-card-top"><span className="cell-main">{txMain(t)}</span>{amountOf(t)}</span>
+                            <span className="tx-card-meta">{[fmtDate(t.date), txParty(t), accountLabel(t.accountType)].filter(Boolean).join(' · ')}</span>
+                          </button>
+                        ))}
+                      </Fragment>
+                    ))}
                   </div>
-                );
-              })}
-            <style>{`.tx-card{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid rgba(0,0,0,0.05);cursor:pointer}.tx-card:active{background:rgba(0,0,0,0.03)}`}</style>
-          </div>
+                ) : (
+                  <div className="mac-card">
+                    <div className="table-wrap">
+                      <table className="data-table tx-table">
+                        <thead>
+                          <tr><th>Date</th><th>Description</th><th>Party</th><th>Account</th><th className="num">Amount</th></tr>
+                        </thead>
+                        <tbody>
+                          {groups.map((g, i) => (
+                            <Fragment key={`${g.key}-${i}`}>
+                              <tr className="tx-month">
+                                <td colSpan={5}><div className="tx-month-in"><span>{g.label}</span><span>{g.rows.length} {g.rows.length === 1 ? 'entry' : 'entries'} · net {signed(g.net)}</span></div></td>
+                              </tr>
+                              {g.rows.map(t => (
+                                <tr key={t.id} className="clickable" tabIndex={0} onClick={() => setDetailId(t.id)} onKeyDown={e => rowKey(e, t)}>
+                                  <td className="tx-date">{fmtDate(t.date)}</td>
+                                  <td>
+                                    <div className="cell-main">{txMain(t)}</div>
+                                    <div className="cell-sub">{txSub(t)}</div>
+                                  </td>
+                                  <td>{txParty(t) || <span className="faint">—</span>}</td>
+                                  <td className="muted">{accountLabel(t.accountType)}</td>
+                                  <td className="num">{amountOf(t)}</td>
+                                </tr>
+                              ))}
+                            </Fragment>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
 
-          {/* Transactions table (tablet / desktop) */}
-          <div className="mac-card only-desktop" style={{ overflow:'hidden' }}>
-            <div style={{ overflowX:'auto' }}>
-              <table style={{ width:'100%', borderCollapse:'collapse' }}>
-                <thead style={{ background:'rgba(0,0,0,0.018)' }}>
-                  <tr>{['','Date','Description','Category','Account','Amount',''].map((h,i) => <TH key={i} c={h}/>)}</tr>
-                </thead>
-                <tbody>
-                  {filtered.length === 0
-                    ? <tr><td colSpan={7} style={{ textAlign:'center', padding:'48px 16px', color:'#AEAEB2', fontSize:13 }}>No transactions found</td></tr>
-                    : filtered.map(t => {
-                      const meta = SUB_TYPE_META[t.subType] || (t.type === 'Credit' ? SUB_TYPE_META.income : SUB_TYPE_META.expense);
-                      return (
-                        <tr key={t.id} className="table-row">
-                          <TD>
-                            <div style={{ width:30, height:30, borderRadius:'50%', background: t.type==='Credit'?'rgba(52,199,89,0.1)':'rgba(255,59,48,0.1)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                              {t.type==='Credit' ? <ArrowUpRight size={13} color="#34C759"/> : <ArrowDownRight size={13} color="#FF3B30"/>}
-                            </div>
-                          </TD>
-                          <TD><span style={{ fontSize:12, color:'#6E6E73', whiteSpace:'nowrap' }}>{(t.date || '').slice(0, 10)}</span></TD>
-                          <TD>
-                            <div style={{ fontSize:13, fontWeight:500, color:'#1D1D1F' }}>{txDesc(t)}</div>
-                            {t.paymentMethod && <div style={{ fontSize:11, color:'#AEAEB2', marginTop:1 }}>{t.paymentMethod}</div>}
-                          </TD>
-                          <TD><Badge color={meta.color}>{meta.label}</Badge></TD>
-                          <TD><Badge color={t.accountType==="Founder's Personal"?'orange':t.accountType==='Partner Personal'?'red':'blue'}>{t.accountType}</Badge></TD>
-                          <TD>
-                            <span style={{ fontSize:13, fontWeight:650, color: t.type==='Credit'?'#34C759':'#FF3B30', letterSpacing:'-0.2px' }}>
-                              {t.type==='Credit'?'+':'-'}{fmt(t.amount)}
-                            </span>
-                          </TD>
-                          <TD>
-                            <div style={{ display:'flex', gap:4 }}>
-                              <button onClick={() => { setEditTx(t); setForm(rowToForm(t)); setShowAdd(true); }} style={{ width:28, height:28, borderRadius:8, background:'rgba(0,0,0,0.06)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                                <Edit2 size={13} color="#6E6E73"/>
-                              </button>
-                              <button onClick={() => setDeleteId(t.id)} style={{ width:28, height:28, borderRadius:8, background:'rgba(255,59,48,0.08)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                                <Trash2 size={13} color="#FF3B30"/>
-                              </button>
-                            </div>
-                          </TD>
-                        </tr>
-                      );
-                    })
-                  }
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Add / Edit Transaction Modal ─────────────────────── */}
-      <Modal
-        isOpen={showAdd}
-        onClose={() => { setShowAdd(false); setEditTx(null); setForm(initForm()); }}
-        title={editTx ? 'Edit Transaction' : 'New Transaction'}
-        size="md"
+      {/* ── Entry detail ─────────────────────────────────────── */}
+      <Drawer
+        isOpen={!!detail}
+        onClose={() => setDetailId(null)}
+        title={detail ? txMain(detail) : ''}
+        subtitle={detail ? `${typeLabel(detail)} · ${fmtDate(detail.date)}` : ''}
+        footer={detail && (
+          <>
+            {!detailOwner && <button className="mac-btn mac-btn-danger" onClick={() => { setDeleteTx(detail); setDetailId(null); }}><Trash2 size={14} /> {detailIsTransfer ? 'Delete transfer' : 'Delete'}</button>}
+            {detailOwner === 'employee'
+              ? <button className="mac-btn mac-btn-primary" onClick={() => navigate('/employees')}><ExternalLink size={14} /> Open Employees</button>
+              : detailOwner === 'project'
+                ? <button className="mac-btn mac-btn-primary" onClick={() => navigate('/projects')}><ExternalLink size={14} /> Open Projects</button>
+                : !detailIsTransfer && <button className="mac-btn mac-btn-primary" onClick={() => openEdit(detail)}><Pencil size={14} /> Edit</button>}
+          </>
+        )}
       >
-        <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-          {/* Type selector — only shown when adding new */}
-          {!editTx && (
-            <TypeSelector
-              value={form.txType}
-              onChange={type => setForm(f => ({
-                ...initForm(type),
-                date: f.date,
-                person: type === 'e_salary' && employees.length > 0 ? employees[0].name : PARTNERS[0],
-              }))}
-            />
-          )}
-
-          {/* When editing, show a type badge */}
-          {editTx && (() => {
-            const meta = TX_TYPES.find(t => t.id === form.txType);
-            return meta ? (
-              <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 12px', borderRadius:10, background: meta.bg }}>
-                <div style={{ width:22, height:22, borderRadius:6, background:meta.color, display:'flex', alignItems:'center', justifyContent:'center' }}>
-                  <meta.icon size={11} color="#fff"/>
-                </div>
-                <span style={{ fontSize:12.5, fontWeight:600, color:meta.color }}>{meta.label}</span>
+        {detail && (
+          <>
+            <div>
+              <div className={`tx-detail-amount ${detail.type === 'Credit' ? 'amount-in' : 'amount-out'}`}>
+                {detail.type === 'Credit' ? '+' : '−'}{fmtMoney(detail.amount)}
               </div>
-            ) : null;
-          })()}
-
-          <div style={{ height:1, background:'rgba(0,0,0,0.07)' }}/>
-
-          <TxFields
-            form={form}
-            onChange={setForm}
-            partnerOutstanding={partnerOutstanding}
-            partnerReimburseOwed={partnerReimburseOwed}
-            salaryConfig={salaryConfig}
-            partnerSalaryPaid={partnerSalaryPaid}
-            employees={employees}
-          />
-        </div>
-
-        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20, paddingTop:16, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
-          <button onClick={() => { setShowAdd(false); setEditTx(null); }} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>Cancel</button>
-          {form.txType === 'e_salary' ? (
-            <button
-              onClick={() => { setShowAdd(false); navigate('/employees'); }}
-              className="mac-btn mac-btn-primary"
-              style={{ fontSize:13, display:'flex', alignItems:'center', gap:6 }}
-            >
-              <ExternalLink size={13}/> Go to Employees
-            </button>
-          ) : (
-            <button onClick={save} disabled={saving} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>
-              {saving ? 'Saving…' : editTx ? 'Save Changes' : 'Add Transaction'}
-            </button>
-          )}
-        </div>
-      </Modal>
-
-      {/* ── Opening Balance Modal ────────────────────────────── */}
-      <Modal isOpen={showOB} onClose={() => setShowOB(false)} title="Set Opening Balance" size="sm">
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
-          <FF label="Cash + Savings (₹)" required>
-            <NumInput className="mac-input" value={obForm.cash || ''} onChange={v => setObForm(b => ({ ...b, cash: +v || 0 }))}/>
-          </FF>
-          <FF label="Company Bank (₹)" required>
-            <NumInput className="mac-input" value={obForm.bank || ''} onChange={v => setObForm(b => ({ ...b, bank: +v || 0 }))}/>
-          </FF>
-        </div>
-        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20, paddingTop:16, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
-          <button onClick={() => setShowOB(false)} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>Cancel</button>
-          <button onClick={saveOB} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>Save</button>
-        </div>
-      </Modal>
-
-      {/* ── Set Partner Salaries Modal ───────────────────────── */}
-      <Modal isOpen={showSalConfig} onClose={() => setShowSalConfig(false)} title="Set Partner Monthly Salaries" size="sm">
-        <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-          {PARTNERS.map(p => {
-            const col = PARTNER_COLORS[p];
-            return (
-              <div key={p} style={{ display:'flex', alignItems:'center', gap:12 }}>
-                <div style={{ width:32, height:32, borderRadius:9, background:col.gradient, display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:11, fontWeight:700, flexShrink:0 }}>
-                  {p.slice(0, 2).toUpperCase()}
-                </div>
-                <FF label={p} required>
-                  <NumInput className="mac-input" value={salConfigForm[p] || ''} onChange={v => setSalConfigForm(c => ({ ...c, [p]: +v || 0 }))} placeholder="Monthly salary ₹"/>
-                </FF>
+              <div className="muted" style={{ fontSize: 'var(--fs-sm)', marginTop: 4 }}>
+                {detail.accountType === POCKET
+                  ? 'Paid from a partner’s own pocket — bank and cash balances are not affected.'
+                  : detail.accountType === 'Non-cash'
+                  ? 'No money moved — this part of the salary was already paid as an advance. It counts as salary cost.'
+                  : `${detail.type === 'Credit' ? 'Added to' : 'Taken from'} ${accountLabel(detail.accountType)}.`}
               </div>
-            );
-          })}
-        </div>
-        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20, paddingTop:16, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
-          <button onClick={() => setShowSalConfig(false)} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>Cancel</button>
-          <button onClick={saveSalaryConfig} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>Save</button>
-        </div>
-      </Modal>
+            </div>
 
-      {/* ── Audit Log Modal ──────────────────────────────────── */}
-      <Modal isOpen={showAudit} onClose={() => setShowAudit(false)} title="Audit Log" size="lg">
-        {auditLog.length === 0
-          ? <p style={{ textAlign:'center', color:'#AEAEB2', padding:'32px 0', fontSize:13 }}>No audit entries yet</p>
-          : <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            {auditLog.map(e => {
-              const badgeColor = e.action === 'Deleted' ? 'red' : e.action === 'Created' ? 'green' : 'blue';
-              const ts = e.createdAt ? new Date(e.createdAt).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : '';
-              return (
-                <div key={e.id} style={{ padding:'10px 12px', borderRadius:10, background:'rgba(0,0,0,0.025)', border:'1px solid rgba(0,0,0,0.06)' }}>
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:4 }}>
-                    <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                      <Badge color={badgeColor}>{e.action}</Badge>
-                      {e.description && <span style={{ fontSize:12.5, color:'#1D1D1F', fontWeight:500 }}>{e.description}</span>}
-                    </div>
-                    <span style={{ fontSize:11, color:'#AEAEB2', textAlign:'right', whiteSpace:'nowrap', marginLeft:8 }}>{ts}</span>
-                  </div>
-                  <div style={{ display:'flex', gap:12, marginTop:3 }}>
-                    <span style={{ fontSize:11, color:'#6E6E73' }}>Updated by: <strong>{e.by || '—'}</strong></span>
-                  </div>
-                  {e.prevData && e.nextData && (
-                    <div style={{ marginTop:6, display:'flex', gap:8, fontSize:11 }}>
-                      <span style={{ color:'#FF3B30' }}>Before: {fmt(e.prevData.amount)} · {e.prevData.accountType}</span>
-                      <span style={{ color:'#AEAEB2' }}>→</span>
-                      <span style={{ color:'#34C759' }}>After: {fmt(e.nextData.amount)} · {e.nextData.accountType}</span>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+            {detailOwner === 'project' && (
+              <div className="tx-note brand">
+                <Info size={14} />
+                <span><strong>Recorded from a project payment.</strong> Change or remove it on the project, which keeps the two in step.</span>
+              </div>
+            )}
+            {detailIsTransfer && (
+              <div className="tx-note">
+                <Info size={14} />
+                <span>One half of a move between your own accounts. Deleting it deletes both halves. It does not count in profit.</span>
+              </div>
+            )}
+            {detailManaged && (
+              <div className="tx-note brand">
+                <Info size={14} />
+                <span>
+                  <strong>Managed from Employees.</strong> Salary payments are recorded and edited on the employee’s page, which keeps their salary history in step.{' '}
+                  <button type="button" className="tx-link" onClick={() => navigate('/employees')}>Open Employees</button>
+                </span>
+              </div>
+            )}
+
+            <dl className="kv">
+              <dt>Type</dt><dd>{typeLabel(detail)}</dd>
+              <dt>Date</dt><dd>{fmtDate(detail.date)}</dd>
+              <dt>Account</dt><dd>{detail.accountType || '—'}</dd>
+              <dt>Payment method</dt><dd>{detail.paymentMethod || '—'}</dd>
+              {detail.source && <><dt>Source</dt><dd>{detail.source}</dd></>}
+              {detail.clientName && <><dt>Client</dt><dd>{detail.clientName}</dd></>}
+              {detail.category && <><dt>Category</dt><dd>{detail.category}</dd></>}
+              {detail.paidTo && <><dt>Paid to</dt><dd>{detail.paidTo}</dd></>}
+              {detail.person && <><dt>{detailManaged ? 'Employee' : 'Partner'}</dt><dd>{detail.person}</dd></>}
+              {detail.monthLabel && <><dt>Salary month</dt><dd>{detail.monthLabel}</dd></>}
+              <dt>Remark</dt><dd>{detail.remark || '—'}</dd>
+            </dl>
+
+            {detailHistory.length > 0 && (
+              <section className="tx-hist">
+                <h3 className="section-title">History</h3>
+                {detailHistory.map(e => <AuditItem key={e.id} e={e} />)}
+              </section>
+            )}
+          </>
+        )}
+      </Drawer>
+
+      {/* ── Add / edit ───────────────────────────────────────── */}
+      <Modal
+        isOpen={showForm}
+        onClose={closeForm}
+        title={editTx ? 'Edit transaction' : 'Add transaction'}
+        size="md"
+        footer={
+          <>
+            <button type="button" onClick={closeForm} disabled={saving} className="mac-btn mac-btn-secondary">Cancel</button>
+            <button type="submit" form="tx-form" disabled={saving} className="mac-btn mac-btn-primary">
+              {saving ? 'Saving…' : editTx ? 'Save changes' : 'Add transaction'}
+            </button>
+          </>
         }
+      >
+        <TxForm
+          form={form}
+          setForm={updateForm}
+          errors={errors}
+          editing={!!editTx}
+          stats={formStats}
+          onSubmit={save}
+          onEmployees={() => { setShowForm(false); navigate('/employees'); }}
+        />
       </Modal>
+
+      {/* ── Opening balance ──────────────────────────────────── */}
+      <Modal isOpen={showOB} onClose={() => !settingsSaving && setShowOB(false)} title="Opening balance" size="sm"
+        footer={
+          <>
+            <button type="button" onClick={() => setShowOB(false)} disabled={settingsSaving} className="mac-btn mac-btn-secondary">Cancel</button>
+            <button type="submit" form="tx-ob-form" disabled={settingsSaving} className="mac-btn mac-btn-primary">{settingsSaving ? 'Saving…' : 'Save'}</button>
+          </>
+        }>
+        <form id="tx-ob-form" onSubmit={saveOB} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="tx-note"><Info size={14} /><span>What each account held before the first entry in this ledger. Every balance on this page starts from these.</span></div>
+          <FormGrid>
+            <Field label="Cash + Savings (₹)">
+              <NumInput className="mac-input" value={obForm.cash || ''} onChange={v => setObForm(b => ({ ...b, cash: +v || 0 }))} placeholder="0" />
+            </Field>
+            <Field label="Company Bank (₹)">
+              <NumInput className="mac-input" value={obForm.bank || ''} onChange={v => setObForm(b => ({ ...b, bank: +v || 0 }))} placeholder="0" />
+            </Field>
+          </FormGrid>
+        </form>
+      </Modal>
+
+      {/* ── Partner salary settings ──────────────────────────── */}
+      <Modal isOpen={showSalConfig} onClose={() => !settingsSaving && setShowSalConfig(false)} title="Partner salary settings" size="sm"
+        footer={
+          <>
+            <button type="button" onClick={() => setShowSalConfig(false)} disabled={settingsSaving} className="mac-btn mac-btn-secondary">Cancel</button>
+            <button type="submit" form="tx-salary-form" disabled={settingsSaving} className="mac-btn mac-btn-primary">{settingsSaving ? 'Saving…' : 'Save'}</button>
+          </>
+        }>
+        <form id="tx-salary-form" onSubmit={saveSalaryConfig} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {partners.map(p => (
+            <div key={p} className="tx-config-row">
+              <Avatar name={p} size={36} />
+              <Field label={`${p} — monthly salary (₹)`}>
+                <NumInput className="mac-input" value={salConfigForm[p] || ''} onChange={v => setSalConfigForm(c => ({ ...c, [p]: +v || 0 }))} placeholder="0" />
+              </Field>
+            </div>
+          ))}
+        </form>
+      </Modal>
+
+      {/* ── History (audit log) ──────────────────────────────── */}
+      <Drawer isOpen={showAudit} onClose={() => setShowAudit(false)} title="History"
+        subtitle={`${auditLog.length} ${auditLog.length === 1 ? 'change' : 'changes'} to the ledger, newest first`}>
+        {auditLog.length === 0
+          ? <div className="empty-panel"><span className="empty-icon"><History size={22} /></span><div className="empty-title">No changes recorded yet</div><div className="empty-text">Every entry added, edited or deleted is listed here with who did it.</div></div>
+          : <div className="tx-hist">{auditLog.map(e => <AuditItem key={e.id} e={e} />)}</div>}
+      </Drawer>
 
       <ConfirmDialog
-        isOpen={!!deleteId}
-        onClose={() => setDeleteId(null)}
-        onConfirm={() => del(deleteId)}
-        title="Delete Transaction"
-        message="This will permanently delete this transaction."
+        isOpen={!!deleteTx}
+        onClose={() => setDeleteTx(null)}
+        onConfirm={() => del(deleteTx)}
+        title="Delete transaction"
+        message={deleteTx ? `Delete “${txMain(deleteTx)}” (${fmtMoney(deleteTx.amount)})? Balances will change and this cannot be undone.${deleteTx.subType === 'employee_salary' ? ' The employee’s salary record on the Employees page is not changed.' : ''}` : ''}
       />
     </div>
   );

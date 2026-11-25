@@ -1,9 +1,17 @@
-import { useState, useRef, useEffect } from 'react';
+// Top bar of every page: <Header title subtitle actions />
+// Left: menu button (phones) + title. Right: the page's own actions, then the
+// global "Search or jump to…" (Ctrl/Cmd+K), notifications and the account menu.
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Menu, LogOut, CheckSquare } from 'lucide-react';
+import * as Popover from '@radix-ui/react-popover';
+import { RiCheckDoubleLine, RiMenuLine, RiNotification3Line, RiSearchLine, RiTaskLine } from '@remixicon/react';
 import { useLayout } from '../../contexts/LayoutContext';
-import { useAuth } from '../../contexts/AuthContext';
 import { useNotifications } from '../../contexts/NotificationContext';
+import { Avatar } from '../ui/Avatar';
+import { Tooltip } from '../ui/Tooltip';
+import { Kbd, modKey } from '../ui/Kbd';
+import UserMenu from './UserMenu';
+import { useMeSummary, useShell } from './shell';
 
 function fmtWhen(iso) {
   if (!iso) return '';
@@ -19,175 +27,102 @@ function NotificationBell() {
   const { notifications, unreadCount, markRead, markAllRead } = useNotifications() || {};
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const ref = useRef(null);
+  const list = notifications || [];
 
-  useEffect(() => {
-    function onClick(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
-    document.addEventListener('mousedown', onClick);
-    return () => document.removeEventListener('mousedown', onClick);
-  }, []);
+  function openItem(n) {
+    if (!n.read) markRead?.(n.id);
+    // open the issue it is about (Work page reads ?issue=)
+    if (n.taskId) { setOpen(false); navigate(`/tasks?issue=${n.taskId}`); }
+  }
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        onClick={() => setOpen(o => !o)}
-        style={{
-          width: 32, height: 32, borderRadius: '50%',
-          background: 'rgba(0,0,0,0.055)', border: 'none', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'background 0.13s', flexShrink: 0, position: 'relative',
-        }}
-        onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,0,0,0.09)'}
-        onMouseLeave={e => e.currentTarget.style.background = 'rgba(0,0,0,0.055)'}
-      >
-        <Bell size={14} color="#48484A" />
-        {!!unreadCount && (
-          <span style={{
-            position: 'absolute', top: -1, right: -1, minWidth: 15, height: 15, padding: '0 3px',
-            borderRadius: 8, background: '#FF3B30', color: '#fff', fontSize: 9.5, fontWeight: 700,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid #F2F2F7',
-          }}>{unreadCount > 9 ? '9+' : unreadCount}</span>
-        )}
-      </button>
-
-      {open && (
-        <div style={{
-          position: 'absolute', top: 40, right: 0, width: 340, maxHeight: 420,
-          background: '#fff', borderRadius: 14, boxShadow: '0 12px 40px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.06)',
-          display: 'flex', flexDirection: 'column', zIndex: 100, overflow: 'hidden',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
-            <span style={{ fontSize: 13.5, fontWeight: 650, color: '#1D1D1F' }}>Notifications</span>
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Tooltip content="Notifications" disabled={open}>
+        <Popover.Trigger asChild>
+          <button type="button" className="icon-btn" aria-label={unreadCount ? `Notifications, ${unreadCount} unread` : 'Notifications'}>
+            <RiNotification3Line size={18} />
+            {!!unreadCount && <span className="hdr-dot" aria-hidden="true">{unreadCount > 9 ? '9+' : unreadCount}</span>}
+          </button>
+        </Popover.Trigger>
+      </Tooltip>
+      <Popover.Portal>
+        <Popover.Content align="end" sideOffset={8} collisionPadding={12}
+          className="ui-pop z-[60] flex max-h-[min(460px,70dvh)] w-[min(360px,calc(100vw-24px))] flex-col overflow-hidden rounded-16 border border-stroke-soft-200 bg-bg-white-0 shadow-regular-md outline-none"
+          style={{ '--ui-origin': 'var(--radix-popover-content-transform-origin)' }}>
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-stroke-soft-200 px-4 py-3">
+            <span className="text-label-sm text-text-strong-950">Notifications</span>
             {!!unreadCount && (
-              <button onClick={markAllRead} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#0071E3', fontSize: 12, fontWeight: 600, padding: 0 }}>
-                Mark all read
+              <button type="button" onClick={markAllRead}
+                className="inline-flex items-center gap-1 rounded-md text-label-xs text-primary-text outline-none transition-colors hover:underline focus-visible:shadow-focus-ring">
+                <RiCheckDoubleLine size={14} aria-hidden="true" /> Mark all read
               </button>
             )}
           </div>
-          <div style={{ overflowY: 'auto', flex: 1 }}>
-            {(!notifications || notifications.length === 0) ? (
-              <div style={{ padding: '32px 16px', textAlign: 'center', color: '#AEAEB2', fontSize: 12.5 }}>No notifications yet</div>
-            ) : notifications.map(n => (
-              <div
-                key={n.id}
-                onClick={() => {
-                  if (!n.read) markRead(n.id);
-                  // open the issue it is about (Work page reads ?issue=)
-                  if (n.taskId) { setOpen(false); navigate(`/tasks?issue=${n.taskId}`); }
-                }}
-                style={{
-                  display: 'flex', gap: 10, padding: '11px 14px', cursor: n.read && !n.taskId ? 'default' : 'pointer',
-                  background: n.read ? '#fff' : 'rgba(0,113,227,0.045)',
-                  borderBottom: '1px solid rgba(0,0,0,0.05)',
-                }}
-              >
-                <div style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, background: 'rgba(0,113,227,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <CheckSquare size={12} color="#0071E3" />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 600, color: '#1D1D1F', lineHeight: 1.4 }}>{n.title}</div>
-                  {n.body && <div style={{ fontSize: 11.5, color: '#8E8E93', marginTop: 2, lineHeight: 1.4 }}>{n.body}</div>}
-                  <div style={{ fontSize: 10.5, color: '#C7C7CC', marginTop: 4 }}>{fmtWhen(n.createdAt)}</div>
-                </div>
-                {!n.read && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#0071E3', flexShrink: 0, marginTop: 4 }} />}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {list.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+                <span className="empty-icon" style={{ margin: 0 }}><RiNotification3Line size={20} /></span>
+                <div className="text-label-sm text-text-strong-950">You are all caught up</div>
+                <div className="text-paragraph-xs text-text-sub-600">New task assignments and mentions show up here.</div>
               </div>
-            ))}
+            ) : list.map(n => {
+              const clickable = !n.read || !!n.taskId;
+              const Row = clickable ? 'button' : 'div';
+              return (
+                <Row key={n.id} {...(clickable ? { type: 'button', onClick: () => openItem(n) } : {})}
+                  className={`flex w-full gap-3 border-b border-stroke-soft-200 px-4 py-3 text-left outline-none transition-colors duration-150 last:border-b-0 ${clickable ? 'cursor-pointer hover:bg-bg-weak-50 focus-visible:bg-bg-weak-50' : ''} ${n.read ? '' : 'bg-primary-alpha-10'}`}>
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-alpha-10 text-primary-text"><RiTaskLine size={16} aria-hidden="true" /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-label-sm text-text-strong-950">{n.title}</span>
+                    {n.body && <span className="mt-0.5 block text-paragraph-xs text-text-sub-600">{n.body}</span>}
+                    <span className="mt-1 block text-paragraph-xs text-text-soft-400">{fmtWhen(n.createdAt)}</span>
+                  </span>
+                  {!n.read && <span className="mt-1.5 size-2 shrink-0 rounded-full bg-primary-base" aria-label="Unread" />}
+                </Row>
+              );
+            })}
           </div>
-        </div>
-      )}
-    </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
 
 export default function Header({ title, subtitle, actions }) {
   const { toggleSidebar } = useLayout();
-  const { user, logout, displayName } = useAuth();
+  const { openPalette } = useShell();
+  const meInfo = useMeSummary();
 
   return (
-    <div
-      className="page-header"
-      style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '16px 32px',
-        background: 'rgba(242,242,247,0.92)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        borderBottom: '1px solid rgba(0,0,0,0.07)',
-        position: 'sticky', top: 0, zIndex: 10,
-        gap: 12, flexWrap: 'wrap',
-      }}
-    >
-      {/* Left: hamburger (mobile) + title */}
+    <header className="page-header">
+      {/* Left: menu (phones) + title */}
       <div className="hdr-main" style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-        <button
-          className="mobile-menu-btn"
-          onClick={toggleSidebar}
-          style={{
-            width: 32, height: 32, borderRadius: 9,
-            background: 'rgba(0,0,0,0.06)', border: 'none', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}
-        >
-          <Menu size={16} color="#1D1D1F" />
+        <button type="button" className="icon-btn mobile-menu-btn" onClick={toggleSidebar} aria-label="Open menu" aria-controls="app-sidebar">
+          <RiMenuLine size={18} />
         </button>
-
         <div style={{ minWidth: 0 }}>
-          <h1 style={{
-            fontSize: 20, fontWeight: 650, color: '#1D1D1F',
-            letterSpacing: '-0.5px', lineHeight: 1.2,
-            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-          }}>
-            {title}
-          </h1>
-          {subtitle && (
-            <p style={{
-              fontSize: 12, color: '#8E8E93', marginTop: 2,
-              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-            }}>{subtitle}</p>
-          )}
+          <h1 className="page-title">{title}</h1>
+          {subtitle && <p className="page-subtitle">{subtitle}</p>}
         </div>
       </div>
 
       {/* Page actions — on phones they move to their own swipeable row */}
       {actions && <div className="hdr-actions">{actions}</div>}
 
-      {/* Right: bell + user */}
+      {/* Right: search, notifications, account */}
       <div className="hdr-user" style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <button type="button" className="hdr-search" onClick={openPalette} aria-label="Search or jump to" aria-keyshortcuts="Control+K Meta+K">
+          <RiSearchLine size={17} aria-hidden="true" style={{ flexShrink: 0 }} />
+          <span>Search or jump to…</span>
+          <Kbd>{modKey()} K</Kbd>
+        </button>
         <NotificationBell />
-
-        {/* User avatar + logout */}
-        {user && (
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <div
-              title={displayName ? `${displayName} · ${user.email}` : user.email}
-              style={{
-                width: 30, height: 30, borderRadius: '50%',
-                background: 'linear-gradient(135deg,#0071E3,#0A84FF)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#fff', fontSize: 11, fontWeight: 700, flexShrink: 0,
-                cursor: 'default',
-              }}
-            >
-              {(displayName || user.email || '?').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase()}
-            </div>
-            <button
-              onClick={logout}
-              title="Sign out"
-              style={{
-                width: 30, height: 30, borderRadius: '50%',
-                background: 'rgba(255,59,48,0.07)', border: 'none', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'background 0.13s', flexShrink: 0,
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,59,48,0.14)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,59,48,0.07)'}
-            >
-              <LogOut size={13} color="#FF3B30"/>
-            </button>
-          </div>
-        )}
+        <UserMenu side="bottom" align="end">
+          <button type="button" className="hdr-avatar" aria-label={`Account menu for ${meInfo.name}`}>
+            <Avatar name={meInfo.name} src={meInfo.avatarUrl} size={32} title="" />
+          </button>
+        </UserMenu>
       </div>
-    </div>
+    </header>
   );
 }

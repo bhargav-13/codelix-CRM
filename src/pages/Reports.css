@@ -1,0 +1,88 @@
+/* P&L Reports — page-specific layout only; colours come from index.css tokens */
+
+/* Header export menu: on phones the actions row scrolls sideways, which would clip the menu */
+@media (max-width: 640px) {
+  .pnl-page .hdr-actions { overflow: visible; }
+  .pnl-page .hdr-actions .menu { right: auto; left: 0; }
+}
+
+/* Period tabs: one line, swipe sideways when they do not fit */
+.pnl-periods { max-width: 100%; overflow-x: auto; scrollbar-width: none; align-self: flex-start; }
+.pnl-periods::-webkit-scrollbar { display: none; }
+.pnl-periods .tab-item { flex-shrink: 0; }
+.pnl-controls .mac-select, .pnl-controls .mac-input { width: auto; height: 38px; padding-top: 0; padding-bottom: 0; }
+.pnl-controls .tab-bar { max-width: 100%; }
+.pnl-controls .tab-bar .tab-item { flex-shrink: 0; }
+.pnl-custom { display: flex; align-items: center; gap: 6px; }
+
+.pnl-section { padding: 20px; }
+.pnl-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.pnl-hint { font-size: var(--fs-xs); color: var(--ink-3); }
+
+.pnl-delta { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.pnl-delta .faint { font-weight: 400; }
+
+/* Statement */
+.pnl-scroll { overflow-x: auto; margin: 0 -20px; padding: 0 20px; }
+.pnl-table { border-collapse: separate; border-spacing: 0; font-size: var(--fs-sm); }
+.data-table.pnl-table th, .data-table.pnl-table td { text-align: right; padding: 8px 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.data-table.pnl-table th { position: static; }
+.data-table.pnl-table .pnl-sticky { position: sticky; left: 0; background: var(--surface); text-align: left; z-index: 1; min-width: 210px; }
+.data-table.pnl-table th.pnl-sticky { z-index: 2; }
+.data-table.pnl-table tbody tr:hover { background: transparent; }
+.pnl-table tr.pnl-group td { padding-top: 16px; font-size: var(--fs-xs); font-weight: 700; color: var(--ink-2); border-bottom: none; }
+.pnl-table tr.pnl-group.muted td { color: var(--ink-3); }
+.data-table.pnl-table tr.pnl-total td { font-weight: 700; background: var(--surface-2); }
+.data-table.pnl-table tr.pnl-net td { font-weight: 700; font-size: var(--fs-md); border-top: 2px solid var(--line-strong); background: color-mix(in srgb, var(--good) 8%, var(--surface)); }
+.pnl-table tr.pnl-margin td { color: var(--ink-2); }
+.pnl-table tr.pnl-excluded td, .pnl-excluded .pnl-cell { color: var(--ink-3); }
+.pnl-line { display: inline-flex; align-items: center; gap: 6px; padding-left: 10px; }
+.pnl-cell { background: none; border: none; padding: 2px 4px; margin: -2px -4px; border-radius: 5px; font: inherit; color: inherit; cursor: pointer; font-variant-numeric: tabular-nums; }
+.pnl-cell:hover, .pnl-cell:focus-visible { background: var(--brand-soft); color: var(--brand); }
+.pnl-tog { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-xs); padding: 2px 8px; border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2); cursor: pointer; font-family: inherit; }
+.pnl-tog:hover { border-color: var(--brand); color: var(--brand); }
+.pnl-neg { color: var(--bad); } .pnl-pos { color: var(--good); }
+.data-table.pnl-table td.muted { color: var(--ink-2); }
+.data-table.pnl-table td.pnl-pos { color: var(--good); }
+.data-table.pnl-drill th:not(:last-child), .data-table.pnl-drill td:not(:last-child) { text-align: left; }
+.data-table.pnl-drill td.pnl-wrap { white-space: normal; }
+
+/* Profit windows */
+.pnl-snap { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.pnl-snap-item { display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 12px 14px; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-family: inherit; min-width: 0; color: var(--ink); }
+.pnl-snap-item:hover { background: var(--surface-2); }
+.pnl-snap-item.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.pnl-snap-name { font-size: var(--fs-sm); color: var(--ink-2); font-weight: 600; }
+.pnl-snap-value { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pnl-snap-sub { font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Highlights */
+.pnl-insights { display: flex; flex-direction: column; gap: 8px; }
+.pnl-insight { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--surface-2); }
+.pnl-insight > svg { flex-shrink: 0; color: var(--ink-2); }
+.pnl-insight-body { flex: 1; min-width: 0; }
+.pnl-insight-label { font-size: var(--fs-xs); color: var(--ink-3); }
+.pnl-insight-value { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.pnl-insight-detail { font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* Options drawer */
+.pnl-opt { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border-radius: var(--r-sm); background: var(--surface-2); cursor: pointer; }
+.pnl-opt-label { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.pnl-opt-hint { display: block; font-size: var(--fs-sm); color: var(--ink-2); margin-top: 1px; }
+.pnl-switch { width: 36px; height: 22px; border-radius: var(--r-pill); border: none; padding: 2px; cursor: pointer; flex-shrink: 0; background: var(--line-strong); transition: background 0.15s; }
+.pnl-switch > span { display: block; width: 18px; height: 18px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-card); transition: transform 0.15s; }
+.pnl-switch[aria-checked="true"] { background: var(--good); }
+.pnl-switch[aria-checked="true"] > span { transform: translateX(14px); }
+
+@media (max-width: 1024px) { .pnl-snap { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .pnl-snap { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .data-table.pnl-table .pnl-sticky { min-width: 150px; }
+  .pnl-section { padding: 16px; }
+  .pnl-scroll { margin: 0 -16px; padding: 0 16px; }
+}
+
+@media print {
+  .no-print, .sidebar-aside, .page-header button { display: none !important; }
+  .pnl-page .mac-card { box-shadow: none; break-inside: avoid; }
+}

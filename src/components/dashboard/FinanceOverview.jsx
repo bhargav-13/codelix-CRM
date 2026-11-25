@@ -4,12 +4,13 @@ import TrendChart from '../charts/TrendChart';
 import {
   resolvePeriod, previousPeriod, samePeriodLastYear, effectiveEnd, summarize, buildColumns, buildStatement,
   computeReceivables, gstClientSet, currentMonth, addMonths, txMonth, rangeLabel,
-  fmtINR, fmtCompact, fmtPct, pctChange, loadPlOptions,
+  fmtINR, fmtCompact, fmtPct, pctChange,
 } from '../../lib/finance';
 import { TrendingUp, TrendingDown, Minus, ArrowRight } from 'lucide-react';
+import { usePlOptions } from '../../lib/plOptions';
 
-const INK = { primary: '#1D1D1F', secondary: '#6E6E73', muted: '#AEAEB2' };
-const GOOD = '#248A3D', BAD = '#D70015';
+const INK = { primary: 'var(--ink)', secondary: 'var(--ink-2)', muted: 'var(--ink-3)' };
+const GOOD = 'var(--good)', BAD = 'var(--bad)';
 
 const TABS = [
   ['this_month', 'This month'], ['last_month', 'Last month'], ['this_quarter', 'This quarter'],
@@ -21,7 +22,7 @@ const WINDOW_NAMES = { last_month: 'Last month', this_quarter: 'This quarter', l
 function Change({ cur, prev, inverse, pp }) {
   if (prev == null) return null;
   const d = pp ? (cur ?? 0) - prev : pctChange(cur, prev);
-  if (d == null || !isFinite(d)) return <span style={{ fontSize: 11, color: INK.muted }}>—</span>;
+  if (d == null || !isFinite(d)) return <span style={{ fontSize: 'var(--fs-xs)', color: INK.muted }}>—</span>;
   const up = d > 0.05, down = d < -0.05;
   const color = !up && !down ? INK.secondary : (inverse ? down : up) ? GOOD : BAD;
   const Icon = up ? TrendingUp : down ? TrendingDown : Minus;
@@ -32,7 +33,7 @@ function Change({ cur, prev, inverse, pp }) {
 export default function FinanceOverview({ txs, projects }) {
   const navigate = useNavigate();
   const [tab, setTab] = useState('this_month');
-  const [opts] = useState(loadPlOptions); // same "what counts" choices as the P&L page
+  const [opts] = usePlOptions(); // the same shared "what counts" choices as the P&L page
   const now = currentMonth();
   const ctx = useMemo(() => ({ gstClients: gstClientSet(projects) }), [projects]);
   const firstMonth = useMemo(() => txs.reduce((m, t) => { const k = txMonth(t); return k && k < m ? k : m; }, now), [txs, now]);
@@ -75,11 +76,11 @@ export default function FinanceOverview({ txs, projects }) {
     <div className="mac-card" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 650, color: INK.primary }}>Profit & Loss</div>
+          <div style={{ fontSize: 'var(--fs-md)', fontWeight: 650, color: INK.primary }}>Profit & Loss</div>
           <div style={{ fontSize: 11.5, color: INK.muted, marginTop: 2 }}>{view.period.label} · vs {view.prevLabel} and last year</div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div className="tab-bar" style={{ flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', minWidth: 0, maxWidth: '100%' }}>
+          <div className="tab-bar fo-tabs">
             {TABS.map(([id, l]) => <button key={id} className={`tab-item ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)} style={{ fontSize: 12, padding: '5px 10px' }}>{l}</button>)}
           </div>
           <button onClick={() => navigate('/reports')} className="mac-btn mac-btn-ghost" style={{ fontSize: 12.5 }}>Full report <ArrowRight size={13} /></button>
@@ -88,12 +89,12 @@ export default function FinanceOverview({ txs, projects }) {
 
       <div className="rg-4">
         {kpis.map(k => (
-          <div key={k.label} style={{ padding: '12px 14px', borderRadius: 12, background: k.strong ? 'rgba(27,175,122,0.07)' : 'rgba(0,0,0,0.025)', minWidth: 0 }}>
+          <div key={k.label} style={{ padding: '12px 14px', borderRadius: 'var(--r-sm)', background: k.strong ? 'var(--good-soft)' : 'var(--surface-2)', minWidth: 0 }}>
             <div style={{ fontSize: 11.5, color: INK.secondary, fontWeight: 500 }}>{k.label}</div>
             <div style={{ fontSize: 21, fontWeight: 680, color: !k.pct && k.v < 0 ? BAD : INK.primary, letterSpacing: '-0.5px', margin: '4px 0', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {k.pct ? fmtPct(k.v) : fmtINR(k.v)}
             </div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11, color: INK.muted }}>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 'var(--fs-xs)', color: INK.muted }}>
               <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}><Change cur={k.v} prev={k.p} inverse={k.inverse} pp={k.pct} /> prev</span>
               <span style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}><Change cur={k.v} prev={k.y} inverse={k.inverse} pp={k.pct} /> YoY</span>
             </div>
@@ -104,14 +105,14 @@ export default function FinanceOverview({ txs, projects }) {
       <div className="fo-windows">
         {windows.map(w => (
           <div key={w.id} title={`Revenue ${fmtINR(w.revenue)} · Expenses ${fmtINR(w.expense)}`}
-            style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.06)', background: '#fff', minWidth: 0 }}>
-            <div style={{ fontSize: 11, color: INK.secondary }}>{WINDOW_NAMES[w.id]}</div>
+            style={{ padding: '10px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--line)', background: 'var(--surface)', minWidth: 0 }}>
+            <div style={{ fontSize: 'var(--fs-xs)', color: INK.secondary }}>{WINDOW_NAMES[w.id]}</div>
             <div style={{ fontSize: 15, fontWeight: 680, color: w.profit < 0 ? BAD : INK.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtCompact(w.profit)}</div>
             <div style={{ fontSize: 10.5, color: INK.muted }}>margin {fmtPct(w.margin, 0)}</div>
           </div>
         ))}
-        <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,149,0,0.07)', minWidth: 0 }}>
-          <div style={{ fontSize: 11, color: INK.secondary }}>To collect</div>
+        <div style={{ padding: '10px 12px', borderRadius: 'var(--r-sm)', background: 'var(--warn-soft)', minWidth: 0 }}>
+          <div style={{ fontSize: 'var(--fs-xs)', color: INK.secondary }}>To collect</div>
           <div style={{ fontSize: 15, fontWeight: 680, color: INK.primary, fontVariantNumeric: 'tabular-nums' }}>{fmtCompact(receivables)}</div>
           <div style={{ fontSize: 10.5, color: INK.muted }}>from projects</div>
         </div>
@@ -122,7 +123,8 @@ export default function FinanceOverview({ txs, projects }) {
         <TrendChart points={trend} height={220} />
       </div>
 
-      <style>{`.fo-windows{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
+      <style>{`.fo-tabs{max-width:100%;overflow-x:auto;scrollbar-width:none}.fo-tabs::-webkit-scrollbar{display:none}.fo-tabs .tab-item{flex-shrink:0}
+.fo-windows{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
 @media(max-width:1024px){.fo-windows{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media(max-width:640px){.fo-windows{grid-template-columns:repeat(2,minmax(0,1fr))}}`}</style>
     </div>

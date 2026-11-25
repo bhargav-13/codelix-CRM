@@ -2,647 +2,714 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import Header from '../components/layout/Header';
 import Badge, { getStatusColor } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { PageLoader } from '../components/ui/CodelixLoader';
 import { projectsDB, existingProjectsDB, employeesDB, auditDB } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
 import { NumInput } from '../lib/numInput';
-import { PROJECT_TYPES, PROJECT_STATUSES, PAYMENT_METHODS, PARTNERS } from '../data/mockData';
-import { Plus, Edit2, Trash2, Filter, History, IndianRupee, ChevronDown, ChevronRight, User, Calendar, Check, X as XIcon } from 'lucide-react';
-
-const today = new Date().toISOString().split('T')[0];
-const fmt = n => n != null ? '₹' + Number(n).toLocaleString('en-IN') : '—';
-
-const emptyProj = { projectName:'',clientName:'',companyName:'',projectType:'Website Development',handledBy:'',startDate:today,dueDate:'',status:'Pending',valuation:'',billingType:'Without GST',milestones:[],payments:[],nextPaymentDue:'',assignedEmployees:[] };
+import { PROJECT_TYPES, PROJECT_STATUSES, PAYMENT_METHODS } from '../data/mockData';
+import { usePeople } from '../lib/people';
+import {
+  useToast, Drawer, Field, FormGrid, FormSection, Toolbar, Chips, StatTiles, SkeletonRows, EmptyPanel, ErrorPanel,
+  RowMenu, Avatar, fmtMoney, fmtDate, todayLocal,
+} from '../components/ui/kit';
+import { Plus, Edit2, Trash2, History, IndianRupee, FolderKanban, Briefcase, Wallet, Clock, Archive, X } from 'lucide-react';
+import './Projects.css';
 
 const GST_RATE = 0.18;
+// Contract value of a "With GST" project is GST-inclusive; split it back out.
 const gstBreakdown = val => {
   const v = +val || 0;
   const taxable = Math.round(v / (1 + GST_RATE));
   return { taxable, gst: v - taxable };
 };
-const emptyPay  = { amount:'',date:today+'T10:00',method:'Bank Transfer',remark:'' };
-const emptyMs   = { label:'',percent:'' };
 
-const FF=({label,children,required})=>(
-  <div>
-    <label style={{display:'block',fontSize:11.5,fontWeight:550,color:'#6E6E73',marginBottom:5,textTransform:'uppercase',letterSpacing:'0.4px'}}>
-      {label}{required&&<span style={{color:'#FF3B30',marginLeft:2}}>*</span>}
-    </label>
-    {children}
-  </div>
-);
+const paidOf = p => (p.payments || []).reduce((s, x) => s + (+x.amount || 0), 0);
+const moneyOf = p => {
+  const value = +p.valuation || 0;
+  const paid = paidOf(p);
+  return { value, paid, balance: Math.max(0, value - paid), pct: value ? Math.round((paid / value) * 100) : 0, fullyPaid: value > 0 && paid >= value };
+};
+const isOverdue = p => !!p.dueDate && p.dueDate < todayLocal() && p.status !== 'Completed' && p.status !== 'Cancelled';
 
-function GstBreakdownLine({val}){
-  const {taxable,gst}=gstBreakdown(val);
-  return(
-    <div style={{fontSize:11,color:'#6E6E73',marginTop:5,display:'flex',gap:10}}>
-      <span>Taxable: <strong style={{color:'#1D1D1F'}}>₹{taxable.toLocaleString('en-IN')}</strong></span>
-      <span>GST 18%: <strong style={{color:'#FF9500'}}>₹{gst.toLocaleString('en-IN')}</strong></span>
+// Payments live in a JSON list on the project. New ones get a stable `key`;
+// entries saved before that existed are addressed by their position.
+// every payment has a server id
+const payIdOf = (p, i) => p.id || p.key || `idx:${i}`;
+
+const blankProject = () => ({
+  projectName: '', clientName: '', companyName: '', projectType: PROJECT_TYPES[0], handledBy: '', startDate: todayLocal(), dueDate: '',
+  status: 'Pending', valuation: '', billingType: 'Without GST', milestones: [], payments: [], nextPaymentDue: '', assignedEmployees: [],
+});
+const blankPayment = () => ({ id: null, amount: '', date: `${todayLocal()}T10:00`, method: 'Bank Transfer', account: 'Company Bank', remark: '' });
+
+const onKeyActivate = fn => e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); fn(); }
+};
+
+function PayProgress({ m }) {
+  return (
+    <div className="proj-pay">
+      <div className={`proj-bar ${m.fullyPaid ? 'full' : ''}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(m.pct, 100)} aria-label="Payment received">
+        <span style={{ width: `${Math.min(m.pct, 100)}%` }} />
+      </div>
+      <div className="proj-pay-text"><strong>{fmtMoney(m.paid)}</strong> of {fmtMoney(m.value)}</div>
     </div>
   );
 }
 
-function GstBreakdownDetail({val}){
-  const {taxable,gst}=gstBreakdown(val);
-  return(
-    <div style={{display:'flex',gap:10,justifyContent:'center',marginTop:10,paddingTop:10,borderTop:'1px solid rgba(0,0,0,0.06)'}}>
-      <span style={{fontSize:11.5,color:'#6E6E73'}}>Taxable: <strong style={{color:'#1D1D1F'}}>₹{taxable.toLocaleString('en-IN')}</strong></span>
-      <span style={{fontSize:11.5,color:'#6E6E73'}}>·</span>
-      <span style={{fontSize:11.5,color:'#6E6E73'}}>GST (18%): <strong style={{color:'#FF9500'}}>₹{gst.toLocaleString('en-IN')}</strong></span>
+function StatusBadges({ p, m }) {
+  return (
+    <div className="proj-badges">
+      <Badge color={getStatusColor(p.status)}>{p.status}</Badge>
+      {m.fullyPaid && <Badge color="green">Fully paid</Badge>}
+      {isOverdue(p) && <Badge color="red">Overdue</Badge>}
     </div>
   );
 }
 
-function ProjectForm({v,onChange,employees=[]}){
-  const s=(k,val)=>onChange({...v,[k]:val});
-  const [ms,setMs]=useState(emptyMs);
-  function addMs(){if(!ms.label||!ms.percent)return;onChange({...v,milestones:[...(v.milestones||[]),{...ms,percent:+ms.percent}]});setMs(emptyMs);}
-  function delMs(i){onChange({...v,milestones:v.milestones.filter((_,idx)=>idx!==i)});}
+function Team({ people = [], max = 3 }) {
+  if (!people.length) return <span className="faint">—</span>;
+  return (
+    <div className="proj-team">
+      {people.slice(0, max).map(e => <Avatar key={e.id} name={e.name} size={26} />)}
+      {people.length > max && <span className="proj-team-more">+{people.length - max}</span>}
+    </div>
+  );
+}
 
-  function toggleEmployee(emp){
-    const already=(v.assignedEmployees||[]).some(e=>e.id===emp.id);
-    if(already) onChange({...v,assignedEmployees:(v.assignedEmployees||[]).filter(e=>e.id!==emp.id)});
-    else         onChange({...v,assignedEmployees:[...(v.assignedEmployees||[]),{id:emp.id,name:emp.name}]});
+function ProjectForm({ v, set, errors, employees, partners, onSubmit }) {
+  const [ms, setMs] = useState({ label: '', percent: '' });
+  const team = v.assignedEmployees || [];
+  const milestones = v.milestones || [];
+  const withGst = v.billingType === 'With GST';
+  const gst = gstBreakdown(v.valuation);
+
+  function addMilestone() {
+    if (!ms.label.trim() || !(+ms.percent > 0)) return;
+    set('milestones', [...milestones, { label: ms.label.trim(), percent: +ms.percent }]);
+    setMs({ label: '', percent: '' });
+  }
+  function toggleEmployee(emp) {
+    set('assignedEmployees', team.some(e => e.id === emp.id) ? team.filter(e => e.id !== emp.id) : [...team, { id: emp.id, name: emp.name }]);
   }
 
-  return(
-    <div style={{display:'flex',flexDirection:'column',gap:14}}>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'14px 16px'}}>
-        <FF label="Project Name" required><input className="mac-input" value={v.projectName} onChange={e=>s('projectName',e.target.value)} placeholder="Project title"/></FF>
-        <FF label="Project Type"><select className="mac-select" value={v.projectType} onChange={e=>s('projectType',e.target.value)}>{PROJECT_TYPES.map(t=><option key={t}>{t}</option>)}</select></FF>
-        <FF label="Client Name"><input className="mac-input" value={v.clientName} onChange={e=>s('clientName',e.target.value)} placeholder="Client name"/></FF>
-        <FF label="Company Name"><input className="mac-input" value={v.companyName} onChange={e=>s('companyName',e.target.value)} placeholder="Company"/></FF>
-        <FF label="Handled By"><select className="mac-select" value={v.handledBy} onChange={e=>s('handledBy',e.target.value)}><option value="">— Select Partner —</option>{PARTNERS.map(p=><option key={p}>{p}</option>)}</select></FF>
-        <FF label="Status"><select className="mac-select" value={v.status} onChange={e=>s('status',e.target.value)}>{PROJECT_STATUSES.map(x=><option key={x}>{x}</option>)}</select></FF>
-        <FF label="Billing Type" required>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
-            {['With GST','Without GST'].map(t=>{
-              const active=v.billingType===t;
-              return(
-                <button key={t} type="button" onClick={()=>s('billingType',t)} style={{padding:'9px 10px',borderRadius:10,border:`1.5px solid ${active?'#0071E3':'rgba(0,0,0,0.1)'}`,background:active?'rgba(0,113,227,0.08)':'rgba(0,0,0,0.015)',cursor:'pointer',fontSize:12.5,fontWeight:active?600:400,color:active?'#0071E3':'#3C3C43',transition:'all 0.13s'}}>
-                  {t}{t==='With GST'&&<span style={{fontSize:10,marginLeft:4,color:active?'#0071E3':'#AEAEB2'}}>18%</span>}
-                </button>
-              );
-            })}
-          </div>
-        </FF>
-        <FF label="Start Date"><input className="mac-input" type="date" value={v.startDate} onChange={e=>s('startDate',e.target.value)}/></FF>
-        <FF label="Due Date"><input className="mac-input" type="date" value={v.dueDate} onChange={e=>s('dueDate',e.target.value)}/></FF>
-        <FF label={v.billingType==='With GST'?'Total Value (Incl. 18% GST)':'Project Value'} required>
-          <NumInput className="mac-input" value={v.valuation} onChange={val=>s('valuation',val)} placeholder="0"/>
-          {v.billingType==='With GST'&&v.valuation&&<GstBreakdownLine val={v.valuation}/>}
-        </FF>
-        <FF label="Next Payment Due"><input className="mac-input" type="date" value={v.nextPaymentDue} onChange={e=>s('nextPaymentDue',e.target.value)}/></FF>
-      </div>
+  return (
+    <form id="proj-form" onSubmit={e => { e.preventDefault(); onSubmit(); }} noValidate>
+      <FormSection title="Project">
+        <FormGrid>
+          <Field label="Project name" required error={errors.projectName}>
+            <input className="mac-input" value={v.projectName} onChange={e => set('projectName', e.target.value)} placeholder="Project title" autoFocus />
+          </Field>
+          <Field label="Client name">
+            <input className="mac-input" value={v.clientName || ''} onChange={e => set('clientName', e.target.value)} placeholder="Client name" />
+          </Field>
+          <Field label="Company">
+            <input className="mac-input" value={v.companyName || ''} onChange={e => set('companyName', e.target.value)} placeholder="Company" />
+          </Field>
+          <Field label="Project type">
+            <select className="mac-select" value={v.projectType} onChange={e => set('projectType', e.target.value)}>{PROJECT_TYPES.map(t => <option key={t}>{t}</option>)}</select>
+          </Field>
+          <Field label="Status">
+            <select className="mac-select" value={v.status} onChange={e => set('status', e.target.value)}>{PROJECT_STATUSES.map(x => <option key={x}>{x}</option>)}</select>
+          </Field>
+          <Field label="Handled by">
+            <select className="mac-select" value={v.handledBy || ''} onChange={e => set('handledBy', e.target.value)}>
+              <option value="">Select partner</option>{(v.handledBy && !partners.includes(v.handledBy) ? [v.handledBy, ...partners] : partners).map(p => <option key={p}>{p}</option>)}
+            </select>
+          </Field>
+        </FormGrid>
+      </FormSection>
 
-      {/* Assigned Employees */}
+      <FormSection title="Money and dates">
+        <FormGrid>
+          <Field label="Billing type">
+            <select className="mac-select" value={v.billingType} onChange={e => set('billingType', e.target.value)}>
+              <option value="Without GST">Without GST</option>
+              <option value="With GST">With GST (18%)</option>
+            </select>
+          </Field>
+          <Field label={withGst ? 'Contract value (₹, including GST)' : 'Contract value (₹)'} error={errors.valuation}
+            hint={withGst && +v.valuation > 0 ? `${fmtMoney(gst.taxable)} before GST + ${fmtMoney(gst.gst)} GST` : undefined}>
+            <NumInput className="mac-input" value={v.valuation ?? ''} onChange={val => set('valuation', val)} placeholder="0" />
+          </Field>
+          <Field label="Start date">
+            <input className="mac-input" type="date" value={v.startDate || ''} onChange={e => set('startDate', e.target.value)} />
+          </Field>
+          <Field label="Due date" error={errors.dueDate}>
+            <input className="mac-input" type="date" value={v.dueDate || ''} onChange={e => set('dueDate', e.target.value)} />
+          </Field>
+          <Field label="Next payment due">
+            <input className="mac-input" type="date" value={v.nextPaymentDue || ''} onChange={e => set('nextPaymentDue', e.target.value)} />
+          </Field>
+        </FormGrid>
+      </FormSection>
+
       {employees.length > 0 && (
-        <div>
-          <label style={{display:'block',fontSize:11.5,fontWeight:550,color:'#6E6E73',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.4px'}}>
-            Assign Employees
-            {(v.assignedEmployees||[]).length > 0 && (
-              <span style={{marginLeft:6,fontSize:10.5,fontWeight:600,color:'#0071E3',background:'rgba(0,113,227,0.1)',padding:'1px 6px',borderRadius:10,textTransform:'none',letterSpacing:0}}>
-                {(v.assignedEmployees||[]).length} selected
-              </span>
-            )}
-          </label>
-          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-            {employees.map(emp=>{
-              const selected=(v.assignedEmployees||[]).some(e=>e.id===emp.id);
-              return(
-                <button
-                  key={emp.id}
-                  type="button"
-                  onClick={()=>toggleEmployee(emp)}
-                  style={{
-                    display:'flex',alignItems:'center',gap:7,padding:'6px 11px',borderRadius:20,cursor:'pointer',
-                    border:`1.5px solid ${selected?'#0071E3':'rgba(0,0,0,0.1)'}`,
-                    background:selected?'rgba(0,113,227,0.08)':'#fff',
-                    transition:'all 0.13s',
-                  }}
-                >
-                  <div style={{width:18,height:18,borderRadius:'50%',background:selected?'#0071E3':'rgba(0,0,0,0.1)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:8,fontWeight:700,color:selected?'#fff':'#6E6E73',flexShrink:0}}>
-                    {emp.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()}
-                  </div>
-                  <span style={{fontSize:12.5,fontWeight:500,color:selected?'#0071E3':'#3C3C43'}}>{emp.name}</span>
-                  {emp.role&&<span style={{fontSize:10.5,color:selected?'#5BA3F5':'#AEAEB2'}}>· {emp.role}</span>}
+        <FormSection title={`Team${team.length ? ` (${team.length} selected)` : ' (optional)'}`}>
+          <div className="proj-team-pick">
+            {employees.map(emp => {
+              const on = team.some(e => e.id === emp.id);
+              return (
+                <button key={emp.id} type="button" className={`chip ${on ? 'active' : ''}`} aria-pressed={on} onClick={() => toggleEmployee(emp)}>
+                  {emp.name}{emp.role ? ` · ${emp.role}` : ''}
                 </button>
               );
             })}
           </div>
-        </div>
+        </FormSection>
       )}
 
-      {/* Payment Milestones */}
-      <div>
-        <label style={{display:'block',fontSize:11.5,fontWeight:550,color:'#6E6E73',marginBottom:8,textTransform:'uppercase',letterSpacing:'0.4px'}}>Payment Milestones</label>
-        <div style={{display:'flex',gap:8,marginBottom:8}}>
-          <input className="mac-input" style={{flex:1}} value={ms.label} onChange={e=>setMs(m=>({...m,label:e.target.value}))} placeholder="Label (e.g. 30% Advance)"/>
-          <NumInput className="mac-input" style={{width:80}} value={ms.percent} onChange={v=>setMs(m=>({...m,percent:v}))} placeholder="%"/>
-          <button onClick={addMs} className="mac-btn mac-btn-secondary" style={{fontSize:13,flexShrink:0}}>Add</button>
+      <FormSection title="Payment milestones (optional)">
+        {/* Enter here adds the milestone instead of submitting the whole form */}
+        <div className="proj-ms-add" onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addMilestone(); } }}>
+          <input className="mac-input" aria-label="Milestone name" value={ms.label} onChange={e => setMs(m => ({ ...m, label: e.target.value }))} placeholder="e.g. 30% advance" />
+          <NumInput className="mac-input" value={ms.percent} onChange={val => setMs(m => ({ ...m, percent: val }))} placeholder="%" />
+          <button type="button" className="mac-btn mac-btn-secondary" onClick={addMilestone}>Add</button>
         </div>
-        {(v.milestones||[]).map((m,i)=>(
-          <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 10px',borderRadius:8,background:'rgba(0,0,0,0.025)',border:'1px solid rgba(0,0,0,0.05)',marginBottom:5}}>
-            <span style={{fontSize:12.5,color:'#1D1D1F'}}>{m.label}</span>
-            <div style={{display:'flex',alignItems:'center',gap:8}}>
-              <Badge color="blue">{m.percent}%</Badge>
-              <button onClick={()=>delMs(i)} style={{background:'none',border:'none',cursor:'pointer',color:'#FF3B30',fontSize:16,lineHeight:1}}>×</button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function PaymentForm({v,onChange}){
-  const s=(k,val)=>onChange({...v,[k]:val});
-  return(
-    <div style={{display:'flex',flexDirection:'column',gap:14}}>
-      <FF label="Amount (₹)" required><NumInput className="mac-input" value={v.amount} onChange={v=>s('amount',v)} placeholder="0"/></FF>
-      <FF label="Date & Time"><input className="mac-input" type="datetime-local" value={v.date} onChange={e=>s('date',e.target.value)}/></FF>
-      <FF label="Payment Method"><select className="mac-select" value={v.method} onChange={e=>s('method',e.target.value)}>{PAYMENT_METHODS.map(m=><option key={m}>{m}</option>)}</select></FF>
-      <FF label="Remark"><input className="mac-input" value={v.remark} onChange={e=>s('remark',e.target.value)} placeholder="Optional note"/></FF>
-    </div>
-  );
-}
-
-function ProjectDetail({proj,onEdit,onAddPayment,onUpdatePayment,onDeletePayment,onClose}){
-  const [showPay,setShowPay]=useState(true);
-  const [editIdx,setEditIdx]=useState(null);
-  const [editForm,setEditForm]=useState(null);
-  const [deleteConfirmIdx,setDeleteConfirmIdx]=useState(null);
-  const paid=(proj.payments||[]).reduce((s,p)=>s+(+p.amount||0),0);
-  const pct=proj.valuation?Math.round((paid/+proj.valuation)*100):0;
-  const rem=Math.max(0,+proj.valuation-paid);
-  const payStatus=pct>=100?'Completed':pct>0?'Partial':'Pending';
-
-  function startEdit(i,p){setEditIdx(i);setEditForm({...p,amount:String(p.amount)});}
-  function cancelEdit(){setEditIdx(null);setEditForm(null);}
-  function saveEdit(){if(!editForm.amount)return;onUpdatePayment(editIdx,{...editForm,amount:+editForm.amount});setEditIdx(null);setEditForm(null);}
-
-  return(
-    <div style={{display:'flex',flexDirection:'column',gap:16}}>
-      <div style={{display:'flex',alignItems:'flex-start',gap:14}}>
-        <div style={{width:48,height:48,borderRadius:14,background:'linear-gradient(135deg,rgba(175,82,222,0.15),rgba(175,82,222,0.08))',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,fontWeight:700,color:'#AF52DE',flexShrink:0}}>
-          {proj.projectName.charAt(0)}
-        </div>
-        <div style={{flex:1}}>
-          <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-            <span style={{fontSize:15.5,fontWeight:660,color:'#1D1D1F',letterSpacing:'-0.3px'}}>{proj.projectName}</span>
-            <Badge color={getStatusColor(proj.status)}>{proj.status}</Badge>
-          </div>
-          <div style={{fontSize:12.5,color:'#6E6E73',marginTop:2}}>{proj.clientName} · {proj.companyName}</div>
-        </div>
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-        {[[User,'Handled By',proj.handledBy],[Calendar,'Start Date',proj.startDate],[Calendar,'Due Date',proj.dueDate],[Calendar,'Next Payment',proj.nextPaymentDue||'—']].map(([Icon,l,v])=>(
-          <div key={l} style={{display:'flex',gap:8,alignItems:'flex-start'}}>
-            <Icon size={12} color="#AEAEB2" style={{marginTop:2,flexShrink:0}}/>
-            <div><div style={{fontSize:10,color:'#AEAEB2',textTransform:'uppercase',letterSpacing:'0.4px',fontWeight:500}}>{l}</div><div style={{fontSize:12.5,color:'#1D1D1F',marginTop:1}}>{v||'—'}</div></div>
-          </div>
-        ))}
-      </div>
-      {(proj.assignedEmployees||[]).length > 0 && (
-        <div>
-          <div style={{fontSize:12,fontWeight:600,color:'#3C3C43',marginBottom:8}}>Team</div>
-          <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-            {proj.assignedEmployees.map(e=>(
-              <div key={e.id} style={{display:'flex',alignItems:'center',gap:6,padding:'5px 10px',borderRadius:20,background:'rgba(52,199,89,0.07)',border:'1px solid rgba(52,199,89,0.15)'}}>
-                <div style={{width:18,height:18,borderRadius:'50%',background:'linear-gradient(135deg,#34C759,#30D158)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:7,fontWeight:700,color:'#fff',flexShrink:0}}>
-                  {e.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()}
-                </div>
-                <span style={{fontSize:12,fontWeight:500,color:'#1D1D1F'}}>{e.name}</span>
+        {milestones.length > 0 && (
+          <div className="proj-list">
+            {milestones.map((m, i) => (
+              <div key={`${m.label}-${i}`} className="proj-ms-row">
+                <span>{m.label} <span className="muted">· {m.percent}%{+v.valuation > 0 ? ` · ${fmtMoney(Math.round((m.percent / 100) * +v.valuation))}` : ''}</span></span>
+                <button type="button" className="icon-btn plain" aria-label={`Remove milestone ${m.label}`} onClick={() => set('milestones', milestones.filter((_, idx) => idx !== i))}><X size={15} /></button>
               </div>
             ))}
           </div>
-        </div>
-      )}
-      <div style={{padding:'14px 16px',borderRadius:14,background:'rgba(0,0,0,0.025)',border:'1px solid rgba(0,0,0,0.06)'}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-          <div style={{display:'flex',alignItems:'center',gap:7}}>
-            <span style={{fontSize:12.5,fontWeight:600,color:'#3C3C43'}}>Payment Progress</span>
-            {proj.billingType==='With GST'&&<Badge color="yellow">GST 18%</Badge>}
-          </div>
-          <div style={{display:'flex',alignItems:'center',gap:8}}><Badge color={getStatusColor(payStatus)}>{payStatus}</Badge><span style={{fontSize:14,fontWeight:700,color:'#1D1D1F'}}>{pct}%</span></div>
-        </div>
-        <div style={{height:6,borderRadius:100,background:'rgba(0,0,0,0.08)',overflow:'hidden',marginBottom:12}}>
-          <div style={{height:'100%',borderRadius:100,background:'linear-gradient(90deg,#0071E3,#0A84FF)',width:`${Math.min(pct,100)}%`,transition:'width 0.4s ease'}}/>
-        </div>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
-          {[['Total Value',fmt(proj.valuation),'#1D1D1F','rgba(0,0,0,0.025)'],['Total Paid',fmt(paid),'#34C759','rgba(52,199,89,0.07)'],['Remaining',fmt(rem),'#FF9500','rgba(255,149,0,0.07)']].map(([l,v,c,bg])=>(
-            <div key={l} style={{textAlign:'center',padding:'8px',borderRadius:10,background:bg}}>
-              <div style={{fontSize:10.5,color:'#AEAEB2',marginBottom:3}}>{l}</div>
-              <div style={{fontSize:13,fontWeight:680,color:c,letterSpacing:'-0.3px'}}>{v}</div>
-            </div>
-          ))}
-        </div>
-        {proj.billingType==='With GST'&&proj.valuation&&<GstBreakdownDetail val={proj.valuation}/>}
-      </div>
-      {(proj.milestones||[]).length>0&&(
-        <div>
-          <div style={{fontSize:12,fontWeight:600,color:'#3C3C43',marginBottom:8}}>Payment Milestones</div>
-          {proj.milestones.map((m,i)=>{
-            const mAmt=Math.round((m.percent/100)*+proj.valuation);
-            return(
-              <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 10px',borderRadius:9,background:'rgba(0,0,0,0.025)',marginBottom:5}}>
-                <span style={{fontSize:12.5,color:'#3C3C43'}}>{m.label}</span>
-                <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <span style={{fontSize:11.5,color:'#6E6E73'}}>{fmt(mAmt)}</span>
-                  <Badge color="blue">{m.percent}%</Badge>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-      <div>
-        <button onClick={()=>setShowPay(h=>!h)} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',fontSize:12.5,fontWeight:600,color:'#3C3C43',marginBottom:8}}>
-          {showPay?<ChevronDown size={13}/>:<ChevronRight size={13}/>} Payment History ({(proj.payments||[]).length})
-        </button>
-        {showPay&&(
-          <div style={{display:'flex',flexDirection:'column',gap:6}}>
-            {(proj.payments||[]).length===0
-              ? <p style={{fontSize:12,color:'#AEAEB2',textAlign:'center',padding:'12px 0'}}>No payments recorded</p>
-              : (proj.payments||[]).map((p,i)=> editIdx===i ? (
-                  /* ── inline edit row ── */
-                  <div key={i} style={{padding:'12px',borderRadius:10,background:'rgba(0,113,227,0.05)',border:'1px solid rgba(0,113,227,0.18)'}}>
-                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
-                      <FF label="Amount (₹)">
-                        <NumInput className="mac-input" value={editForm.amount} onChange={v=>setEditForm(f=>({...f,amount:v}))} placeholder="0"/>
-                      </FF>
-                      <FF label="Date & Time">
-                        <input className="mac-input" type="datetime-local" value={editForm.date} onChange={e=>setEditForm(f=>({...f,date:e.target.value}))}/>
-                      </FF>
-                      <FF label="Method">
-                        <select className="mac-select" value={editForm.method} onChange={e=>setEditForm(f=>({...f,method:e.target.value}))}>
-                          {PAYMENT_METHODS.map(m=><option key={m}>{m}</option>)}
-                        </select>
-                      </FF>
-                      <FF label="Remark">
-                        <input className="mac-input" value={editForm.remark||''} onChange={e=>setEditForm(f=>({...f,remark:e.target.value}))} placeholder="Optional note"/>
-                      </FF>
-                    </div>
-                    <div style={{display:'flex',gap:6,justifyContent:'flex-end'}}>
-                      <button onClick={cancelEdit} className="mac-btn mac-btn-secondary" style={{fontSize:12,padding:'5px 12px'}}><XIcon size={11}/> Cancel</button>
-                      <button onClick={saveEdit} className="mac-btn mac-btn-primary" style={{fontSize:12,padding:'5px 12px'}}><Check size={11}/> Save</button>
-                    </div>
-                  </div>
-                ) : deleteConfirmIdx===i ? (
-                  /* ── inline delete confirm ── */
-                  <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 12px',borderRadius:10,background:'rgba(255,59,48,0.06)',border:'1px solid rgba(255,59,48,0.18)'}}>
-                    <span style={{fontSize:12.5,color:'#FF3B30',fontWeight:500}}>Delete {fmt(p.amount)} payment?</span>
-                    <div style={{display:'flex',gap:6}}>
-                      <button onClick={()=>setDeleteConfirmIdx(null)} className="mac-btn mac-btn-secondary" style={{fontSize:12,padding:'4px 10px'}}>Cancel</button>
-                      <button onClick={()=>{onDeletePayment(i);setDeleteConfirmIdx(null);}} className="mac-btn" style={{fontSize:12,padding:'4px 10px',background:'#FF3B30',color:'#fff',border:'none',borderRadius:8,cursor:'pointer'}}>Delete</button>
-                    </div>
-                  </div>
-                ) : (
-                  /* ── normal display row ── */
-                  <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 12px',borderRadius:10,background:'rgba(52,199,89,0.06)',border:'1px solid rgba(52,199,89,0.12)'}}>
-                    <div><div style={{fontSize:12.5,fontWeight:500,color:'#1D1D1F'}}>{p.remark||'Payment'}</div><div style={{fontSize:10.5,color:'#AEAEB2',marginTop:1}}>{p.date} · {p.method}</div></div>
-                    <div style={{display:'flex',alignItems:'center',gap:8}}>
-                      <span style={{fontSize:13,fontWeight:680,color:'#34C759'}}>+{fmt(p.amount)}</span>
-                      <button onClick={()=>startEdit(i,p)} style={{width:24,height:24,borderRadius:6,background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Edit2 size={11} color="#6E6E73"/></button>
-                      <button onClick={()=>setDeleteConfirmIdx(i)} style={{width:24,height:24,borderRadius:6,background:'rgba(255,59,48,0.08)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Trash2 size={11} color="#FF3B30"/></button>
-                    </div>
-                  </div>
-                )
-              )
-            }
-          </div>
         )}
-      </div>
-      <div style={{display:'flex',gap:8,paddingTop:4,borderTop:'1px solid rgba(0,0,0,0.06)'}}>
-        <button onClick={onAddPayment} className="mac-btn mac-btn-secondary" style={{flex:1,fontSize:13}}><IndianRupee size={13}/> Add Payment</button>
-        <button onClick={onEdit} className="mac-btn mac-btn-secondary" style={{flex:1,fontSize:13}}><Edit2 size={13}/> Edit</button>
-        <button onClick={onClose} className="mac-btn mac-btn-primary" style={{flex:1,fontSize:13}}>Done</button>
-      </div>
-    </div>
+      </FormSection>
+    </form>
   );
 }
 
-const statusGradients={
-  'In Progress':'linear-gradient(135deg,rgba(0,113,227,0.08),rgba(10,132,255,0.05))',
-  'Completed':'linear-gradient(135deg,rgba(52,199,89,0.08),rgba(48,209,88,0.05))',
-  'Pending':'linear-gradient(135deg,rgba(255,204,0,0.08),rgba(255,204,0,0.04))',
-  'On Hold':'linear-gradient(135deg,rgba(255,149,0,0.08),rgba(255,179,64,0.05))',
-  'Cancelled':'rgba(0,0,0,0.025)',
-};
+function PaymentInlineForm({ v, set, error, saving, onSubmit, onCancel }) {
+  return (
+    <form className="proj-inline-form" onSubmit={e => { e.preventDefault(); onSubmit(); }} noValidate>
+      <FormGrid>
+        <Field label="Amount (₹)" required error={error}>
+          <NumInput className="mac-input" value={v.amount} onChange={val => set('amount', val)} placeholder="0" />
+        </Field>
+        <Field label="Date and time">
+          <input className="mac-input" type="datetime-local" value={v.date || ''} onChange={e => set('date', e.target.value)} />
+        </Field>
+        <Field label="Method">
+          <select className="mac-select" value={v.method} onChange={e => set('method', e.target.value)}>{PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}</select>
+        </Field>
+        <Field label="Money arrived in" hint="Also records this as client income in Transactions">
+          <select className="mac-select" value={v.account || 'Company Bank'} onChange={e => set('account', e.target.value)}>
+            <option value="Company Bank">Company Bank</option>
+            <option value="Cash + Savings Account">Cash + Savings</option>
+          </select>
+        </Field>
+        <Field label="Remark">
+          <input className="mac-input" value={v.remark} onChange={e => set('remark', e.target.value)} placeholder="Optional" />
+        </Field>
+      </FormGrid>
+      <div className="proj-inline-actions">
+        <button type="button" className="mac-btn mac-btn-secondary" onClick={onCancel} disabled={saving}>Cancel</button>
+        <button type="submit" className="mac-btn mac-btn-primary" disabled={saving}>{saving ? 'Saving…' : v.id == null ? 'Add payment' : 'Save payment'}</button>
+      </div>
+    </form>
+  );
+}
 
-export default function Projects(){
-  const { user, employeeData } = useAuth();
-  const currentUser = employeeData?.name || user?.email || 'Unknown';
-  const [projs,setProjs]       = useState([]);
-  const [loading,setLoading]   = useState(true);
-  const [saving,setSaving]     = useState(false);
-  const [search,setSearch]     = useState('');
-  const [filters,setFilters]   = useState({status:'',projectType:''});
-  const [showFilters,setShowFilters] = useState(false);
-  const [showAdd,setShowAdd]   = useState(false);
-  const [editProj,setEditProj] = useState(null);
-  const [form,setForm]         = useState(emptyProj);
-  const [deleteId,setDeleteId] = useState(null);
-  const [detail,setDetail]     = useState(null);
-  const [showPay,setShowPay]   = useState(false);
-  const [payProjId,setPayProjId] = useState(null);
-  const [payForm,setPayForm]   = useState(emptyPay);
-  const [auditLog,setAuditLog]   = useState([]);
-  const [showAudit,setShowAudit] = useState(false);
-  const [employees,setEmployees] = useState([]);
+function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDeletePayment, onToggleMilestone, onAskMove }) {
+  const [pf, setPf] = useState(startAddPayment ? blankPayment() : null); // payment form (new or edit)
+  const [pfError, setPfError] = useState('');
+  const [pfSaving, setPfSaving] = useState(false);
+  const m = moneyOf(proj);
+  const withGst = proj.billingType === 'With GST';
+  const gst = gstBreakdown(proj.valuation);
+  const team = proj.assignedEmployees || [];
+  const milestones = proj.milestones || [];
+  // Newest first for reading; each row keeps the id of its stored position
+  const payments = useMemo(
+    () => (proj.payments || []).map((p, i) => ({ p, id: payIdOf(p, i) }))
+      .sort((a, b) => String(b.p.date || '').localeCompare(String(a.p.date || ''))),
+    [proj.payments],
+  );
 
-  const fetchProjs = useCallback(async () => {
-    setLoading(true);
+  const setPfField = (k, val) => { setPf(f => ({ ...f, [k]: val })); if (k === 'amount') setPfError(''); };
+  const closePf = () => { setPf(null); setPfError(''); };
+  async function submitPayment() {
+    if (pfSaving) return;
+    if (!(+pf.amount > 0)) { setPfError('Enter an amount greater than 0'); return; }
+    setPfSaving(true);
+    const ok = await onSavePayment(proj.id, pf.id, { amount: +pf.amount, date: pf.date, method: pf.method, account: pf.account || 'Company Bank', remark: pf.remark });
+    setPfSaving(false);
+    if (ok) closePf();
+  }
+
+  return (
+    <>
+      <StatusBadges p={proj} m={m} />
+
+      {m.fullyPaid && (
+        <div className="proj-notice">
+          <span>This project is fully paid. When the work is done you can move it to Past Projects.</span>
+          <button className="mac-btn mac-btn-secondary" onClick={() => onAskMove(proj.id)} disabled={moving}><Archive size={14} /> {moving ? 'Moving…' : 'Move to Past Projects'}</button>
+        </div>
+      )}
+
+      <section className="form-section">
+        <h3 className="section-title">Money</h3>
+        <PayProgress m={m} />
+        <dl className="kv">
+          <dt>Contract value{withGst ? ' (incl. GST)' : ''}</dt><dd>{fmtMoney(m.value)}</dd>
+          {withGst && m.value > 0 && <><dt>Value before GST</dt><dd>{fmtMoney(gst.taxable)}</dd><dt>GST amount (18%)</dt><dd>{fmtMoney(gst.gst)}</dd></>}
+          <dt>Received</dt><dd className="amount-in">{fmtMoney(m.paid)}{m.value > 0 ? ` (${m.pct}%)` : ''}</dd>
+          <dt>Balance to collect</dt><dd>{fmtMoney(m.balance)}</dd>
+        </dl>
+      </section>
+
+      <section className="form-section">
+        <h3 className="section-title">Overview</h3>
+        <dl className="kv">
+          <dt>Client</dt><dd>{proj.clientName || '—'}</dd>
+          <dt>Company</dt><dd>{proj.companyName || '—'}</dd>
+          <dt>Project type</dt><dd>{proj.projectType || '—'}</dd>
+          <dt>Handled by</dt><dd>{proj.handledBy || '—'}</dd>
+          <dt>Billing type</dt><dd>{proj.billingType}</dd>
+          <dt>Start date</dt><dd>{fmtDate(proj.startDate)}</dd>
+          <dt>Due date</dt><dd className={isOverdue(proj) ? 'proj-overdue' : undefined}>{fmtDate(proj.dueDate)}{isOverdue(proj) ? ' · overdue' : ''}</dd>
+          <dt>Next payment due</dt><dd>{fmtDate(proj.nextPaymentDue)}</dd>
+          <dt>Team</dt>
+          <dd>
+            {team.length === 0 ? '—' : (
+              <span className="proj-team-list">{team.map(e => <span key={e.id}><Avatar name={e.name} size={22} />{e.name}</span>)}</span>
+            )}
+          </dd>
+        </dl>
+      </section>
+
+      <section className="form-section">
+        <div className="proj-section-head">
+          <h3 className="section-title">Payments ({payments.length})</h3>
+          {!pf && <button className="mac-btn mac-btn-secondary" onClick={() => setPf(blankPayment())}><Plus size={14} /> Add payment</button>}
+        </div>
+        {pf && pf.id == null && <PaymentInlineForm v={pf} set={setPfField} error={pfError} saving={pfSaving} onSubmit={submitPayment} onCancel={closePf} />}
+        {payments.length === 0 && !pf && <p className="proj-note">No payments recorded yet.</p>}
+        {payments.length > 0 && (
+          <div className="proj-list">
+            {payments.map(({ p, id }) => (pf && pf.id === id
+              ? <PaymentInlineForm key={id} v={pf} set={setPfField} error={pfError} saving={pfSaving} onSubmit={submitPayment} onCancel={closePf} />
+              : (
+                <div key={id} className="proj-pay-row">
+                  <div>
+                    <div className="cell-main">{p.remark || p.note || 'Payment'}</div>
+                    <div className="cell-sub">{fmtDate(p.date)}{p.method ? ` · ${p.method}` : ''}</div>
+                  </div>
+                  <span className="amount-in">+{fmtMoney(p.amount)}</span>
+                  <RowMenu label="Payment actions" items={[
+                    { label: 'Edit', icon: Edit2, onClick: () => { setPf({ id, amount: String(p.amount ?? ''), date: p.date || '', method: p.method || 'Bank Transfer', account: p.account || 'Company Bank', remark: p.remark ?? p.note ?? '' }); setPfError(''); } },
+                    { label: 'Delete', icon: Trash2, danger: true, onClick: () => onAskDeletePayment(proj.id, id, p) },
+                  ]} />
+                </div>
+              )))}
+          </div>
+        )}
+      </section>
+
+      {milestones.length > 0 && (
+        <section className="form-section">
+          <h3 className="section-title">Milestones ({milestones.filter(x => x.done).length} of {milestones.length} done)</h3>
+          <div className="proj-list">
+            {milestones.map((ms, i) => (
+              <label key={`${ms.label}-${i}`} className={`proj-ms ${ms.done ? 'done' : ''}`}>
+                <input type="checkbox" checked={!!ms.done} onChange={() => onToggleMilestone(proj.id, i)} />
+                <span>{ms.label}</span>
+                <span className="muted">{ms.percent}% · {fmtMoney(Math.round((ms.percent / 100) * m.value))}</span>
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  );
+}
+
+export default function Projects() {
+  const { user, displayName } = useAuth();
+  const toast = useToast();
+  const currentUser = displayName || user?.email || 'Unknown';
+  // "Handled by" is a display name; the choices are the partners in the people directory
+  const { people: directory } = usePeople();
+  const partners = useMemo(() => directory.filter(p => p.kind === 'partner' && p.active !== false).map(p => p.name), [directory]);
+
+  const [projs, setProjs] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [auditLog, setAuditLog] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('');
+  const [type, setType] = useState('');
+  const [dueOnly, setDueOnly] = useState(false);
+
+  const [detail, setDetail] = useState(null);     // { id, addPayment }
+  const [form, setForm] = useState(null);         // { id: null | project id, values }
+  const [formErrors, setFormErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [confirm, setConfirm] = useState(null);   // { title, message, confirmLabel, danger, run }
+  const [movingId, setMovingId] = useState(null);
+  const [showAudit, setShowAudit] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true); setLoadError(null);
     try {
-      const [ps, emps, auditData] = await Promise.all([projectsDB.getAll(), employeesDB.getAll(), auditDB.getAll('project')]);
+      // Team list and history are secondary: the page still works without them.
+      const [ps, emps, auditData] = await Promise.all([
+        projectsDB.getAll(),
+        employeesDB.getAll().catch(e => { console.error(e); return []; }),
+        auditDB.getAll('project').catch(e => { console.error(e); return []; }),
+      ]);
       setProjs(ps);
       setEmployees(emps.filter(e => e.status === 'Active'));
       setAuditLog(auditData);
-      // Sweep: migrate any project that's already fully paid but never got
-      // moved (e.g. an earlier attempt failed and was never retried).
-      for (const p of ps) await moveToPastIfComplete(p);
-    } catch(e) { console.error(e); }
+    } catch (e) { console.error(e); setLoadError(e); }
     setLoading(false);
   }, []);
+  useEffect(() => { load(); }, [load]);
 
-  useEffect(() => { fetchProjs(); }, [fetchProjs]);
+  async function logAudit(entityId, action, description) {
+    try {
+      await auditDB.log({ entity: 'project', entityId, action, description });   // the server stamps who did it
+      setAuditLog(l => [{ id: Date.now(), entity: 'project', entityId, action, description, by: currentUser, createdAt: new Date().toISOString() }, ...l]);
+    } catch (e) { console.error(e); }
+  }
 
-  const filtered=useMemo(()=>projs.filter(p=>{
-    const q=search.toLowerCase();
-    return(!q||p.projectName.toLowerCase().includes(q)||p.clientName?.toLowerCase().includes(q))
-      &&(!filters.status||p.status===filters.status)
-      &&(!filters.projectType||p.projectType===filters.projectType);
-  }),[projs,search,filters]);
+  // ── Derived numbers (same fields and formulas as before) ────────
+  const stats = useMemo(() => {
+    const totalVal = projs.reduce((s, p) => s + (+p.valuation || 0), 0);
+    const totalRec = projs.reduce((s, p) => s + paidOf(p), 0);
+    const gstOnPending = projs.filter(p => p.billingType === 'With GST')
+      .reduce((s, p) => s + Math.round(Math.max(0, +p.valuation - paidOf(p)) * 18 / 118), 0);
+    const toCollect = totalVal - totalRec;
+    return {
+      active: projs.filter(p => p.status === 'In Progress').length,
+      totalVal, totalRec, toCollect, gstOnPending,
+      netOfGst: Math.max(0, toCollect - gstOnPending),
+      owing: projs.filter(p => moneyOf(p).balance > 0).length,
+    };
+  }, [projs]);
 
-  async function save(){
-    if(!form.projectName||saving)return;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = projs.filter(p =>
+      (!q || p.projectName?.toLowerCase().includes(q) || p.clientName?.toLowerCase().includes(q) || p.companyName?.toLowerCase().includes(q))
+      && (!status || p.status === status)
+      && (!type || p.projectType === type)
+      && (!dueOnly || moneyOf(p).balance > 0));
+    return dueOnly ? [...list].sort((a, b) => moneyOf(b).balance - moneyOf(a).balance) : list;
+  }, [projs, search, status, type, dueOnly]);
+
+  const statusChips = useMemo(() => [
+    { value: '', label: 'All', count: projs.length },
+    ...PROJECT_STATUSES.map(s => ({ value: s, label: s, count: projs.filter(p => p.status === s).length })),
+  ], [projs]);
+
+  const isFiltered = !!(search || status || type || dueOnly);
+  const clearFilters = () => { setSearch(''); setStatus(''); setType(''); setDueOnly(false); };
+  const detailProj = detail ? projs.find(p => p.id === detail.id) || null : null;
+  const overlayOnTop = !!(form || confirm);
+
+  // ── Create / edit ───────────────────────────────────────────────
+  const openAdd = () => { setForm({ id: null, values: blankProject() }); setFormErrors({}); };
+  const openEdit = p => { setForm({ id: p.id, values: { ...p } }); setFormErrors({}); };
+  const setField = (k, v) => {
+    setForm(f => ({ ...f, values: { ...f.values, [k]: v } }));
+    setFormErrors(er => (er[k] ? { ...er, [k]: undefined } : er));
+  };
+
+  async function saveProject() {
+    if (saving || !form) return;
+    const v = form.values;
+    const errors = {};
+    if (!v.projectName?.trim()) errors.projectName = 'Enter a project name';
+    if (v.valuation !== '' && v.valuation != null && !(+v.valuation >= 0)) errors.valuation = 'Enter a number';
+    if (v.startDate && v.dueDate && v.dueDate < v.startDate) errors.dueDate = 'Due date is before the start date';
+    setFormErrors(errors);
+    if (Object.keys(errors).length) return;
+
     setSaving(true);
-    try{
-      if(editProj){
-        const updated=await projectsDB.update(editProj.id,{...form,valuation:+form.valuation});
-        setProjs(ps=>ps.map(p=>p.id===editProj.id?updated:p));
-        await auditDB.log({ entity:'project', entityId:editProj.id, action:'Edited', description:updated.projectName, by:currentUser });
-        setAuditLog(l=>[{ id:Date.now(), entity:'project', entityId:editProj.id, action:'Edited', description:updated.projectName, by:currentUser, createdAt:new Date().toISOString() },...l]);
-        await moveToPastIfComplete(updated);
+    try {
+      const base = { ...v, projectName: v.projectName.trim(), valuation: +v.valuation };
+      if (form.id) {
+        // Payments are not part of a project save (they have their own endpoints).
+        // The version is the one the page holds now, so a payment recorded while
+        // the form was open does not make this save look out of date.
+        const current = projs.find(p => p.id === form.id);
+        const updated = await projectsDB.update(form.id, { ...base, version: current?.version ?? base.version });
+        setProjs(ps => ps.map(p => (p.id === form.id ? updated : p)));
+        await logAudit(form.id, 'Edited', updated.projectName);
+        toast.success('Project updated');
       } else {
-        const created=await projectsDB.create({...form,valuation:+form.valuation,payments:[],milestones:form.milestones||[]});
-        setProjs(ps=>[...ps,created]);
-        await auditDB.log({ entity:'project', entityId:created.id, action:'Created', description:created.projectName, by:currentUser });
-        setAuditLog(l=>[{ id:Date.now(), entity:'project', entityId:created.id, action:'Created', description:created.projectName, by:currentUser, createdAt:new Date().toISOString() },...l]);
+        const created = await projectsDB.create({ ...base, milestones: v.milestones || [] });
+        setProjs(ps => [created, ...ps]);
+        await logAudit(created.id, 'Created', created.projectName);
+        toast.success('Project created');
       }
-    } catch(e){ console.error(e); }
+      setForm(null);
+    } catch (e) {
+      toast.error(form.id ? 'Could not save changes' : 'Could not create project', e);
+    }
     setSaving(false);
-    setShowAdd(false);setEditProj(null);setForm(emptyProj);
   }
 
-  async function del(id){
-    const p=projs.find(x=>x.id===id);
-    setProjs(ps=>ps.filter(x=>x.id!==id));
-    if(detail?.id===id)setDetail(null);
-    try{
+  async function deleteProject(id) {
+    const p = projs.find(x => x.id === id);
+    if (!p) return;
+    try {
       await projectsDB.delete(id);
-      if(p){
-        await auditDB.log({ entity:'project', entityId:id, action:'Deleted', description:p.projectName, by:currentUser });
-        setAuditLog(l=>[{ id:Date.now(), entity:'project', entityId:id, action:'Deleted', description:p.projectName, by:currentUser, createdAt:new Date().toISOString() },...l]);
-      }
-    } catch(e){ console.error(e); await fetchProjs(); }
+      setProjs(ps => ps.filter(x => x.id !== id));
+      setDetail(d => (d?.id === id ? null : d));
+      await logAudit(id, 'Deleted', p.projectName);
+      toast.success(`“${p.projectName}” deleted`);
+    } catch (e) { toast.error('Could not delete project', e); }
   }
 
-  // When a project's payments reach 100% of its valuation, graduate it out of
-  // the active Projects list into Past Projects automatically.
-  async function moveToPastIfComplete(proj){
-    if(!proj||!(+proj.valuation>0))return false;
-    const paid=(proj.payments||[]).reduce((s,p)=>s+(+p.amount||0),0);
-    const pct=(paid/+proj.valuation)*100;
-    if(pct<100)return false;
-    try{
+  // ── Payments ────────────────────────────────────────────────────
+  // id === null adds a payment; otherwise it is the payment's key (or "idx:N"
+  // for entries saved before keys existed). Returns true when saved.
+  async function savePayment(projId, id, data) {
+    const proj = projs.find(p => p.id === projId);
+    if (!proj) { toast.error('This project is no longer in the list'); return false; }
+    try {
+      const updated = id == null ? await projectsDB.addPayment(projId, data) : await projectsDB.updatePayment(projId, id, data);
+      setProjs(ps => ps.map(p => (p.id === projId ? updated : p)));
+      const nowFull = moneyOf(updated).fullyPaid && !moneyOf(proj).fullyPaid;
+      toast.success(nowFull ? 'Payment saved — this project is now fully paid' : id == null ? 'Payment added' : 'Payment updated');
+      return true;
+    } catch (e) { toast.error('Could not save the payment', e); return false; }
+  }
+
+  async function deletePayment(projId, id) {
+    const proj = projs.find(p => p.id === projId);
+    if (!proj) return;
+    try {
+      const updated = await projectsDB.deletePayment(projId, id);
+      setProjs(ps => ps.map(p => (p.id === projId ? updated : p)));
+      toast.success('Payment deleted');
+    } catch (e) { toast.error('Could not delete the payment', e); }
+  }
+
+  async function toggleMilestone(projId, idx) {
+    const proj = projs.find(p => p.id === projId);
+    if (!proj) return;
+    const milestones = (proj.milestones || []).map((m, i) => (i === idx ? { ...m, done: !m.done } : m));
+    setProjs(ps => ps.map(p => (p.id === projId ? { ...p, milestones } : p)));
+    try {
+      const updated = await projectsDB.update(projId, { ...proj, milestones });
+      setProjs(ps => ps.map(p => (p.id === projId ? updated : p)));
+    } catch (e) {
+      setProjs(ps => ps.map(p => (p.id === projId ? { ...p, milestones: proj.milestones } : p)));
+      toast.error('Could not update the milestone', e);
+    }
+  }
+
+  // ── Move a fully-paid project to Past Projects (only when asked) ─
+  async function moveToPast(id) {
+    const proj = projs.find(p => p.id === id);
+    if (!proj || movingId) return;
+    const m = moneyOf(proj);
+    if (!m.fullyPaid) { toast.error('Only a fully paid project can be moved to Past Projects'); return; }
+    const count = (proj.payments || []).length;
+    setMovingId(id);
+    try {
       await existingProjectsDB.create({
         projectName: proj.projectName,
-        clientName:  proj.clientName,
+        clientName: proj.clientName,
         companyName: proj.companyName,
         projectType: proj.projectType,
-        finalValue:  proj.valuation,
+        finalValue: proj.valuation,
         billingType: proj.billingType,
         status: 'Delivered',
-        notes: `Auto-moved from Projects on ${new Date().toLocaleDateString('en-IN')} after reaching 100% payment (${fmt(paid)} of ${fmt(proj.valuation)} received across ${(proj.payments||[]).length} payment${(proj.payments||[]).length===1?'':'s'}). Handled by: ${proj.handledBy||'—'}.`,
+        notes: `Moved from Projects on ${fmtDate(todayLocal())} after full payment (${fmtMoney(m.paid)} of ${fmtMoney(m.value)} received across ${count} payment${count === 1 ? '' : 's'}). Handled by: ${proj.handledBy || '—'}.`,
       });
-      await projectsDB.delete(proj.id);
-      setProjs(ps=>ps.filter(p=>p.id!==proj.id));
-      setDetail(d=>d&&d.id===proj.id?null:d);
-      await auditDB.log({ entity:'project', entityId:proj.id, action:'Completed', description:`${proj.projectName} — fully paid, moved to Past Projects`, by:currentUser });
-      setAuditLog(l=>[{ id:Date.now(), entity:'project', entityId:proj.id, action:'Completed', description:`${proj.projectName} — fully paid, moved to Past Projects`, by:currentUser, createdAt:new Date().toISOString() },...l]);
-      return true;
-    } catch(e){ console.error(e); return false; }
+    } catch (e) {
+      toast.error('Could not move to Past Projects. Nothing was changed', e);
+      setMovingId(null);
+      return;
+    }
+    try {
+      await projectsDB.delete(id);
+    } catch (e) {
+      toast.error(`“${proj.projectName}” was copied to Past Projects, but could not be removed from Projects. It now exists in both — delete it here, and do not move it again`, e);
+      setMovingId(null);
+      return;
+    }
+    setProjs(ps => ps.filter(p => p.id !== id));
+    setDetail(d => (d?.id === id ? null : d));
+    await logAudit(id, 'Completed', `${proj.projectName} — fully paid, moved to Past Projects`);
+    toast.success(`“${proj.projectName}” moved to Past Projects`);
+    setMovingId(null);
   }
 
-  async function addPayment(){
-    if(!payForm.amount||saving)return;
-    setSaving(true);
-    const proj=projs.find(p=>p.id===payProjId);
-    if(!proj){ setSaving(false); return; }
-    const newPayments=[...(proj.payments||[]),{...payForm,amount:+payForm.amount}];
-    try{
-      const updated=await projectsDB.addPayment(payProjId,newPayments);
-      setProjs(ps=>ps.map(p=>p.id===payProjId?updated:p));
-      setDetail(d=>d&&d.id===payProjId?updated:d);
-      await moveToPastIfComplete(updated);
-    } catch(e){ console.error(e); }
-    setSaving(false);
-    setShowPay(false);setPayForm(emptyPay);
-  }
+  // ── Confirmations ───────────────────────────────────────────────
+  const askDelete = p => setConfirm({
+    title: 'Delete project', confirmLabel: 'Delete', danger: true,
+    message: `This permanently deletes “${p.projectName}” with its payments and milestones.`,
+    run: () => deleteProject(p.id),
+  });
+  const askDeletePayment = (projId, id, pay) => setConfirm({
+    title: 'Delete payment', confirmLabel: 'Delete', danger: true,
+    message: `Delete the ${fmtMoney(pay.amount)} payment dated ${fmtDate(pay.date)}? This cannot be undone.`,
+    run: () => deletePayment(projId, id),
+  });
+  const askMove = id => {
+    const p = projs.find(x => x.id === id);
+    if (!p) return;
+    setConfirm({
+      title: 'Move to Past Projects', confirmLabel: 'Move project', danger: false,
+      message: `“${p.projectName}” will be added to Past Projects and removed from this list. Only the project details and final value are copied — its individual payments and milestones are NOT carried over and will be deleted. A one-line summary of the payments is saved in the notes.`,
+      run: () => moveToPast(id),
+    });
+  };
 
-  async function updatePayment(idx,pay){
-    const proj=projs.find(p=>p.id===detail?.id);
-    if(!proj)return;
-    const newPayments=(proj.payments||[]).map((p,i)=>i===idx?pay:p);
-    try{
-      const updated=await projectsDB.addPayment(proj.id,newPayments);
-      setProjs(ps=>ps.map(p=>p.id===proj.id?updated:p));
-      setDetail(updated);
-      await moveToPastIfComplete(updated);
-    } catch(e){ console.error(e); }
-  }
+  // ── Render ──────────────────────────────────────────────────────
+  const rowMenu = p => [
+    { label: 'Add payment', icon: IndianRupee, onClick: () => setDetail({ id: p.id, addPayment: true }) },
+    { label: 'Edit', icon: Edit2, onClick: () => openEdit(p) },
+    moneyOf(p).fullyPaid && { label: 'Move to Past Projects', icon: Archive, onClick: () => askMove(p.id) },
+    { label: 'Delete', icon: Trash2, danger: true, onClick: () => askDelete(p) },
+  ];
+  const open = p => setDetail({ id: p.id, addPayment: false });
+  const subtitle = loading ? 'Loading…' : loadError ? 'Could not load'
+    : `${projs.length} project${projs.length === 1 ? '' : 's'} · ${stats.active} in progress · ${fmtMoney(stats.toCollect)} to collect`;
 
-  async function deletePayment(idx){
-    const proj=projs.find(p=>p.id===detail?.id);
-    if(!proj)return;
-    const newPayments=(proj.payments||[]).filter((_,i)=>i!==idx);
-    try{
-      const updated=await projectsDB.addPayment(proj.id,newPayments);
-      setProjs(ps=>ps.map(p=>p.id===proj.id?updated:p));
-      setDetail(updated);
-    } catch(e){ console.error(e); }
-  }
-
-  const totalVal=projs.reduce((s,p)=>s+(+p.valuation||0),0);
-  const totalRec=projs.reduce((s,p)=>s+(p.payments||[]).reduce((a,py)=>a+(+py.amount||0),0),0);
-  const gstProjs=projs.filter(p=>p.billingType==='With GST');
-  const gstOnPending=gstProjs.reduce((s,p)=>{
-    const paid=(p.payments||[]).reduce((a,py)=>a+(+py.amount||0),0);
-    return s+Math.round(Math.max(0,+p.valuation-paid)*18/118);
-  },0);
-  const pendingAfterGst=Math.max(0,(totalVal-totalRec)-gstOnPending);
-
-  return(
+  return (
     <div>
-      <Header title="Projects" subtitle={`${projs.length} projects · ${projs.filter(p=>p.status==='In Progress').length} in progress`}
-        actions={<div style={{display:'flex',gap:8}}>
-          <button onClick={()=>setShowAudit(true)} className="mac-btn mac-btn-secondary" style={{fontSize:13}}><History size={13}/> Audit</button>
-          <button onClick={()=>{setForm(emptyProj);setEditProj(null);setShowAdd(true);}} className="mac-btn mac-btn-primary" style={{fontSize:13}}><Plus size={14}/> New Project</button>
+      <Header title="Projects" subtitle={subtitle}
+        actions={<div style={{ display: 'flex', gap: 8 }}>
+          <button className="icon-btn" onClick={() => setShowAudit(true)} aria-label="History" title="History"><History size={16} /></button>
+          <button className="mac-btn mac-btn-primary" onClick={openAdd}><Plus size={15} /> New project</button>
         </div>}
       />
 
-      {loading ? <PageLoader /> : (
-        <div className="page-body">
-          <div style={{display:'grid',gridTemplateColumns:'repeat(3,minmax(0,1fr))',gap:14}}>
-            {[
-              {label:'Total Projects',value:projs.length,bg:'rgba(0,113,227,0.08)',c:'#0071E3'},
-              {label:'Total Value',value:fmt(totalVal),bg:'rgba(175,82,222,0.08)',c:'#AF52DE'},
-              {label:'Received',value:fmt(totalRec),bg:'rgba(52,199,89,0.08)',c:'#34C759'},
-              {label:'Pending',value:fmt(totalVal-totalRec),bg:'rgba(255,149,0,0.08)',c:'#FF9500'},
-              {label:'GST Payable (18%)',value:fmt(gstOnPending),bg:'rgba(255,204,0,0.08)',c:'#B8860B'},
-              {label:'Total Value After GST',value:fmt(pendingAfterGst),bg:'rgba(255,59,48,0.07)',c:'#FF3B30'},
-            ].map(s=>(
-              <div key={s.label} className="mac-card" style={{padding:'16px 18px',background:s.bg,borderColor:'rgba(0,0,0,0.06)'}}>
-                <div style={{fontSize:22,fontWeight:700,color:s.c,letterSpacing:'-0.6px'}}>{s.value}</div>
-                <div style={{fontSize:12,color:'#6E6E73',marginTop:3,fontWeight:500}}>{s.label}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{display:'flex',gap:10,alignItems:'center'}}>
-            <div style={{flex:1,maxWidth:280}}><SearchBar value={search} onChange={setSearch} placeholder="Search projects…"/></div>
-            <button onClick={()=>setShowFilters(f=>!f)} className={`mac-btn ${showFilters?'mac-btn-primary':'mac-btn-secondary'}`} style={{fontSize:13}}><Filter size={13}/> Filter</button>
-          </div>
-          {showFilters&&(
-            <div className="mac-card" style={{padding:'14px 16px',display:'flex',gap:14}}>
-              {[['Status','status',PROJECT_STATUSES],['Type','projectType',PROJECT_TYPES]].map(([label,key,opts])=>(
-                <div key={key} style={{flex:1}}>
-                  <label style={{display:'block',fontSize:10.5,fontWeight:600,color:'#8E8E93',textTransform:'uppercase',letterSpacing:'0.5px',marginBottom:5}}>{label}</label>
-                  <select className="mac-select" style={{fontSize:13}} value={filters[key]} onChange={e=>setFilters(f=>({...f,[key]:e.target.value}))}>
-                    <option value="">All</option>{opts.map(o=><option key={o}>{o}</option>)}
-                  </select>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="rg-2">
-            {filtered.length===0?<div style={{gridColumn:'span 2',textAlign:'center',padding:'56px',color:'#AEAEB2',fontSize:13}}>No projects found</div>
-              :filtered.map(p=>{
-                const paid=(p.payments||[]).reduce((s,py)=>s+(+py.amount||0),0);
-                const pct=p.valuation?Math.round((paid/+p.valuation)*100):0;
-                const rem=Math.max(0,+p.valuation-paid);
-                const isOverdue=p.dueDate&&p.dueDate<today&&p.status!=='Completed'&&p.status!=='Cancelled';
-                return(
-                  <div key={p.id} style={{background:statusGradients[p.status]||'#fff',border:'1px solid rgba(0,0,0,0.07)',borderRadius:16,padding:20,cursor:'pointer',transition:'box-shadow 0.15s',boxShadow:'0 1px 3px rgba(0,0,0,0.04)'}}
-                    onClick={()=>setDetail(p)}
-                    onMouseEnter={ev=>ev.currentTarget.style.boxShadow='0 6px 24px rgba(0,0,0,0.1)'}
-                    onMouseLeave={ev=>ev.currentTarget.style.boxShadow='0 1px 3px rgba(0,0,0,0.04)'}
-                  >
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
-                      <div style={{flex:1,minWidth:0,paddingRight:8}}>
-                        <div style={{display:'flex',alignItems:'center',gap:7,flexWrap:'wrap',marginBottom:3}}>
-                          <span style={{fontSize:13.5,fontWeight:620,color:'#1D1D1F',letterSpacing:'-0.2px'}}>{p.projectName}</span>
-                          <Badge color={getStatusColor(p.status)}>{p.status}</Badge>
-                          {p.billingType==='With GST'&&<Badge color="yellow">GST</Badge>}
-                          {isOverdue&&<Badge color="red">Overdue</Badge>}
-                        </div>
-                        <div style={{fontSize:12,color:'#6E6E73'}}>{p.clientName} · {p.projectType}</div>
-                      </div>
-                      <div onClick={ev=>ev.stopPropagation()} style={{display:'flex',gap:4,flexShrink:0}}>
-                        <button onClick={()=>{setPayProjId(p.id);setShowPay(true);}} style={{width:28,height:28,borderRadius:8,background:'rgba(52,199,89,0.1)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><IndianRupee size={13} color="#34C759"/></button>
-                        <button onClick={()=>{setEditProj(p);setForm(p);setShowAdd(true);}} style={{width:28,height:28,borderRadius:8,background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Edit2 size={13} color="#6E6E73"/></button>
-                        <button onClick={()=>setDeleteId(p.id)} style={{width:28,height:28,borderRadius:8,background:'rgba(255,59,48,0.08)',border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Trash2 size={13} color="#FF3B30"/></button>
-                      </div>
-                    </div>
-                    <div style={{marginBottom:12}}>
-                      <div style={{display:'flex',justifyContent:'space-between',marginBottom:5}}>
-                        <span style={{fontSize:11.5,color:'#6E6E73'}}>Payment progress</span>
-                        <span style={{fontSize:12,fontWeight:600,color:'#1D1D1F'}}>{pct}%</span>
-                      </div>
-                      <div style={{height:5,borderRadius:100,background:'rgba(0,0,0,0.08)',overflow:'hidden'}}>
-                        <div style={{height:'100%',borderRadius:100,background:'linear-gradient(90deg,#0071E3,#0A84FF)',width:`${Math.min(pct,100)}%`,transition:'width 0.4s ease'}}/>
-                      </div>
-                    </div>
-                    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8}}>
-                      {[['Value',fmt(p.valuation),'#1D1D1F'],['Paid',fmt(paid),'#34C759'],['Due',fmt(rem),'#FF9500']].map(([l,v,c])=>(
-                        <div key={l} style={{textAlign:'center',padding:'7px 0'}}>
-                          <div style={{fontSize:10.5,color:'#AEAEB2',marginBottom:2}}>{l}</div>
-                          <div style={{fontSize:12.5,fontWeight:680,color:c,letterSpacing:'-0.2px'}}>{v}</div>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',paddingTop:10,borderTop:'1px solid rgba(0,0,0,0.06)',marginTop:6}}>
-                      <span style={{fontSize:11,color:'#8E8E93'}}>Due: {p.dueDate||'—'}</span>
-                      <div style={{display:'flex',alignItems:'center',gap:4}}>
-                        {(p.assignedEmployees||[]).slice(0,3).map((e,i)=>(
-                          <div key={e.id} title={e.name} style={{width:20,height:20,borderRadius:'50%',background:'linear-gradient(135deg,#34C759,#30D158)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:7,fontWeight:700,color:'#fff',border:'1.5px solid #fff',marginLeft:i?-6:0,zIndex:i}}>
-                            {e.name.split(' ').map(n=>n[0]).join('').slice(0,2).toUpperCase()}
+      <div className="page-body">
+        {loading ? <SkeletonRows rows={6} />
+          : loadError ? <ErrorPanel title="Could not load projects" error={loadError} onRetry={load} />
+          : projs.length === 0 ? (
+            <EmptyPanel icon={FolderKanban} title="No projects yet" text="Create a project to track its team, due date and payments."
+              action={<button className="mac-btn mac-btn-primary" onClick={openAdd}><Plus size={15} /> New project</button>} />
+          ) : (
+            <>
+              <StatTiles items={[
+                { label: 'Active projects', value: stats.active, sub: `${projs.length} in total`, icon: Briefcase },
+                { label: 'Total contract value', value: fmtMoney(stats.totalVal), sub: 'All projects in this list', icon: Wallet },
+                { label: 'Received', value: fmtMoney(stats.totalRec), icon: IndianRupee, tone: 'good',
+                  sub: stats.totalVal > 0 ? `${Math.round((stats.totalRec / stats.totalVal) * 100)}% of contract value` : undefined },
+                { label: 'To collect', value: fmtMoney(stats.toCollect), icon: Clock, tone: stats.toCollect > 0 ? 'warn' : undefined,
+                  sub: dueOnly ? 'Showing these — tap to show all'
+                    : stats.gstOnPending > 0 ? `Includes ${fmtMoney(stats.gstOnPending)} GST · ${fmtMoney(stats.netOfGst)} after GST`
+                    : `${stats.owing} project${stats.owing === 1 ? '' : 's'} — tap to see`,
+                  onClick: () => setDueOnly(d => !d) },
+              ]} />
+
+              <Toolbar search={search} onSearch={setSearch} placeholder="Search project or client…"
+                right={isFiltered && <><span>{filtered.length} of {projs.length}</span><button className="mac-btn mac-btn-ghost" onClick={clearFilters}>Clear</button></>}>
+                <select className="mac-select" aria-label="Project type" value={type} onChange={e => setType(e.target.value)}>
+                  <option value="">All types</option>{PROJECT_TYPES.map(o => <option key={o}>{o}</option>)}
+                </select>
+                {dueOnly && <button className="chip active" onClick={() => setDueOnly(false)} aria-label="Remove outstanding filter">Outstanding, highest first ×</button>}
+              </Toolbar>
+              <Chips label="Status" options={statusChips} value={status} onChange={setStatus} />
+
+              {filtered.length === 0 ? (
+                <EmptyPanel icon={FolderKanban} title="No projects match these filters" text="Try a different search or clear the filters."
+                  action={<button className="mac-btn mac-btn-secondary" onClick={clearFilters}>Clear filters</button>} />
+              ) : (
+                <>
+                  <div className="mac-card table-wrap only-desktop">
+                    <table className="data-table">
+                      <thead><tr><th>Project</th><th>Status</th><th>Team</th><th>Due</th><th>Payment</th><th aria-label="Actions" /></tr></thead>
+                      <tbody>
+                        {filtered.map(p => {
+                          const m = moneyOf(p);
+                          return (
+                            <tr key={p.id} className="clickable" tabIndex={0} onClick={() => open(p)} onKeyDown={onKeyActivate(() => open(p))}>
+                              <td>
+                                <div className="cell-main">{p.projectName}</div>
+                                <div className="cell-sub">{[p.clientName, p.projectType].filter(Boolean).join(' · ') || '—'}</div>
+                              </td>
+                              <td><StatusBadges p={p} m={m} /></td>
+                              <td><Team people={p.assignedEmployees} /></td>
+                              <td className={isOverdue(p) ? 'proj-overdue' : undefined} style={{ whiteSpace: 'nowrap' }}>{fmtDate(p.dueDate)}</td>
+                              <td><PayProgress m={m} /></td>
+                              <td><div className="proj-row-actions"><RowMenu items={rowMenu(p)} label={`Actions for ${p.projectName}`} /></div></td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="list-cards only-mobile">
+                    {filtered.map(p => {
+                      const m = moneyOf(p);
+                      return (
+                        <div key={p.id} className="list-card" role="button" tabIndex={0} onClick={() => open(p)} onKeyDown={onKeyActivate(() => open(p))}>
+                          <div className="proj-card-top">
+                            <div>
+                              <div className="cell-main">{p.projectName}</div>
+                              <div className="cell-sub">{[p.clientName, p.projectType].filter(Boolean).join(' · ') || '—'}</div>
+                            </div>
+                            <RowMenu items={rowMenu(p)} label={`Actions for ${p.projectName}`} />
                           </div>
-                        ))}
-                        {(p.assignedEmployees||[]).length > 3 && (
-                          <span style={{fontSize:10,color:'#AEAEB2',marginLeft:2}}>+{(p.assignedEmployees||[]).length-3}</span>
-                        )}
-                        {!(p.assignedEmployees||[]).length && <span style={{fontSize:11,color:'#8E8E93'}}>By: {p.handledBy}</span>}
-                      </div>
-                    </div>
+                          <StatusBadges p={p} m={m} />
+                          <PayProgress m={m} />
+                          <div className="proj-card-foot">
+                            <span className={isOverdue(p) ? 'proj-overdue' : undefined}>Due {fmtDate(p.dueDate)}</span>
+                            <Team people={p.assignedEmployees} />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })
-            }
-          </div>
-        </div>
-      )}
+                </>
+              )}
+            </>
+          )}
+      </div>
 
-      <Modal isOpen={showAdd} onClose={()=>{setShowAdd(false);setEditProj(null);setForm(emptyProj);}} title={editProj?'Edit Project':'New Project'} size="xl">
-        <ProjectForm v={form} onChange={setForm} employees={employees}/>
-        <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:20,paddingTop:16,borderTop:'1px solid rgba(0,0,0,0.07)'}}>
-          <button onClick={()=>{setShowAdd(false);setEditProj(null);}} className="mac-btn mac-btn-secondary" style={{fontSize:13}}>Cancel</button>
-          <button onClick={save} disabled={saving} className="mac-btn mac-btn-primary" style={{fontSize:13}}>{saving?'Saving…':editProj?'Save Changes':'Create Project'}</button>
-        </div>
+      <Drawer isOpen={!!detailProj} onClose={() => { if (!overlayOnTop) setDetail(null); }}
+        title={detailProj?.projectName} subtitle={detailProj && ([detailProj.clientName, detailProj.companyName].filter(Boolean).join(' · ') || 'No client set')}
+        actions={detailProj && <RowMenu items={rowMenu(detailProj).slice(1)} label="Project actions" />}>
+        {detailProj && (
+          <ProjectDetail key={detailProj.id} proj={detailProj} startAddPayment={detail.addPayment} moving={movingId === detailProj.id}
+            onSavePayment={savePayment} onAskDeletePayment={askDeletePayment} onToggleMilestone={toggleMilestone} onAskMove={askMove} />
+        )}
+      </Drawer>
+
+      <Modal isOpen={!!form} onClose={() => { if (!saving) setForm(null); }} title={form?.id ? 'Edit project' : 'New project'} size="lg"
+        footer={<>
+          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setForm(null)} disabled={saving}>Cancel</button>
+          <button type="submit" form="proj-form" className="mac-btn mac-btn-primary" disabled={saving}>{saving ? 'Saving…' : form?.id ? 'Save changes' : 'Create project'}</button>
+        </>}>
+        {form && <ProjectForm v={form.values} set={setField} errors={formErrors} employees={employees} partners={partners} onSubmit={saveProject} />}
       </Modal>
 
-      <Modal isOpen={!!detail} onClose={()=>setDetail(null)} title="Project Details" size="lg">
-        {detail&&<ProjectDetail
-          proj={detail}
-          onClose={()=>setDetail(null)}
-          onEdit={()=>{setEditProj(detail);setForm(detail);setDetail(null);setShowAdd(true);}}
-          onAddPayment={()=>{setPayProjId(detail.id);setShowPay(true);}}
-          onUpdatePayment={updatePayment}
-          onDeletePayment={deletePayment}
-        />}
+      <Modal isOpen={showAudit} onClose={() => setShowAudit(false)} title="Project history" size="md">
+        {auditLog.length === 0
+          ? <p className="proj-note" style={{ textAlign: 'center', padding: '24px 0' }}>No changes recorded yet.</p>
+          : auditLog.map(a => (
+            <div key={a.id} className="proj-audit">
+              <div className="proj-audit-top">
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <Badge color={a.action === 'Deleted' ? 'red' : a.action === 'Created' ? 'green' : 'blue'}>{a.action}</Badge>
+                  <span className="cell-main">{a.description || a.name}</span>
+                </span>
+                <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>
+                  {a.createdAt ? new Date(a.createdAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                </span>
+              </div>
+              <span className="cell-sub">By {a.by || '—'}</span>
+            </div>
+          ))}
       </Modal>
 
-      <Modal isOpen={showPay} onClose={()=>setShowPay(false)} title="Add Payment Entry" size="sm">
-        <PaymentForm v={payForm} onChange={setPayForm}/>
-        <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:20,paddingTop:16,borderTop:'1px solid rgba(0,0,0,0.07)'}}>
-          <button onClick={()=>setShowPay(false)} className="mac-btn mac-btn-secondary" style={{fontSize:13}}>Cancel</button>
-          <button onClick={addPayment} disabled={saving} className="mac-btn mac-btn-primary" style={{fontSize:13}}>{saving?'Saving…':'Save Payment'}</button>
-        </div>
-      </Modal>
-
-      <Modal isOpen={showAudit} onClose={()=>setShowAudit(false)} title="Project Audit Log" size="md">
-        {auditLog.length===0?<p style={{textAlign:'center',color:'#AEAEB2',padding:'32px 0',fontSize:13}}>No entries yet</p>
-          :<div style={{display:'flex',flexDirection:'column',gap:6}}>
-            {auditLog.map(e=>{
-              const badgeColor=e.action==='Deleted'?'red':e.action==='Created'?'green':'blue';
-              const ts=e.createdAt?new Date(e.createdAt).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
-              return(
-                <div key={e.id} style={{padding:'10px 12px',borderRadius:10,background:'rgba(0,0,0,0.025)',border:'1px solid rgba(0,0,0,0.06)'}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
-                    <div style={{display:'flex',gap:8,alignItems:'center'}}><Badge color={badgeColor}>{e.action}</Badge><span style={{fontSize:12.5,color:'#1D1D1F',fontWeight:500}}>{e.description||e.name}</span></div>
-                    <span style={{fontSize:11,color:'#AEAEB2',whiteSpace:'nowrap',marginLeft:8}}>{ts}</span>
-                  </div>
-                  <span style={{fontSize:11,color:'#6E6E73'}}>Updated by: <strong>{e.by||'—'}</strong></span>
-                </div>
-              );
-            })}
-          </div>
-        }
-      </Modal>
-
-      <ConfirmDialog isOpen={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>del(deleteId)} title="Delete Project" message="This will permanently delete the project and all payment records."/>
+      <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={() => confirm?.run()}
+        title={confirm?.title} message={confirm?.message} confirmLabel={confirm?.confirmLabel} danger={confirm?.danger} />
     </div>
   );
 }

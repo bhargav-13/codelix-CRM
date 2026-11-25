@@ -1,43 +1,55 @@
 import { useState, useMemo } from 'react';
-import { STATUSES, taskKey, isOverdue } from '../../lib/work';
-import { STATUS_META, TypeGlyph, PriorityGlyph, AvatarStack, LabelPill, Avatar } from './ui';
-import { Plus, MessageSquare, Paperclip, CalendarClock, ListChecks, GitBranch, Clock } from 'lucide-react';
+import { STATUSES, PRIORITIES, taskKey } from '../../lib/work';
+import { STATUS_META, TypeGlyph, PriorityGlyph, AvatarStack, LabelPill, Avatar, QuickAdd, isLate, shortDate, personKey, asPerson, plural } from './ui';
+import { MessageSquare, Paperclip, CalendarClock, ListChecks, GitBranch, Clock, ArrowRightLeft } from 'lucide-react';
 
-export function TaskCard({ t, ctx, onOpen, draggable, onDragStart, onDragEnd, dragging }) {
-  const subs = ctx.childrenOf(t.id);
-  const doneSubs = subs.filter(s => s.status === 'Done').length;
+const LANES = [['none', 'No swimlanes'], ['assignee', 'By assignee'], ['epic', 'By epic'], ['priority', 'By priority']];
+const bySort = (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0);
+
+function TaskCard({ t, ctx, onOpen, canEdit, dragging, onDragStart, onDragEnd, onStatus }) {
+  const kids = ctx.childStats.get(t.id);
+  const logged = ctx.loggedBy.get(t.id) || 0;
   const checks = t.checklist || [];
   const epic = t.parentId ? ctx.taskById(t.parentId) : null;
-  const logged = ctx.loggedFor(t.id);
+  const late = isLate(t);
   return (
-    <div draggable={draggable} onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', t.id); onDragStart?.(t); }}
-      onDragEnd={onDragEnd} onClick={() => onOpen(t)} className="wk-card" style={{ opacity: dragging ? 0.4 : 1, cursor: draggable ? 'grab' : 'pointer' }}>
-      {epic && epic.type === 'Epic' && <div style={{ fontSize: 10.5, color: '#8A3DB5', fontWeight: 600, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>⚡ {epic.title}</div>}
-      <div style={{ fontSize: 13, fontWeight: 520, color: '#1D1D1F', lineHeight: 1.35, marginBottom: 8, wordBreak: 'break-word' }}>{t.title}</div>
-      {t.labels?.length > 0 && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>{t.labels.slice(0, 3).map(l => <LabelPill key={l} label={l} />)}</div>}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#8E8E93', flexWrap: 'wrap' }}>
+    <div className={`wk-card ${dragging ? 'dragging' : ''}`} data-card={t.id} draggable={canEdit}
+      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', t.id); onDragStart(t); }}
+      onDragEnd={onDragEnd} onClick={() => onOpen(t)}>
+      {epic?.type === 'Epic' && <div className="wk-card-epic">{epic.title}</div>}
+      <div className="wk-card-top">
+        <button type="button" className="wk-card-title">{t.title}</button>
+        {canEdit && (
+          <label className="wk-move" title="Move to another column" onClick={e => e.stopPropagation()}>
+            <ArrowRightLeft size={15} aria-hidden="true" />
+            <select aria-label={`Move “${t.title}” to`} value={t.status} onChange={e => onStatus(t, e.target.value)}>
+              {STATUSES.map(s => <option key={s}>{s}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      {t.labels?.length > 0 && <div className="wk-card-labels">{t.labels.slice(0, 3).map(l => <LabelPill key={l} label={l} />)}</div>}
+      <div className="wk-meta">
         <TypeGlyph type={t.type} size={15} />
-        <span style={{ fontWeight: 600, color: '#6E6E73' }}>{taskKey(t, ctx.projects)}</span>
+        <span className="wk-key">{taskKey(t, ctx.projects)}</span>
         <PriorityGlyph priority={t.priority} size={14} />
-        {t.storyPoints != null && t.storyPoints !== '' && <span title="Story points" style={{ padding: '0 6px', borderRadius: 100, background: 'rgba(0,0,0,0.06)', fontWeight: 600, color: '#48484A' }}>{t.storyPoints}</span>}
-        {t.dueDate && <span title="Due date" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: isOverdue(t) ? '#D70015' : '#8E8E93', fontWeight: isOverdue(t) ? 600 : 400 }}><CalendarClock size={11} />{t.dueDate.slice(5)}</span>}
-        {subs.length > 0 && <span title="Subtasks done" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><GitBranch size={11} />{doneSubs}/{subs.length}</span>}
-        {checks.length > 0 && <span title="Checklist" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><ListChecks size={11} />{checks.filter(c => c.done).length}/{checks.length}</span>}
-        {t.comments?.length > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><MessageSquare size={11} />{t.comments.length}</span>}
-        {t.attachments?.length > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Paperclip size={11} />{t.attachments.length}</span>}
-        {logged > 0 && <span title="Time logged" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><Clock size={11} />{Math.round(logged / 6) / 10}h</span>}
+        {t.storyPoints != null && t.storyPoints !== '' && <span title="Story points" className="wk-pointsbadge">{t.storyPoints}</span>}
+        {t.dueDate && <span title={late ? 'Overdue' : 'Due date'} className={late ? 'wk-late' : ''}><CalendarClock size={12} />{shortDate(t.dueDate)}</span>}
+        {kids && <span title="Subtasks done"><GitBranch size={12} />{kids.done}/{kids.total}</span>}
+        {checks.length > 0 && <span title="Checklist"><ListChecks size={12} />{checks.filter(c => c.done).length}/{checks.length}</span>}
+        {t.comments?.length > 0 && <span title="Comments"><MessageSquare size={12} />{t.comments.length}</span>}
+        {t.attachments?.length > 0 && <span title="Attachments"><Paperclip size={12} />{t.attachments.length}</span>}
+        {logged > 0 && <span title="Time logged"><Clock size={12} />{Math.round(logged / 6) / 10}h</span>}
         <span style={{ marginLeft: 'auto' }}><AvatarStack people={t.assignees} size={20} /></span>
       </div>
     </div>
   );
 }
 
-const LANES = [['none', 'No swimlanes'], ['assignee', 'By assignee'], ['epic', 'By epic'], ['priority', 'By priority']];
-
 export default function BoardView({ tasks, ctx, onOpen, onMove, onQuickAdd, canCreate, canEdit }) {
   const [lane, setLane] = useState('none');
-  const [dragId, setDragId] = useState(null);
-  const [over, setOver] = useState(null); // `${laneKey}|${status}`
+  const [drag, setDrag] = useState(null);   // { id, lane } — card being dragged and the lane it came from
+  const [over, setOver] = useState(null);   // { key: `${laneKey}|${status}`, before: cardId | null }
 
   const lanes = useMemo(() => {
     if (lane === 'none') return [{ key: 'all', label: null, tasks }];
@@ -46,62 +58,106 @@ export default function BoardView({ tasks, ctx, onOpen, onMove, onQuickAdd, canC
     for (const t of tasks) {
       if (lane === 'assignee') {
         if (!t.assignees.length) put('none', 'Unassigned', t, 'zzz');
-        else t.assignees.forEach(a => put(`${a.kind}:${a.id}`, a.name, t, a.name));
+        else t.assignees.forEach(a => put(personKey(a), a.name, t, a.name));
       } else if (lane === 'epic') {
         const e = t.parentId && ctx.taskById(t.parentId);
-        if (e && e.type === 'Epic') put(e.id, `⚡ ${e.title}`, t, e.title); else put('none', 'No epic', t, 'zzz');
+        if (e && e.type === 'Epic') put(e.id, e.title, t, e.title); else put('none', 'No epic', t, 'zzz');
       } else {
-        put(t.priority, t.priority, t, ['Highest', 'High', 'Medium', 'Low', 'Lowest'].indexOf(t.priority));
+        put(t.priority, t.priority, t, PRIORITIES.indexOf(t.priority));
       }
     }
     return [...groups.values()].sort((a, b) => (a.sortKey > b.sortKey ? 1 : -1));
   }, [lane, tasks, ctx]);
 
-  function drop(status, laneKey, e) {
+  const heads = useMemo(() => {
+    const m = new Map(STATUSES.map(s => [s, { n: 0, pts: 0 }]));
+    for (const t of tasks) { const h = m.get(t.status); if (h) { h.n++; h.pts += +t.storyPoints || 0; } }
+    return m;
+  }, [tasks]);
+
+  const endDrag = () => { setDrag(null); setOver(null); };
+
+  // items = the cards of the cell that received the drop, in display order
+  function drop(status, laneKey, items, e) {
     e.preventDefault();
-    const id = e.dataTransfer.getData('text/plain') || dragId;
-    setOver(null); setDragId(null);
+    const id = drag?.id || e.dataTransfer.getData('text/plain');
+    const from = drag?.lane;
+    const target = over;
+    endDrag();
     const t = tasks.find(x => x.id === id);
     if (!t) return;
-    const patch = { status };
-    if (lane === 'assignee' && laneKey !== 'all') {
-      const target = laneKey === 'none' ? [] : null;
-      if (target) patch.assignees = target;
-      else if (!t.assignees.some(a => `${a.kind}:${a.id}` === laneKey)) {
-        const person = ctx.people.find(p => `${p.kind}:${p.id}` === laneKey);
-        if (person) patch.assignees = [{ id: person.id, name: person.name, kind: person.kind }];
+
+    const patch = {};
+    if (status !== t.status) patch.status = status;
+
+    // Swimlanes. A task with several assignees sits in several lanes, so a drop
+    // from one person's lane to another's swaps just that person; everyone else
+    // stays. Only the "Unassigned" lane clears the list, because that is what it means.
+    if (lane === 'assignee' && laneKey !== 'all' && laneKey !== from) {
+      if (laneKey === 'none') {
+        if (t.assignees.length) patch.assignees = [];
+      } else {
+        const person = ctx.people.find(p => personKey(p) === laneKey);
+        if (person) {
+          const kept = t.assignees.filter(a => personKey(a) !== from && personKey(a) !== laneKey);
+          const next = [...kept, asPerson(person)];
+          if (next.length !== t.assignees.length || !t.assignees.some(a => personKey(a) === laneKey)) patch.assignees = next;
+        }
       }
     }
     if (lane === 'priority' && laneKey !== t.priority) patch.priority = laneKey;
-    const col = tasks.filter(x => x.status === status && x.id !== id);
-    patch.sortOrder = (col.reduce((m, x) => Math.max(m, x.sortOrder || 0), 0)) + 1000;
-    if (status === t.status && !patch.assignees && !patch.priority) return;
+
+    // Position: place the card between the neighbours of where it was dropped.
+    const own = items.findIndex(x => x.id === id);
+    let before = target?.key === `${laneKey}|${status}` ? target.before : null;
+    if (before === id) before = items[own + 1]?.id ?? null;
+    const list = items.filter(x => x.id !== id);
+    let idx = before ? list.findIndex(x => x.id === before) : list.length;
+    if (idx < 0) idx = list.length;
+    const extra = [];
+    if (own !== idx) {
+      const a = list[idx - 1] ? (list[idx - 1].sortOrder || 0) : null;
+      const b = list[idx] ? (list[idx].sortOrder || 0) : null;
+      if (a == null && b == null) patch.sortOrder = 1000;
+      else if (a == null) patch.sortOrder = b - 1000;
+      else if (b == null) patch.sortOrder = a + 1000;
+      else if (b - a > 1e-6) patch.sortOrder = (a + b) / 2;
+      else {
+        // neighbours share the same order value: renumber this cell once
+        [...list.slice(0, idx), t, ...list.slice(idx)].forEach((x, n) => {
+          const so = (n + 1) * 1000;
+          if (x.id === id) patch.sortOrder = so; else if (x.sortOrder !== so) extra.push([x, { sortOrder: so }]);
+        });
+      }
+    }
+    if (!Object.keys(patch).length) return;
     onMove(t, patch);
+    extra.forEach(([x, p]) => onMove(x, p));
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <select className="mac-select" value={lane} onChange={e => setLane(e.target.value)} style={{ width: 'auto', fontSize: 12.5 }} aria-label="Swimlanes">
+      <div className="toolbar">
+        <select className="mac-select" value={lane} onChange={e => setLane(e.target.value)} aria-label="Swimlanes">
           {LANES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </select>
-        <span style={{ fontSize: 11.5, color: '#AEAEB2' }}>{tasks.length} issue{tasks.length === 1 ? '' : 's'}{canEdit ? ' · drag cards to change status' : ''}</span>
+        <span className="wk-hint">{plural(tasks.length, 'task')}{canEdit ? ' · drag a card to move or reorder it, or use the arrows on the card' : ''}</span>
       </div>
-      <div style={{ overflowX: 'auto', paddingBottom: 8 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${STATUSES.length}, minmax(240px, 1fr))`, gap: 12, minWidth: STATUSES.length * 252 }}>
+      <div className="wk-board-scroll">
+        <div className="wk-board">
           {STATUSES.map(s => {
-            const n = tasks.filter(t => t.status === s);
-            const pts = n.reduce((a, t) => a + (+t.storyPoints || 0), 0);
+            const h = heads.get(s);
             return (
-              <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '4px 6px', fontSize: 11.5, fontWeight: 650, color: '#6E6E73', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                <span style={{ width: 8, height: 8, borderRadius: 4, background: STATUS_META[s].dot }} />{s}
-                <span style={{ fontWeight: 500, color: '#AEAEB2' }}>{n.length}{pts ? ` · ${pts} pts` : ''}</span>
+              <div key={s} className="wk-col-head">
+                <i style={{ background: STATUS_META[s].dot }} />{s}
+                <span className="n">{h.n}{h.pts ? ` · ${h.pts} pts` : ''}</span>
               </div>
             );
           })}
           {lanes.map(L => (
             <LaneRow key={L.key} L={L} ctx={ctx} onOpen={onOpen} canEdit={canEdit} canCreate={canCreate && lane === 'none'}
-              dragId={dragId} setDragId={setDragId} over={over} setOver={setOver} drop={drop} onQuickAdd={onQuickAdd} />
+              drag={drag} setDrag={setDrag} over={over} setOver={setOver} endDrag={endDrag} drop={drop}
+              onQuickAdd={onQuickAdd} onStatus={(t, status) => { if (status !== t.status) onMove(t, { status }); }} />
           ))}
         </div>
       </div>
@@ -109,28 +165,38 @@ export default function BoardView({ tasks, ctx, onOpen, onMove, onQuickAdd, canC
   );
 }
 
-function LaneRow({ L, ctx, onOpen, canEdit, canCreate, dragId, setDragId, over, setOver, drop, onQuickAdd }) {
+function LaneRow({ L, ctx, onOpen, canEdit, canCreate, drag, setDrag, over, setOver, endDrag, drop, onQuickAdd, onStatus }) {
   return (
     <>
       {L.label && (
-        <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 4px 0', fontSize: 12.5, fontWeight: 650, color: '#1D1D1F', borderTop: '1px solid rgba(0,0,0,0.06)' }}>
-          {L.key.includes(':') && <Avatar p={{ kind: L.key.split(':')[0], id: L.key.split(':')[1], name: L.label }} size={18} ring={false} />}
-          {L.label} <span style={{ fontWeight: 400, color: '#AEAEB2' }}>{L.tasks.length}</span>
+        <div className="wk-lane-head">
+          {L.key.includes(':') && <Avatar p={{ kind: L.key.split(':')[0], id: L.key.split(':')[1], name: L.label }} size={20} ring={false} />}
+          {L.label} <span className="n">{L.tasks.length}</span>
         </div>
       )}
       {STATUSES.map(s => {
-        const items = L.tasks.filter(t => t.status === s).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+        const items = L.tasks.filter(t => t.status === s).sort(bySort);
         const k = `${L.key}|${s}`;
+        const isOver = over?.key === k;
         return (
-          <div key={k} className="wk-col" style={{ outline: over === k ? '2px dashed rgba(0,113,227,0.5)' : 'none' }}
-            onDragOver={e => { if (!canEdit) return; e.preventDefault(); if (over !== k) setOver(k); }}
+          <div key={k} className={`wk-col ${isOver ? 'is-over' : ''}`} aria-label={`${s}${L.label ? ` — ${L.label}` : ''}`}
+            onDragOver={e => {
+              if (!canEdit || !drag) return;
+              e.preventDefault();
+              const hit = [...e.currentTarget.querySelectorAll('[data-card]')].find(el => { const r = el.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; });
+              const before = hit ? hit.dataset.card : null;
+              if (!isOver || over.before !== before) setOver({ key: k, before });
+            }}
             onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(null); }}
-            onDrop={e => canEdit && drop(s, L.key, e)}>
+            onDrop={e => { if (canEdit) drop(s, L.key, items, e); }}>
+            {canCreate && <QuickAdd onAdd={title => onQuickAdd(title, s)} label={`Add a task to ${s}`} />}
             {items.map(t => (
-              <TaskCard key={t.id} t={t} ctx={ctx} onOpen={onOpen} draggable={canEdit} dragging={dragId === t.id}
-                onDragStart={x => setDragId(x.id)} onDragEnd={() => { setDragId(null); setOver(null); }} />
+              <LaneCard key={t.id} showLine={isOver && over.before === t.id}>
+                <TaskCard t={t} ctx={ctx} onOpen={onOpen} canEdit={canEdit} dragging={drag?.id === t.id}
+                  onDragStart={x => setDrag({ id: x.id, lane: L.key })} onDragEnd={endDrag} onStatus={onStatus} />
+              </LaneCard>
             ))}
-            {canCreate && <QuickAdd onAdd={title => onQuickAdd(title, s)} />}
+            {isOver && over.before == null && <div className="wk-drop-line" />}
           </div>
         );
       })}
@@ -138,14 +204,6 @@ function LaneRow({ L, ctx, onOpen, canEdit, canCreate, dragId, setDragId, over, 
   );
 }
 
-export function QuickAdd({ onAdd, placeholder = 'What needs to be done?' }) {
-  const [open, setOpen] = useState(false);
-  const [v, setV] = useState('');
-  if (!open) return <button onClick={() => setOpen(true)} className="wk-quick"><Plus size={13} /> Create issue</button>;
-  return (
-    <input autoFocus className="mac-input" value={v} placeholder={placeholder} style={{ fontSize: 13 }}
-      onChange={e => setV(e.target.value)}
-      onKeyDown={e => { if (e.key === 'Enter' && v.trim()) { onAdd(v.trim()); setV(''); } if (e.key === 'Escape') { setOpen(false); setV(''); } }}
-      onBlur={() => { if (v.trim()) onAdd(v.trim()); setOpen(false); setV(''); }} />
-  );
+function LaneCard({ showLine, children }) {
+  return <>{showLine && <div className="wk-drop-line" />}{children}</>;
 }

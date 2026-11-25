@@ -1,0 +1,41 @@
+/* Users & Access — layout only; colours come from the tokens in index.css */
+.acc-strip { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--r-sm); background: var(--warn-soft); color: var(--warn); font-size: var(--fs-sm); font-weight: 600; }
+.acc-strip.bad { background: var(--bad-soft); color: var(--bad); }
+.acc-strip > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.acc-strip button { border: none; background: none; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; padding: 0 2px; flex-shrink: 0; }
+
+.acc-person { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.acc-person > div { min-width: 0; }
+.acc-person .cell-main, .acc-person .cell-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acc-card-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+.acc-badge { background: var(--surface-2); color: var(--ink-2); white-space: nowrap; }
+.acc-badge.good { background: var(--good-soft); color: var(--good); }
+.acc-badge.warn { background: var(--warn-soft); color: var(--warn); }
+.acc-badge.bad { background: var(--bad-soft); color: var(--bad); }
+
+.acc-section { display: flex; flex-direction: column; gap: 12px; }
+.acc-section + .acc-section { padding-top: 20px; border-top: 1px solid var(--line); }
+.acc-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.acc-section-head .mac-select { width: auto; max-width: 100%; }
+.acc-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.acc-note { font-size: var(--fs-sm); color: var(--ink-2); }
+
+.acc-secret { display: flex; flex-direction: column; gap: 10px; padding: 16px; border: 2px solid var(--ink); border-radius: var(--r-md); background: var(--surface-2); }
+.acc-secret-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.acc-secret code { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 18px; font-weight: 700; letter-spacing: 0.03em; color: var(--ink); overflow-wrap: anywhere; user-select: all; }
+.acc-secret-warn { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 700; color: var(--warn); }
+
+.acc-module { display: flex; flex-direction: column; gap: 8px; padding: 14px 0; border-top: 1px solid var(--line); }
+.acc-module:first-child { border-top: none; padding-top: 0; }
+.acc-perms { display: flex; gap: 8px; flex-wrap: wrap; }
+.acc-perm { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--r-pill); font-size: var(--fs-sm); font-weight: 600; color: var(--ink-2); cursor: pointer; user-select: none; }
+.acc-perm.on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
+.acc-perm input { width: 16px; height: 16px; margin: 0; accent-color: var(--brand); }
+
+.acc-foot-note { margin-right: auto; align-self: center; font-size: var(--fs-sm); font-weight: 600; color: var(--warn); }
+.acc-history { display: flex; flex-direction: column; gap: 8px; }
+.acc-hrow { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--surface-2); font-size: var(--fs-sm); }
+.acc-hrow > div { min-width: 0; overflow-wrap: anywhere; }
+.acc-hrow time { color: var(--ink-3); white-space: nowrap; font-size: var(--fs-xs); }
+@media (max-width: 480px) { .acc-hrow { flex-direction: column; gap: 4px; } }

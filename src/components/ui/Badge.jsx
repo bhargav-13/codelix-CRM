@@ -1,50 +1,42 @@
-const COLORS = {
-  gray:       { bg:'rgba(142,142,147,0.12)', color:'#6E6E73' },
-  blue:       { bg:'rgba(0,113,227,0.1)',    color:'#0071E3' },
-  green:      { bg:'rgba(52,199,89,0.1)',    color:'#34C759' },
-  red:        { bg:'rgba(255,59,48,0.1)',    color:'#FF3B30' },
-  orange:     { bg:'rgba(255,149,0,0.1)',    color:'#FF9500' },
-  yellow:     { bg:'rgba(255,204,0,0.12)',   color:'#B07D00' },
-  purple:     { bg:'rgba(175,82,222,0.1)',   color:'#AF52DE' },
-  hot:        { bg:'rgba(255,59,48,0.1)',    color:'#FF3B30' },
-  warm:       { bg:'rgba(255,149,0,0.1)',    color:'#FF9500' },
-  cold:       { bg:'rgba(0,113,227,0.1)',    color:'#0071E3' },
-  won:        { bg:'rgba(52,199,89,0.1)',    color:'#34C759' },
-  lost:       { bg:'rgba(142,142,147,0.1)',  color:'#8E8E93' },
-  high:       { bg:'rgba(255,59,48,0.1)',    color:'#FF3B30' },
-  medium:     { bg:'rgba(255,149,0,0.1)',    color:'#FF9500' },
-  low:        { bg:'rgba(142,142,147,0.1)',  color:'#8E8E93' },
-  active:     { bg:'rgba(52,199,89,0.1)',    color:'#34C759' },
-  inactive:   { bg:'rgba(142,142,147,0.1)',  color:'#8E8E93' },
-  left:       { bg:'rgba(142,142,147,0.1)',  color:'#8E8E93' },
-  inprogress: { bg:'rgba(0,113,227,0.1)',    color:'#0071E3' },
-  completed:  { bg:'rgba(52,199,89,0.1)',    color:'#34C759' },
-  pending:    { bg:'rgba(255,204,0,0.12)',   color:'#B07D00' },
-  onhold:     { bg:'rgba(255,149,0,0.1)',    color:'#FF9500' },
-  cancelled:  { bg:'rgba(142,142,147,0.1)',  color:'#8E8E93' },
-  credit:     { bg:'rgba(52,199,89,0.1)',    color:'#34C759' },
-  debit:      { bg:'rgba(255,59,48,0.1)',    color:'#FF3B30' },
-  partial:    { bg:'rgba(255,149,0,0.1)',    color:'#FF9500' },
-  fulltime:   { bg:'rgba(0,113,227,0.1)',    color:'#0071E3' },
-  parttime:   { bg:'rgba(175,82,222,0.1)',   color:'#AF52DE' },
-  freelancer: { bg:'rgba(255,204,0,0.12)',   color:'#B07D00' },
-  intern:     { bg:'rgba(142,142,147,0.1)',  color:'#8E8E93' },
+/* eslint-disable react-refresh/only-export-components */
+// Status pill. Colours come from the design tokens.
+//   <Badge color="green">Active</Badge>            soft background + coloured text (default)
+//   <Badge color="blue" variant="filled">New</Badge>
+//   <Badge color="orange" variant="stroke" dot>Pending</Badge>
+const TONES = {
+  neutral: { fg: 'var(--ink-2)', soft: 'var(--surface-2)', solid: 'var(--color-neutral-600)', line: 'var(--line-strong)' },
+  brand:   { fg: 'var(--brand)', soft: 'var(--brand-soft)', solid: 'var(--accent)', line: 'var(--color-primary-alpha-24)' },
+  good:    { fg: 'var(--good)', soft: 'var(--good-soft)', solid: 'var(--color-green-800)', line: 'var(--color-green-alpha-24)' },
+  bad:     { fg: 'var(--bad)', soft: 'var(--bad-soft)', solid: 'var(--color-red-700)', line: 'var(--color-red-alpha-24)' },
+  warn:    { fg: 'var(--warn)', soft: 'var(--warn-soft)', solid: 'var(--color-orange-800)', line: 'var(--color-orange-alpha-24)' },
+  feature: { fg: 'var(--color-feature-dark)', soft: 'var(--color-purple-alpha-10)', solid: 'var(--color-purple-600)', line: 'var(--color-purple-alpha-24)' },
 };
 
-export default function Badge({ children, color = 'gray' }) {
-  const c = COLORS[color] || COLORS.gray;
+// Every colour name existing callers pass, mapped to a tone.
+const COLOR_TONE = {
+  gray: 'neutral', blue: 'brand', green: 'good', red: 'bad', orange: 'warn', yellow: 'warn', purple: 'feature',
+  hot: 'bad', warm: 'warn', cold: 'brand', won: 'good', lost: 'neutral',
+  high: 'bad', medium: 'warn', low: 'neutral',
+  active: 'good', inactive: 'neutral', left: 'neutral',
+  inprogress: 'brand', completed: 'good', pending: 'warn', onhold: 'warn', cancelled: 'neutral',
+  credit: 'good', debit: 'bad', partial: 'warn',
+  fulltime: 'brand', parttime: 'brand', freelancer: 'warn', intern: 'neutral',
+};
+
+export default function Badge({ children, color = 'gray', variant = 'light', dot = false, icon: Icon, className = '', style, ...rest }) {
+  const t = TONES[COLOR_TONE[color]] || TONES[color] || TONES.neutral;
+  const look = variant === 'filled' ? { background: t.solid, color: '#fff' }
+    : variant === 'stroke' ? { background: 'transparent', color: t.fg, boxShadow: `inset 0 0 0 1px ${t.line}` }
+    : { background: t.soft, color: t.fg };
   return (
-    <span style={{
-      display: 'inline-flex', alignItems: 'center',
-      padding: '2px 8px', borderRadius: 100,
-      fontSize: 11, fontWeight: 550, letterSpacing: '0.1px',
-      background: c.bg, color: c.color,
-      whiteSpace: 'nowrap',
-    }}>
+    <span className={`badge ${className}`} style={{ ...look, ...style }} {...rest}>
+      {dot && <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor', flexShrink: 0 }} />}
+      {Icon && <Icon size={13} aria-hidden="true" />}
       {children}
     </span>
   );
 }
+export { Badge };
 
 export function getStatusColor(status) {
   const map = {

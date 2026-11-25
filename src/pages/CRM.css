@@ -1,0 +1,56 @@
+/* CRM page — layout only; colours come from the tokens in index.css */
+.crm-client { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.crm-client > div { min-width: 0; }
+.crm-due { white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.crm-due.is-overdue { color: var(--bad); font-weight: 700; }
+.crm-due.is-today { color: var(--warn); font-weight: 700; }
+
+/* Phone cards: the card opens the record, the phone button dials */
+.crm-card-row { display: flex; align-items: stretch; gap: 8px; }
+.crm-card-row .list-card { flex: 1; min-width: 0; }
+.crm-card-top { display: flex; justify-content: space-between; gap: 10px; }
+.crm-card-top .cell-main { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.crm-call { align-self: center; width: 44px; height: 44px; color: var(--good); text-decoration: none; }
+
+.crm-note { font-size: var(--fs-sm); color: var(--ink-2); }
+.crm-note button { border: none; background: none; padding: 0; font: inherit; font-weight: 600; color: var(--brand); cursor: pointer; }
+
+/* Drawer */
+.crm-quick { display: flex; gap: 8px; flex-wrap: wrap; }
+.crm-quick .mac-btn { text-decoration: none; flex: 1 1 120px; }
+.crm-status-row { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.crm-status-row .field { flex: 1 1 160px; }
+.crm-next { flex: 1 1 160px; padding: 9px 12px; border-radius: var(--r-sm); background: var(--surface-2); font-size: var(--fs-sm); color: var(--ink-2); }
+.crm-next strong { display: block; font-size: var(--fs-md); color: var(--ink); }
+.crm-next.is-overdue { background: var(--bad-soft); } .crm-next.is-overdue strong { color: var(--bad); }
+.crm-next.is-today { background: var(--warn-soft); } .crm-next.is-today strong { color: var(--warn); }
+
+.crm-log { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface-2); }
+.crm-log textarea { resize: vertical; min-height: 76px; }
+.crm-log-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.crm-presets { display: flex; gap: 6px; flex-wrap: wrap; }
+.crm-presets button { height: 36px; padding: 0 12px; border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+.crm-presets button:hover { color: var(--ink); background: var(--surface); border-color: var(--ink-3); }
+.crm-presets button.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+.crm-section { display: flex; flex-direction: column; gap: 12px; }
+.crm-link { color: var(--brand); font-weight: 600; text-decoration: none; }
+.crm-link:hover { text-decoration: underline; }
+
+.crm-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.crm-timeline li { position: relative; padding: 0 0 16px 20px; }
+.crm-timeline li::before { content: ''; position: absolute; left: 0; top: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); }
+.crm-timeline li::after { content: ''; position: absolute; left: 4px; top: 18px; bottom: 0; width: 1px; background: var(--line-strong); }
+.crm-timeline li:last-child { padding-bottom: 0; }
+.crm-timeline li:last-child::after { display: none; }
+.crm-timeline-when { font-size: var(--fs-xs); color: var(--ink-3); font-weight: 600; }
+.crm-timeline-text { font-size: var(--fs-md); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.crm-timeline-next { font-size: var(--fs-sm); color: var(--ink-2); }
+
+/* Change history (audit) */
+.crm-audit { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.crm-audit li { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.crm-audit li:last-child { border-bottom: none; }
+.crm-audit-main { flex: 1; min-width: 0; }
+.crm-audit-when { font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; }

@@ -1,0 +1,41 @@
+/* Projects page — layout-only additions on top of the shared UX kit */
+.proj-bar { height: 6px; border-radius: var(--r-pill); background: var(--line-strong); overflow: hidden; }
+.proj-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--brand); transition: width 0.3s ease; }
+.proj-bar.full > span { background: var(--good); }
+.proj-pay { display: flex; flex-direction: column; gap: 6px; min-width: 170px; }
+.proj-pay-text { font-size: var(--fs-sm); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.proj-pay-text strong { color: var(--ink); }
+
+.proj-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.proj-team { display: flex; align-items: center; }
+.proj-team .avatar { border: 2px solid var(--surface); box-sizing: content-box; }
+.proj-team .avatar + .avatar { margin-left: -8px; }
+.proj-team-more { margin-left: 6px; font-size: var(--fs-xs); color: var(--ink-2); font-weight: 600; }
+.proj-overdue { color: var(--bad); font-weight: 600; }
+.proj-row-actions { display: flex; justify-content: flex-end; }
+
+.proj-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.proj-card-top > div:first-child { min-width: 0; }
+.proj-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--fs-sm); color: var(--ink-2); }
+
+.proj-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.proj-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 14px; border-radius: var(--r-md); background: var(--good-soft); font-size: var(--fs-sm); color: var(--ink); }
+.proj-inline-form { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface-2); }
+.proj-inline-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.proj-list { display: flex; flex-direction: column; gap: 8px; }
+.proj-pay-row { display: flex; align-items: center; gap: 10px; padding: 8px 6px 8px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.proj-pay-row > div:first-child { flex: 1; min-width: 0; }
+.proj-ms { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); cursor: pointer; font-size: 13.5px; }
+.proj-ms input { width: 18px; height: 18px; flex-shrink: 0; accent-color: var(--accent); }
+.proj-ms > span:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.proj-ms.done > span:nth-child(2) { color: var(--ink-3); text-decoration: line-through; }
+.proj-ms-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 6px 8px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); font-size: 13.5px; background: var(--surface); }
+.proj-ms-add { display: grid; grid-template-columns: minmax(0, 1fr) 84px auto; gap: 8px; }
+.proj-note { font-size: var(--fs-sm); color: var(--ink-2); }
+.proj-team-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.proj-team-pick .chip { height: 36px; }
+.proj-team-list { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.proj-team-list > span { display: inline-flex; align-items: center; gap: 6px; }
+.proj-audit { display: flex; flex-direction: column; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.proj-audit:last-child { border-bottom: none; }
+.proj-audit-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }

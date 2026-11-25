@@ -1,183 +1,135 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { RiAlertFill, RiEyeLine, RiEyeOffLine, RiFolderChartLine, RiLock2Line, RiMailLine, RiTeamLine, RiWalletLine } from '@remixicon/react';
 import { useAuth } from '../contexts/AuthContext';
-import { Mail, Lock, Eye, EyeOff, AlertCircle, Loader2 } from 'lucide-react';
+import '../components/ui/theme';
+import codelixLogo from '../assets/codelix.svg';
+import { Field } from '../components/ui/kit';
+import { TextInput } from '../components/ui/Input';
+import { Button, IconButton } from '../components/ui/Button';
+
+const POINTS = [
+  { icon: RiWalletLine, title: 'Money in one place', text: 'Cash, bank and every project payment, with profit and loss always up to date.' },
+  { icon: RiFolderChartLine, title: 'Clients and projects', text: 'From the first follow-up to the final invoice.' },
+  { icon: RiTeamLine, title: 'The whole team', text: 'Tasks, chat, timesheets and salaries together.' },
+];
 
 export default function Login() {
   const { login } = useAuth();
-  const [email, setEmail]     = useState('');
-  const [password, setPassword] = useState('');
+  const emailRef = useRef(null);
+  const passwordRef = useRef(null);
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState('');
+  const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({});
 
+  // The button is never disabled: browsers autofill these fields without telling
+  // React, so the values are read from the form itself when it is submitted.
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!email || !password || loading) return;
+    if (loading) return;
+    const data = new FormData(e.currentTarget);
+    const email = String(data.get('email') || '').trim();
+    const password = String(data.get('password') || '');
+
+    const missing = {};
+    if (!email) missing.email = 'Enter your email address.';
+    else if (!/^\S+@\S+\.\S+$/.test(email)) missing.email = 'This does not look like an email address.';
+    if (!password) missing.password = 'Enter your password.';
+    setFieldErrors(missing);
     setError('');
+    if (missing.email) { emailRef.current?.focus(); return; }
+    if (missing.password) { passwordRef.current?.focus(); return; }
+
     setLoading(true);
-
-    const { error: err } = await login(email.trim(), password);
-
-    if (err) {
-      setError(err.message || 'Something went wrong. Please try again.');
-    }
+    let failure = null;
+    try {
+      const result = await login(email, password);
+      failure = result?.error || null;
+    } catch (err) { failure = err; }
+    // on success the app replaces this screen; on failure the form is usable again at once
     setLoading(false);
+    if (failure) {
+      setError(failure.status === 0 || failure.name === 'TypeError'
+        ? 'Cannot reach the server. Check your connection and try again.'
+        : failure.message || 'Could not sign you in. Please try again.');
+      passwordRef.current?.focus();
+      passwordRef.current?.select?.();
+    }
   }
 
+  const clearError = key => { if (fieldErrors[key]) setFieldErrors(x => ({ ...x, [key]: undefined })); };
+
   return (
-    <div style={{
-      minHeight: '100vh',
-      background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '24px',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif',
-    }}>
-
-      {/* Background blobs */}
-      <div style={{ position:'fixed', inset:0, overflow:'hidden', pointerEvents:'none' }}>
-        <div style={{ position:'absolute', top:'-10%', right:'-5%', width:500, height:500, borderRadius:'50%', background:'rgba(0,113,227,0.12)', filter:'blur(80px)' }}/>
-        <div style={{ position:'absolute', bottom:'-10%', left:'-5%', width:400, height:400, borderRadius:'50%', background:'rgba(175,82,222,0.1)', filter:'blur(80px)' }}/>
-      </div>
-
-      {/* Card */}
-      <div style={{
-        width: '100%', maxWidth: 400,
-        background: 'rgba(255,255,255,0.97)',
-        borderRadius: 24,
-        padding: '40px 36px',
-        boxShadow: '0 32px 80px rgba(0,0,0,0.35), 0 0 0 1px rgba(255,255,255,0.06)',
-        position: 'relative',
-        zIndex: 1,
-      }}>
-
-        {/* Brand */}
-        <div style={{ textAlign:'center', marginBottom:32 }}>
-          <div style={{
-            width: 56, height: 56, borderRadius: 16,
-            background: 'linear-gradient(135deg,#0071E3,#0A84FF)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            margin: '0 auto 14px',
-            boxShadow: '0 8px 24px rgba(0,113,227,0.35)',
-          }}>
-            <span style={{ color:'#fff', fontSize:22, fontWeight:800, letterSpacing:'-1px' }}>C</span>
-          </div>
-          <h1 style={{ fontSize:24, fontWeight:700, color:'#1D1D1F', letterSpacing:'-0.6px', margin:0 }}>
-            Codelix CRM
-          </h1>
-          <p style={{ fontSize:13.5, color:'#8E8E93', marginTop:6 }}>
-            Sign in to your account
-          </p>
+    <div className="auth-screen">
+      <aside className="auth-art" aria-hidden="true">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ width: 44, height: 44, borderRadius: 13, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 20px -8px #0d1f5299' }}>
+            <img src={codelixLogo} alt="" style={{ width: 19, height: 'auto' }} />
+          </span>
+          <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-0.015em' }}>Codelix</span>
         </div>
 
-        {/* Error */}
-        {error && (
-          <div style={{
-            display:'flex', alignItems:'flex-start', gap:8,
-            padding:'10px 12px', borderRadius:10, marginBottom:18,
-            background:'rgba(255,59,48,0.07)', border:'1px solid rgba(255,59,48,0.2)',
-          }}>
-            <AlertCircle size={14} color="#FF3B30" style={{ flexShrink:0, marginTop:1 }}/>
-            <span style={{ fontSize:12.5, color:'#FF3B30', lineHeight:1.5 }}>{error}</span>
-          </div>
-        )}
+        <div style={{ maxWidth: 440 }}>
+          <h2 style={{ fontSize: 36, lineHeight: '44px', fontWeight: 600, letterSpacing: '-0.025em', margin: 0 }}>Run the whole office from one place.</h2>
+          <ul style={{ listStyle: 'none', padding: 0, margin: '32px 0 0', display: 'flex', flexDirection: 'column', gap: 18 }}>
+            {POINTS.map(({ icon: Icon, title, text }) => (
+              <li key={title} style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                <span style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: '#ffffff24', boxShadow: 'inset 0 0 0 1px #ffffff29', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon size={18} />
+                </span>
+                <span>
+                  <span style={{ display: 'block', fontSize: 15, fontWeight: 600, lineHeight: '20px' }}>{title}</span>
+                  <span style={{ display: 'block', fontSize: 14, lineHeight: '20px', color: '#ffffffd9', marginTop: 2 }}>{text}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} style={{ display:'flex', flexDirection:'column', gap:14 }}>
+        <div style={{ fontSize: 13, color: '#ffffffc2' }}>Codelix Office Management</div>
+      </aside>
 
-          {/* Email */}
+      <main className="auth-panel">
+        <div className="auth-card">
           <div>
-            <label style={{ display:'block', fontSize:11.5, fontWeight:550, color:'#6E6E73', marginBottom:6, textTransform:'uppercase', letterSpacing:'0.4px' }}>
-              Email
-            </label>
-            <div style={{ position:'relative' }}>
-              <Mail size={15} color="#AEAEB2" style={{ position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', pointerEvents:'none' }}/>
-              <input
-                type="email"
-                value={email}
-                onChange={e => { setEmail(e.target.value); setError(''); }}
-                placeholder="you@codelix.in"
-                required
-                style={{
-                  width:'100%', boxSizing:'border-box',
-                  padding:'10px 12px 10px 36px',
-                  borderRadius:10, border:'1.5px solid rgba(0,0,0,0.12)',
-                  background:'#fff', fontSize:14, color:'#1D1D1F',
-                  outline:'none', transition:'border-color 0.15s',
-                  fontFamily:'inherit',
-                }}
-                onFocus={e => e.target.style.borderColor = '#0071E3'}
-                onBlur={e  => e.target.style.borderColor = 'rgba(0,0,0,0.12)'}
-              />
-            </div>
+            <span className="auth-logo"><img src={codelixLogo} alt="" /></span>
+            <h1 className="auth-title" style={{ marginTop: 20 }}>Welcome back</h1>
+            <p className="auth-sub">Sign in to Codelix OMS to continue.</p>
           </div>
 
-          {/* Password */}
-          <div>
-            <label style={{ display:'block', fontSize:11.5, fontWeight:550, color:'#6E6E73', marginBottom:6, textTransform:'uppercase', letterSpacing:'0.4px' }}>
-              Password
-            </label>
-            <div style={{ position:'relative' }}>
-              <Lock size={15} color="#AEAEB2" style={{ position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', pointerEvents:'none' }}/>
-              <input
-                type={showPass ? 'text' : 'password'}
-                value={password}
-                onChange={e => { setPassword(e.target.value); setError(''); }}
-                placeholder="••••••••"
-                required
-                style={{
-                  width:'100%', boxSizing:'border-box',
-                  padding:'10px 40px 10px 36px',
-                  borderRadius:10, border:'1.5px solid rgba(0,0,0,0.12)',
-                  background:'#fff', fontSize:14, color:'#1D1D1F',
-                  outline:'none', transition:'border-color 0.15s',
-                  fontFamily:'inherit',
-                }}
-                onFocus={e => e.target.style.borderColor = '#0071E3'}
-                onBlur={e  => e.target.style.borderColor = 'rgba(0,0,0,0.12)'}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPass(v => !v)}
-                style={{ position:'absolute', right:10, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', padding:4, color:'#AEAEB2' }}
-              >
-                {showPass ? <EyeOff size={15}/> : <Eye size={15}/>}
-              </button>
+          {error && (
+            <div className="auth-alert" role="alert">
+              <RiAlertFill size={16} aria-hidden="true" />
+              <span>{error}</span>
             </div>
-          </div>
+          )}
 
-          {/* Submit */}
-          <button
-            type="submit"
-            disabled={loading || !email || !password}
-            style={{
-              marginTop:4,
-              padding:'12px',
-              borderRadius:11,
-              border:'none',
-              background: loading || !email || !password
-                ? 'rgba(0,113,227,0.4)'
-                : 'linear-gradient(135deg,#0071E3,#0A84FF)',
-              color:'#fff',
-              fontSize:14.5,
-              fontWeight:600,
-              cursor: loading || !email || !password ? 'not-allowed' : 'pointer',
-              display:'flex', alignItems:'center', justifyContent:'center', gap:8,
-              transition:'opacity 0.15s',
-              fontFamily:'inherit',
-            }}
-          >
-            {loading
-              ? <><Loader2 size={16} style={{ animation:'spin 0.8s linear infinite' }}/> Signing in…</>
-              : 'Sign In'
-            }
-          </button>
-        </form>
-      </div>
+          <form onSubmit={handleSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <Field label="Email" error={fieldErrors.email}>
+              {id => (
+                <TextInput ref={emailRef} id={id} name="email" type="email" leftIcon={RiMailLine} autoComplete="username" inputMode="email"
+                  placeholder="you@codelix.in" hasError={!!fieldErrors.email} autoFocus
+                  onChange={() => { clearError('email'); if (error) setError(''); }} />
+              )}
+            </Field>
 
-      {/* Spinner keyframe */}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+            <Field label="Password" error={fieldErrors.password}>
+              {id => (
+                <TextInput ref={passwordRef} id={id} name="password" type={showPass ? 'text' : 'password'} leftIcon={RiLock2Line} autoComplete="current-password"
+                  placeholder="Your password" hasError={!!fieldErrors.password}
+                  onChange={() => { clearError('password'); if (error) setError(''); }}
+                  right={<IconButton size="small" icon={showPass ? RiEyeOffLine : RiEyeLine} label={showPass ? 'Hide password' : 'Show password'} aria-pressed={showPass} onClick={() => setShowPass(v => !v)} />} />
+              )}
+            </Field>
+
+            <Button type="submit" fullWidth loading={loading} loadingText="Signing in…" style={{ marginTop: 4 }}>Sign in</Button>
+          </form>
+
+          <p style={{ fontSize: 13, color: 'var(--ink-3)', lineHeight: '18px', margin: 0 }}>
+            Forgot your password? Ask a partner to reset it in Users &amp; Access.
+          </p>
+        </div>
+      </main>
     </div>
   );
 }

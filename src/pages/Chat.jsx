@@ -1,204 +1,433 @@
-import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, Fragment } from 'react';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import Modal from '../components/ui/Modal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { PageLoader } from '../components/ui/CodelixLoader';
-import { supabase } from '../lib/supabase';
-import { directoryDB, notificationsDB, uploadProjectFile } from '../lib/db';
+import { useToast, Drawer, Field, Chips, SkeletonRows, EmptyPanel, ErrorPanel, Avatar } from '../components/ui/kit';
+import { realtime } from '../lib/realtime';
+import { notificationsDB } from '../lib/db';
+import { uploadFile, useFileUrls } from '../lib/files';
+import { usePeople, roleLabel } from '../lib/people';
 import {
-  chat, toMessage, toChannel, toReaction, sameId, personKey, initialsOf, colorFor, fmtTime, fmtDay, fmtListTime,
+  chat, toMessage, toChannel, toReaction, toRead, sameId, personKey, colorFor, fmtTime, fmtDay, fmtListTime,
   extractMentions, formatSegments, QUICK_REACTIONS, EMOJIS, PAGE,
 } from '../lib/chat';
 import { useAuth } from '../contexts/AuthContext';
 import { useChat } from '../contexts/ChatContext';
-import { PARTNERS } from '../data/mockData';
 import {
-  Send, Paperclip, Users, X, Trash2, UserPlus, MessageSquare, FileText, Loader2, Check, CheckCheck, Hash, Search,
-  Smile, Reply, Pencil, Pin, PinOff, Copy, BellOff, Bell, Info, ArrowLeft, ArrowDown, LogOut, RotateCcw, Plus, AlertCircle,
+  Send, Paperclip, Users, X, Trash2, UserPlus, MessageSquare, FileText, Loader2, Check, CheckCheck, Search,
+  Smile, Reply, Pencil, Pin, PinOff, Copy, BellOff, Bell, Info, ArrowLeft, ArrowDown, LogOut, Plus, AlertCircle,
+  MoreHorizontal, UserX,
 } from 'lucide-react';
+import './Chat.css';
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const MAX_FILE = 20 * 1024 * 1024;
 
+const senderOf = m => ({ kind: m.senderKind, id: m.senderId });
+const isCoarse = () => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches;
+const sortChannels = cs => [...cs].sort((a, b) => new Date(b.lastMessageAt || b.createdAt || 0) - new Date(a.lastMessageAt || a.createdAt || 0));
+const previewOf = m => m.deleted ? 'This message was deleted' : m.text || (m.attachments.length ? '📎 Attachment' : '');
+
+// One message = one key, whether it is still the local optimistic copy or the saved row.
+const msgKey = m => (m.clientId ? `c:${m.clientId}` : `i:${m.id}`);
+// Add / replace rows by key, oldest → newest. Used for every merge, so a page
+// that arrives twice (or a row that arrives by fetch and by realtime) never duplicates.
+function mergeMessages(list, incoming) {
+  const map = new Map(list.map(m => [msgKey(m), m]));
+  for (const m of incoming) map.set(msgKey(m), m);
+  // unsent local messages stay at the end whatever this device's clock says
+  return [...map.values()].sort((a, b) => (a.status ? 1 : 0) - (b.status ? 1 : 0) || new Date(a.createdAt) - new Date(b.createdAt));
+}
+// Fold a freshly fetched "latest page" into what is already on screen.
+function withLatest(cur, latest) {
+  const full = latest.length === PAGE;
+  if (!cur?.list.length) return { list: latest, hasMore: full };
+  const known = new Set(cur.list.map(msgKey));
+  if (!latest.length || latest.some(m => known.has(msgKey(m)))) return { list: mergeMessages(cur.list, latest), hasMore: cur.hasMore };
+  // More than a page was missed: the old history no longer joins up, so start
+  // again from the latest page (keeping anything of mine that is still unsent).
+  return { list: mergeMessages(cur.list.filter(m => m.status), latest), hasMore: full };
+}
+
+// Unsent drafts per conversation, kept for the life of the tab.
+const DRAFTS = new Map();       // `${meKey}|${channelId}` → { text, files, replyTo }
+// Files already uploaded for a message that then failed to send — Retry reuses these.
+const UPLOADED = new WeakMap(); // File → { id, name, url, type, size }
+
+// On phones the on-screen keyboard covers the bottom of the layout viewport.
+// Shrink the chat to the visible part so the composer stays above the keyboard.
+function useKeyboardFit(onChange) {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv || !isCoarse()) return;
+    const apply = () => {
+      const el = document.querySelector('.chat-root');
+      if (!el) return;
+      const open = window.innerHeight - vv.height > 120;
+      el.style.height = open ? `${Math.round(vv.height - Math.max(0, el.getBoundingClientRect().top))}px` : '';
+      if (open) window.scrollTo(0, 0);
+      onChange();
+    };
+    vv.addEventListener('resize', apply);
+    vv.addEventListener('scroll', apply);
+    return () => {
+      vv.removeEventListener('resize', apply);
+      vv.removeEventListener('scroll', apply);
+      const el = document.querySelector('.chat-root');
+      if (el) el.style.height = '';
+    };
+  }, [onChange]);
+}
+
 export default function Chat() {
   const { isPartner, can } = useAuth();
-  const ctx = useChat();
-  const me = ctx.me;
+  const toast = useToast();
+  const { me, unread, muted, totalUnread, markRead, refreshUnread, setActive, toggleMute, isOnline } = useChat();
+  const meKey = me ? personKey(me) : null;
   const canStart = isPartner || can('chat', 'create');
-  const [params, setParams] = useSearchParams();
-  const activeId = params.get('c');
-  const setActiveId = useCallback(id => setParams(id ? { c: id } : {}, { replace: false }), [setParams]);
+  const coarse = useMemo(isCoarse, []);
 
-  const [people, setPeople] = useState([]);
+  const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const activeId = params.get('c');
+
+  // everyone I can chat with: partners + active employees, from the shared directory
+  const { people: directory } = usePeople();
+  const people = useMemo(() => directory.filter(p => p.active !== false).map(p => ({ id: p.id, name: p.name, kind: p.kind, role: roleLabel(p) })), [directory]);
   const [channels, setChannels] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [load, setLoad] = useState({ status: 'loading', error: null });
+  const [reloadKey, setReloadKey] = useState(0);
   const [msgs, setMsgs] = useState({});              // channelId → { list, hasMore }
+  const [quotedExtra, setQuotedExtra] = useState([]); // replied-to messages outside the loaded pages
   const [reactions, setReactions] = useState([]);    // active channel
-  const [reads, setReads] = useState([]);            // active channel: others' read markers
+  const [reads, setReads] = useState([]);            // active channel: read markers
+  const [pins, setPins] = useState([]);              // active channel: every pinned message
   const [typing, setTyping] = useState({});          // personKey → { name, until }
-  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [thread, setThread] = useState({ loading: false, error: null });
+  const [openTick, setOpenTick] = useState(0);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [tab, setTab] = useState('all');
+  const [filter, setFilter] = useState('all');
   const [q, setQ] = useState('');
   const [found, setFound] = useState([]);
   const [text, setText] = useState('');
   const [replyTo, setReplyTo] = useState(null);
   const [editing, setEditing] = useState(null);
   const [files, setFiles] = useState([]);            // { file, url }
+  const [composeKey, setComposeKey] = useState(null); // which conversation the composer's content belongs to
+  const [preEdit, setPreEdit] = useState('');        // what was typed before "Edit" replaced it
   const [dragOver, setDragOver] = useState(false);
   const [emojiOpen, setEmojiOpen] = useState(false);
-  const [reactFor, setReactFor] = useState(null);
+  const [menu, setMenu] = useState(null);            // { id, rect } — message whose action menu is open
   const [showNew, setShowNew] = useState(false);
-  const [showInfo, setShowInfo] = useState(false);
+  const [info, setInfo] = useState(null);            // null | 'about' | 'pins' | 'files'
   const [confirm, setConfirm] = useState(null);
   const [atBottom, setAtBottom] = useState(true);
   const [newBelow, setNewBelow] = useState(0);
   const [firstUnreadId, setFirstUnreadId] = useState(null);
   const [highlight, setHighlight] = useState(null);
-  const [tapped, setTapped] = useState(null);       // touch screens: message whose actions are open
-  const [error, setError] = useState('');
+  const [notifPerm, setNotifPerm] = useState(() => (typeof Notification === 'undefined' ? 'unsupported' : Notification.permission));
+
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
   const fileRef = useRef(null);
+  const emojiRef = useRef(null);
   const typingSent = useRef(0);
-  const typingChan = useRef(null);
-  const channelsRef = useRef([]);
-  useEffect(() => { channelsRef.current = channels; }, [channels]);
-  const activeIdRef = useRef(activeId);
-  useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
   const atBottomRef = useRef(true);
-  useEffect(() => { atBottomRef.current = atBottom; }, [atBottom]);
+  const wantBottom = useRef(false);   // scroll to the end after the next list render
+  const keepFrom = useRef(null);      // { h, top } — hold position after older messages are prepended
+  const pendingJump = useRef(null);   // message id to scroll to once its conversation has loaded
+  const shownId = useRef(null);       // conversation the scroller is currently showing
+  const olderBusy = useRef(false);
+  const resyncBusy = useRef(false);
+  const closing = useRef(null);
 
-  const isMember = useCallback(c => me && (c.members || []).some(m => sameId(m, me)), [me]);
+  // Latest values for callbacks that must not be re-created (realtime handlers).
+  const meRef = useRef(me);
+  const activeIdRef = useRef(activeId);
+  const channelsRef = useRef(channels);
+  const msgsRef = useRef(msgs);
+  const unreadRef = useRef(unread);
+  const composeRef = useRef({ text: '', editing: null });
+  const pushedRef = useRef(false);
+  useEffect(() => {
+    meRef.current = me; activeIdRef.current = activeId; channelsRef.current = channels; msgsRef.current = msgs; unreadRef.current = unread;
+    composeRef.current = { text, editing };
+    pushedRef.current = !!location.state?.chatPushed;
+  });
+
+  const isMine = useCallback(c => (c.members || []).some(m => sameId(m, meRef.current)), []);
   const active = channels.find(c => c.id === activeId) || null;
   const list = useMemo(() => msgs[activeId]?.list || [], [msgs, activeId]);
-  const byId = useMemo(() => new Map(list.map(m => [m.id, m])), [list]);
+  const hasMore = !!msgs[activeId]?.hasMore;
 
-  // ── load ─────────────────────────────────────────────────────────
+  // ── navigation: opening from the list adds ONE history entry; switching
+  //    between conversations replaces it, so Back always returns to the list.
+  const openChat = useCallback(id => {
+    if (!id || id === activeIdRef.current) return;
+    const switching = !!activeIdRef.current;
+    setParams({ c: id }, { replace: switching, state: { chatPushed: switching ? pushedRef.current : true } });
+  }, [setParams]);
+  const closeChat = useCallback(() => {
+    const id = activeIdRef.current;
+    if (!id || closing.current === id) return;
+    closing.current = id;
+    if (pushedRef.current) navigate(-1); else setParams({}, { replace: true });
+  }, [navigate, setParams]);
+  useEffect(() => { closing.current = null; }, [activeId]);
+
+  // ── load people + my conversations ──────────────────────────────
   useEffect(() => {
-    if (!me) return;
+    if (!meKey) return;
+    let off = false;
     (async () => {
       try {
-        const [team, chans] = await Promise.all([directoryDB.team(), chat.channels()]);
-        setPeople([
-          ...PARTNERS.map(p => ({ id: p, name: p, kind: 'partner', role: 'Partner' })),
-          ...team.filter(e => e.status === 'Active').map(e => ({ id: e.id, name: e.name, kind: 'employee', role: e.role || 'Team' })),
-        ]);
-        setChannels(chans.filter(isMember));
-      } catch (e) { setError(e.message); }
-      setLoading(false);
+        const chans = await chat.channels();
+        if (off) return;
+        setChannels(sortChannels(chans.filter(isMine)));
+        setLoad({ status: 'ready', error: null });
+      } catch (e) { if (!off) setLoad({ status: 'error', error: e }); }
     })();
-  }, [me, isMember]);
+    return () => { off = true; };
+  }, [meKey, reloadKey, isMine]);
 
   // tell the app-wide context which conversation is on screen
-  useEffect(() => { ctx.setActive(activeId); return () => ctx.setActive(null); }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setActive(activeId); return () => setActive(null); }, [activeId, setActive]);
 
-  // open a conversation: messages, reactions, read markers, "new messages" line
+  // a conversation I was removed from (or a stale link) → back to the list
   useEffect(() => {
-    if (!activeId || !me) return;
+    if (load.status !== 'ready' || !activeId || active || closing.current === activeId) return;
+    toast.info('That conversation is no longer available');
+    closeChat();
+  }, [load.status, activeId, active, closeChat, toast]);
+
+  // ── drafts: restored on entering a conversation, remembered as you type ─
+  // Keyed on the conversation id and on WHO I am (a string) — never on the `me`
+  // object, whose identity can change without anything really changing.
+  const draftKey = activeId && meKey ? `${meKey}|${activeId}` : null;
+  if (draftKey && composeKey !== draftKey) {
+    // a different conversation is now open: swap the composer over to its draft (during render, so there is no flash of the old text)
+    const d = DRAFTS.get(draftKey);
+    setComposeKey(draftKey);
+    setText(d?.text || ''); setFiles(d?.files || []); setReplyTo(d?.replyTo || null);
+    setEditing(null); setPreEdit(''); setEmojiOpen(false);
+  }
+  useEffect(() => {
+    if (!draftKey || composeKey !== draftKey) return;
+    const body = editing ? preEdit : text;
+    if (body.trim() || files.length || replyTo) DRAFTS.set(draftKey, { text: body, files, replyTo });
+    else DRAFTS.delete(draftKey);
+  }, [composeKey, draftKey, text, files, replyTo, editing, preEdit]);
+
+  // ── open a conversation: messages, reactions, read markers, pins ─
+  useEffect(() => {
+    if (!activeId || !meKey) return;
     let off = false;
-    const unreadNow = ctx.unread[activeId]?.unread || 0;
-    setReplyTo(null); setEditing(null); setText(''); setFiles([]); setNewBelow(0); setFirstUnreadId(null);
+    const unreadNow = unreadRef.current[activeId]?.unread || 0;
+    const cached = !!msgsRef.current[activeId];
+    setNewBelow(0); setFirstUnreadId(null); setMenu(null); setReactions([]); setReads([]); setPins([]); setQuotedExtra([]);
+    setThread({ loading: !cached, error: null });
+    atBottomRef.current = true; setAtBottom(true);
     (async () => {
-      if (!msgs[activeId]) setLoadingMsgs(true);
       try {
         const [m, r, rd] = await Promise.all([chat.messages(activeId), chat.reactions(activeId), chat.reads(activeId)]);
         if (off) return;
-        setMsgs(x => ({ ...x, [activeId]: { list: m, hasMore: m.length === PAGE } }));
+        const self = meRef.current;
+        const jump = pendingJump.current; pendingJump.current = null;
+        if (!jump) wantBottom.current = true;
+        setMsgs(x => ({ ...x, [activeId]: withLatest(x[activeId], m) }));
         setReactions(r); setReads(rd);
         if (unreadNow) {
-          const others = m.filter(x => !sameId({ kind: x.senderKind, id: x.senderId }, me) && !x.deleted);
+          const others = m.filter(x => !sameId(senderOf(x), self) && !x.deleted);
           setFirstUnreadId(others[Math.max(0, others.length - unreadNow)]?.id || null);
         }
+        setThread({ loading: false, error: null });
+        if (jump) requestAnimationFrame(() => jumpTo(jump));
         const missing = [...new Set(m.map(x => x.replyTo).filter(id => id && !m.some(y => y.id === id)))];
-        if (missing.length) chat.messagesById(missing).then(extra => !off && setMsgs(x => ({ ...x, [`ref:${activeId}`]: { list: extra } }))).catch(() => {});
-      } catch (e) { setError(e.message); }
-      setLoadingMsgs(false);
-      ctx.markRead(activeId);
-      requestAnimationFrame(() => scrollToBottom(false));
+        if (missing.length) chat.messagesById(missing).then(extra => { if (!off) setQuotedExtra(extra); }).catch(() => {});
+        chat.pinned(activeId).then(p => { if (!off) setPins(p); }).catch(() => {});
+        markRead(activeId);   // only once the messages are actually on screen
+      } catch (e) {
+        if (off) return;
+        setThread({ loading: false, error: e });
+        if (cached) toast.error('Could not refresh this conversation', e);
+      }
     })();
     return () => { off = true; };
-  }, [activeId, me]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeId, meKey, openTick, markRead]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── catch up after a gap (socket reconnect, or the tab was hidden) ─
+  // Order matters: fetch the list, the counts and the open conversation's
+  // latest page first, and mark it read only after those are on screen.
+  const resync = useCallback(async () => {
+    if (!meRef.current || resyncBusy.current) return;
+    resyncBusy.current = true;
+    const id = activeIdRef.current;
+    const withThread = !!id && !!msgsRef.current[id];
+    try {
+      const [chans, latest, rx, rd] = await Promise.all([
+        chat.channels(),
+        withThread ? chat.messages(id) : null,
+        withThread ? chat.reactions(id) : null,
+        withThread ? chat.reads(id) : null,
+        refreshUnread(),
+      ]);
+      setChannels(sortChannels(chans.filter(isMine)));
+      if (withThread && activeIdRef.current === id) {
+        const self = meRef.current;
+        const known = new Set((msgsRef.current[id]?.list || []).map(msgKey));
+        const fresh = latest.filter(m => !known.has(msgKey(m)) && !sameId(senderOf(m), self) && !m.deleted);
+        const stay = atBottomRef.current && document.visibilityState === 'visible';
+        if (stay) wantBottom.current = true;
+        setMsgs(x => ({ ...x, [id]: withLatest(x[id], latest) }));
+        setReactions(rx); setReads(rd);
+        if (fresh.length) {
+          setFirstUnreadId(cur => cur || fresh[0].id);
+          if (!stay) setNewBelow(n => n + fresh.length);
+        }
+        if (stay) markRead(id);
+      }
+    } catch (e) { console.error('chat catch-up', e); /* still offline — the next reconnect tries again */ }
+    finally { resyncBusy.current = false; }
+  }, [refreshUnread, markRead, isMine]);
+
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === 'visible') resync(); };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', resync);
+    return () => { document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('online', resync); };
+  }, [resync]);
 
   // ── realtime: messages, channels, reactions, read markers ────────
+  // Frames come from the app-wide socket (opened by ChatContext). Depends on the
+  // string meKey only, so the handlers are registered once per signed-in person
+  // and always removed on cleanup.
   useEffect(() => {
-    if (!me) return;
-    const ch = supabase.channel('chat-page-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_messages' }, ({ eventType, new: row }) => {
-        if (eventType === 'DELETE' || !row?.id) return;
-        const m = toMessage(row);
-        setMsgs(x => {
-          const cur = x[m.channelId];
-          if (!cur) return x;
-          const i = cur.list.findIndex(y => y.id === m.id || (m.clientId && y.clientId === m.clientId));
-          const next = i >= 0 ? cur.list.map((y, k) => k === i ? m : y) : [...cur.list, m];
-          return { ...x, [m.channelId]: { ...cur, list: next } };
-        });
-        if (eventType === 'INSERT' && m.channelId === activeIdRef.current && !sameId({ kind: m.senderKind, id: m.senderId }, me)) {
-          setTyping(t => { const n = { ...t }; delete n[`${m.senderKind}:${m.senderId}`]; return n; });
-          if (!atBottomRef.current) setNewBelow(n => n + 1); else requestAnimationFrame(() => scrollToBottom(true));
-        }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_channels' }, ({ eventType, new: row, old }) => {
-        if (eventType === 'DELETE') { setChannels(cs => cs.filter(c => c.id !== old.id)); return; }
-        const c = toChannel(row);
+    if (!meKey) return;
+    const onMessage = isNew => frame => {
+      if (!frame.data?.id) return;
+      const m = toMessage(frame.data);
+      // keep the conversation list's preview and order in step with the newest message
+      if (isNew) {
+        const preview = (m.text || '').trim().slice(0, 80) || (m.attachments?.length ? '📎 Attachment' : '');
+        setChannels(cs => (cs.some(c => c.id === m.channelId)
+          ? sortChannels(cs.map(c => (c.id === m.channelId ? { ...c, lastMessageAt: m.createdAt, lastMessagePreview: preview || c.lastMessagePreview } : c)))
+          : cs));
+      }
+      setMsgs(x => {
+        const cur = x[m.channelId];
+        if (!cur) return x;
+        const key = msgKey(m);
+        if (!isNew && cur.hasMore && cur.list.length && !cur.list.some(y => msgKey(y) === key)
+          && new Date(m.createdAt) < new Date(cur.list[0].createdAt)) return x;   // change to a message older than what is loaded
+        return { ...x, [m.channelId]: { ...cur, list: mergeMessages(cur.list, [m]) } };
+      });
+      if (m.channelId !== activeIdRef.current) return;
+      setPins(ps => { const rest = ps.filter(p => p.id !== m.id); return m.pinned && !m.deleted ? [m, ...rest] : rest; });
+      if (isNew && !sameId(senderOf(m), meRef.current)) {
+        setTyping(t => { const n = { ...t }; delete n[`${m.senderKind}:${m.senderId}`]; return n; });
+        if (atBottomRef.current && document.visibilityState === 'visible') wantBottom.current = true;
+        else { setNewBelow(n => n + 1); setFirstUnreadId(cur => cur || m.id); }
+      }
+    };
+    // a deleted message arrives either as the whole (now empty) message or as just its id
+    const onDeleted = frame => {
+      const id = frame.data?.id;
+      if (!id) return;
+      if (frame.data.senderId != null) { onMessage(false)({ ...frame, data: { ...frame.data, deleted: true, text: '', attachments: [] } }); return; }
+      const gone = y => (y.id === id ? { ...y, deleted: true, text: '', attachments: [], pinned: false } : y);
+      setMsgs(x => (frame.channelId && x[frame.channelId] ? { ...x, [frame.channelId]: { ...x[frame.channelId], list: x[frame.channelId].list.map(gone) } } : x));
+      setPins(ps => ps.filter(p => p.id !== id));
+    };
+    const offs = [
+      realtime.on('message.new', onMessage(true)),
+      realtime.on('message.updated', onMessage(false)),
+      realtime.on('message.deleted', onDeleted),
+      realtime.on('channel.updated', frame => {
+        if (!frame.data?.id) return;
+        const c = toChannel(frame.data);
         setChannels(cs => {
           const without = cs.filter(x => x.id !== c.id);
-          return isMember(c) ? sortChannels([c, ...without]) : without;
+          return isMine(c) ? sortChannels([c, ...without]) : without;
         });
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_reactions' }, ({ eventType, new: row, old }) => {
-        if (eventType === 'DELETE') { setReactions(rs => rs.filter(r => r.id !== old.id)); return; }
-        if (row.channel_id !== activeIdRef.current) return;
-        const r = toReaction(row);
-        setReactions(rs => rs.some(x => x.id === r.id) ? rs : [...rs, r]);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'chat_reads' }, ({ new: row }) => {
-        if (!row || row.channel_id !== activeIdRef.current) return;
-        setReads(rs => [...rs.filter(r => !(r.kind === row.member_kind && String(r.id) === String(row.member_id))), { kind: row.member_kind, id: row.member_id, lastReadAt: row.last_read_at, muted: row.muted }]);
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(ch); };
-  }, [me, isMember]); // eslint-disable-line react-hooks/exhaustive-deps
+      }),
+      realtime.on('channel.deleted', frame => {
+        const id = frame.data?.id || frame.channelId;
+        if (id) setChannels(cs => cs.filter(c => c.id !== id));
+      }),
+      realtime.on('reaction.added', frame => {
+        const r = frame.data;
+        if (!r?.id || (r.channelId || frame.channelId) !== activeIdRef.current) return;
+        setReactions(rs => (rs.some(x => x.id === r.id) ? rs : [...rs, toReaction(r)]));
+      }),
+      realtime.on('reaction.removed', frame => {
+        const id = frame.data?.id;
+        if (id) setReactions(rs => rs.filter(r => r.id !== id));
+      }),
+      realtime.on('read.updated', frame => {
+        if (!frame.data || frame.channelId !== activeIdRef.current) return;
+        const r = toRead(frame.data);
+        if (r.id == null) return;
+        setReads(rs => [...rs.filter(x => !sameId(x, r)), r]);
+      }),
+      realtime.on('typing', frame => {
+        const p = frame.data;
+        if (!p?.id || frame.channelId !== activeIdRef.current || sameId(p, meRef.current)) return;
+        setTyping(t => ({ ...t, [`${p.kind}:${p.id}`]: { name: p.name || 'Someone', until: Date.now() + 4000 } }));
+      }),
+      // the socket came back after a gap: frames were missed, so catch up from the server
+      realtime.onReconnect(() => resync()),
+    ];
+    return () => offs.forEach(off => off());
+  }, [meKey, isMine, resync]);
 
-  // typing indicator (private broadcast channel, members only)
-  useEffect(() => {
-    if (!activeId || !me) return;
-    const ch = supabase.channel(`chat:${activeId}`, { config: { private: true, broadcast: { self: false } } });
-    ch.on('broadcast', { event: 'typing' }, ({ payload }) => {
-      if (!payload?.key || payload.key === personKey(me)) return;
-      setTyping(t => ({ ...t, [payload.key]: { name: payload.name, until: Date.now() + 4000 } }));
-    }).subscribe();
-    typingChan.current = ch;
-    setTyping({});
-    return () => { supabase.removeChannel(ch); typingChan.current = null; };
-  }, [activeId, me]);
+  // typing indicator: cleared when the conversation changes; sent at most every 2.5 s
+  useEffect(() => () => setTyping({}), [activeId, meKey]);
   useEffect(() => {
     const i = setInterval(() => setTyping(t => { const now = Date.now(); const n = Object.fromEntries(Object.entries(t).filter(([, v]) => v.until > now)); return Object.keys(n).length === Object.keys(t).length ? t : n; }), 1500);
     return () => clearInterval(i);
   }, []);
   function signalTyping() {
-    if (!typingChan.current || Date.now() - typingSent.current < 2500) return;
-    typingSent.current = Date.now();
-    typingChan.current.send({ type: 'broadcast', event: 'typing', payload: { key: personKey(me), name: me.name } });
+    if (!activeId || !me || Date.now() - typingSent.current < 2500) return;
+    if (realtime.send({ type: 'typing', channelId: activeId })) typingSent.current = Date.now();
   }
-
-  // mark read when returning to the tab
-  useEffect(() => {
-    const onVis = () => { if (document.visibilityState === 'visible' && activeIdRef.current) ctx.markRead(activeIdRef.current); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => document.removeEventListener('visibilitychange', onVis);
-  }, [ctx]);
 
   // message search (server side, only my conversations)
   useEffect(() => {
-    if (q.trim().length < 2) { setFound([]); return; }
-    const t = setTimeout(() => chat.search(q.trim()).then(r => setFound(r.filter(x => channelsRef.current.some(c => c.id === x.channel_id)))).catch(() => setFound([])), 300);
+    const term = q.trim();
+    const t = setTimeout(() => {
+      if (term.length < 2) { setFound([]); return; }
+      chat.search(term).then(r => setFound(r.filter(x => channelsRef.current.some(c => c.id === x.channelId)))).catch(() => setFound([]));
+    }, term.length < 2 ? 0 : 300);
     return () => clearTimeout(t);
   }, [q]);
 
+  // close the emoji picker on an outside press
+  useEffect(() => {
+    if (!emojiOpen) return;
+    const close = e => { if (!emojiRef.current?.contains(e.target)) setEmojiOpen(false); };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [emojiOpen]);
+
   // ── scrolling ────────────────────────────────────────────────────
+  const stickToBottom = useCallback(() => {
+    const el = scrollRef.current;
+    if (el && atBottomRef.current) el.scrollTop = el.scrollHeight;
+  }, []);
+  useKeyboardFit(stickToBottom);
+
+  // After a render that changed the list: land at the end (open / send / new
+  // message while at the end) or hold position (older page prepended).
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (shownId.current !== activeId) { shownId.current = activeId; keepFrom.current = null; if (!pendingJump.current) wantBottom.current = true; }
+    if (keepFrom.current) { el.scrollTop = el.scrollHeight - keepFrom.current.h + keepFrom.current.top; keepFrom.current = null; }
+    if (wantBottom.current) { wantBottom.current = false; atBottomRef.current = true; el.scrollTop = el.scrollHeight; }
+  }, [list, thread.loading, load.status, activeId]);
+
   function scrollToBottom(smooth) {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
@@ -207,85 +436,175 @@ export default function Chat() {
   function onScroll(e) {
     const el = e.currentTarget;
     const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    atBottomRef.current = bottom;
     if (bottom !== atBottom) setAtBottom(bottom);
-    if (bottom && newBelow) { setNewBelow(0); ctx.markRead(activeId); }
-    if (el.scrollTop < 60 && msgs[activeId]?.hasMore && !loadingOlder) loadOlder();
+    if (bottom && (newBelow || unread[activeId]?.unread)) { setNewBelow(0); markRead(activeId); }
+    if (el.scrollTop < 80) loadOlder();
   }
+  // The ref guard makes a second call (scroll events arrive in bursts) a no-op,
+  // and the merge is by message id, so a page can never be added twice.
   async function loadOlder() {
-    const cur = msgs[activeId];
-    if (!cur?.list.length) return;
-    setLoadingOlder(true);
-    const el = scrollRef.current, prevH = el?.scrollHeight || 0;
+    const id = activeIdRef.current;
+    const cur = msgsRef.current[id];
+    const first = cur?.list.find(m => !m.status);
+    if (olderBusy.current || !cur?.hasMore || !first) return;
+    olderBusy.current = true; setLoadingOlder(true);
     try {
-      const older = await chat.messages(activeId, cur.list[0].createdAt);
-      setMsgs(x => ({ ...x, [activeId]: { list: [...older, ...x[activeId].list], hasMore: older.length === PAGE } }));
-      requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - prevH; });
-    } catch (e) { setError(e.message); }
-    setLoadingOlder(false);
+      const older = await chat.messages(id, first.createdAt);
+      const el = scrollRef.current;
+      if (el && activeIdRef.current === id) keepFrom.current = { h: el.scrollHeight, top: el.scrollTop };
+      setMsgs(x => (x[id] ? { ...x, [id]: { list: mergeMessages(x[id].list, older), hasMore: older.length === PAGE } } : x));
+    } catch (e) { toast.error('Could not load earlier messages', e); }
+    finally { olderBusy.current = false; setLoadingOlder(false); }
   }
   function jumpTo(id) {
     const node = document.getElementById(`msg-${id}`);
-    if (node) { node.scrollIntoView({ behavior: 'smooth', block: 'center' }); setHighlight(id); setTimeout(() => setHighlight(null), 1600); }
+    if (!node) { toast.info('That message is further back — scroll up to load earlier messages.'); return; }
+    node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlight(id); setTimeout(() => setHighlight(h => (h === id ? null : h)), 1600);
+  }
+  function openFound(f) {
+    if (f.channelId === activeId) { jumpTo(f.id); return; }
+    pendingJump.current = f.id;
+    openChat(f.channelId);
   }
 
-  // ── sending ──────────────────────────────────────────────────────
-  function addFiles(list) {
+  // ── local message state helpers ─────────────────────────────────
+  const patchMsg = (channelId, match, patch) => setMsgs(x => (x[channelId]
+    ? { ...x, [channelId]: { ...x[channelId], list: x[channelId].list.map(y => (match(y) ? (typeof patch === 'function' ? patch(y) : { ...y, ...patch }) : y)) } } : x));
+  const byMsgId = id => y => y.id === id;
+  const byClientId = id => y => y.clientId === id;
+
+  // ── composing ────────────────────────────────────────────────────
+  function addFiles(picked) {
     const ok = [], bad = [];
-    for (const f of list) (f.size > MAX_FILE ? bad : ok).push(f);
-    if (bad.length) setError(`${bad.map(f => f.name).join(', ')} ${bad.length > 1 ? 'are' : 'is'} over 20 MB`);
-    setFiles(fs => [...fs, ...ok.map(f => ({ file: f, url: f.type.startsWith('image/') ? URL.createObjectURL(f) : null }))]);
+    for (const f of picked) (f.size > MAX_FILE ? bad : ok).push(f);
+    if (bad.length) toast.error(`${bad.map(f => f.name).join(', ')} ${bad.length > 1 ? 'are' : 'is'} over 20 MB and ${bad.length > 1 ? 'were' : 'was'} not attached`);
+    if (ok.length) setFiles(fs => [...fs, ...ok.map(f => ({ file: f, url: f.type.startsWith('image/') ? URL.createObjectURL(f) : null }))]);
+  }
+  function removeFile(i) {
+    setFiles(fs => { if (fs[i]?.url) URL.revokeObjectURL(fs[i].url); return fs.filter((_, k) => k !== i); });
+  }
+  function startEdit(m) {
+    if (!editing) setPreEdit(text);
+    setEditing(m); setReplyTo(null); setText(m.text);
+    inputRef.current?.focus();
+  }
+  function cancelEdit() {
+    setEditing(null); setText(preEdit); setPreEdit('');
+  }
+  function startReply(m) {
+    if (editing) cancelEdit();
+    setReplyTo(m);
+    inputRef.current?.focus();
   }
 
-  async function send(retry) {
+  function submit() {
     if (!active || !me) return;
-    if (editing && !retry) return saveEdit();
-    const body = retry ? retry.text : text.trim();
-    const pending = retry ? [] : files;
-    if (!body && !pending.length && !retry) return;
-    const clientId = retry?.clientId || uid();
-    const mentions = extractMentions(body, people).filter(p => !sameId(p, me));
-    const reply = retry ? retry.replyTo : replyTo?.id || null;
-    const optimistic = { id: `tmp-${clientId}`, clientId, channelId: active.id, senderId: me.id, senderName: me.name, senderKind: me.kind, text: body, attachments: retry?.attachments || pending.map(f => ({ name: f.file.name, type: f.file.type, url: f.url, uploading: true })), replyTo: reply, mentions, createdAt: new Date().toISOString(), status: 'sending' };
-    setMsgs(x => ({ ...x, [active.id]: { ...(x[active.id] || { hasMore: false }), list: [...(x[active.id]?.list || []).filter(m => m.clientId !== clientId), optimistic] } }));
-    if (!retry) { setText(''); setFiles([]); setReplyTo(null); setEmojiOpen(false); }
-    requestAnimationFrame(() => scrollToBottom(true));
+    if (editing) { saveEdit(); return; }
+    const body = text.trim();
+    if (!body && !files.length) return;
+    const clientId = uid();
+    const draft = {
+      id: `tmp-${clientId}`, clientId, channelId: active.id, senderId: me.id, senderName: me.name, senderKind: me.kind, text: body,
+      // local previews only — `localFiles` holds the real File objects that get uploaded
+      attachments: files.map(f => ({ name: f.file.name, type: f.file.type, size: f.file.size, url: f.url, uploading: true })),
+      localFiles: files, replyTo: replyTo?.id || null,
+      // only people in THIS conversation can be mentioned / notified
+      mentions: extractMentions(body, (active.members || []).filter(p => !sameId(p, me))),
+      mentionTitle: `${me.name} mentioned you in ${channelLabel(active)}`,
+      editedAt: null, deleted: false, pinned: false, createdAt: new Date().toISOString(), status: 'sending',
+    };
+    wantBottom.current = true;
+    setMsgs(x => ({ ...x, [active.id]: { hasMore: false, ...x[active.id], list: mergeMessages(x[active.id]?.list || [], [draft]) } }));
+    setText(''); setFiles([]); setReplyTo(null); setEmojiOpen(false); setFirstUnreadId(null); setNewBelow(0);
+    inputRef.current?.focus();
+    deliver(draft);
+  }
+
+  // Upload (once per file) and insert. Used for the first attempt and for Retry,
+  // so a retry always sends real uploaded attachments, never blob: previews.
+  async function deliver(draft) {
     try {
-      const attachments = retry ? retry.attachments : await Promise.all(pending.map(f => uploadProjectFile(f.file)));
-      const saved = await chat.send({ channelId: active.id, me, text: body, attachments, replyTo: reply, mentions, clientId });
-      setMsgs(x => ({ ...x, [active.id]: { ...x[active.id], list: x[active.id].list.map(m => m.clientId === clientId ? saved : m) } }));
-      if (mentions.length) notificationsDB.createMany(mentions.map(p => ({ recipientKind: p.kind, recipientId: p.id, type: 'chat', title: `${me.name} mentioned you in ${channelLabel(active)}`, body: body.slice(0, 140) }))).catch(() => {});
-      ctx.markRead(active.id);
+      const attachments = await Promise.all(draft.localFiles.map(async f => {
+        if (!UPLOADED.has(f.file)) UPLOADED.set(f.file, await uploadFile(f.file, { module: 'chat', sourceId: draft.channelId, type: 'message' }));
+        return UPLOADED.get(f.file);
+      }));
+      const saved = await chat.send({ channelId: draft.channelId, text: draft.text, attachments, replyTo: draft.replyTo, mentions: draft.mentions, clientId: draft.clientId });
+      patchMsg(draft.channelId, byClientId(draft.clientId), () => saved);
+      draft.localFiles.forEach(f => f.url && URL.revokeObjectURL(f.url));
+      if (draft.mentions.length) notificationsDB.createMany(draft.mentions.map(p => ({ recipient: p, type: 'chat', title: draft.mentionTitle, body: draft.text.slice(0, 140) }))).catch(() => {});
+      if (activeIdRef.current === draft.channelId) markRead(draft.channelId);
     } catch (e) {
-      setMsgs(x => ({ ...x, [active.id]: { ...x[active.id], list: x[active.id].list.map(m => m.clientId === clientId ? { ...m, status: 'failed', error: e.message } : m) } }));
+      console.error('chat send', e);
+      patchMsg(draft.channelId, y => y.clientId === draft.clientId && !!y.status, { status: 'failed', error: e?.message || 'Network error' });
     }
+  }
+  function retrySend(m) {
+    patchMsg(m.channelId, byClientId(m.clientId), { status: 'sending', error: null });
+    deliver(m);
+  }
+  function discardFailed(m) {
+    m.localFiles?.forEach(f => f.url && URL.revokeObjectURL(f.url));
+    setMsgs(x => (x[m.channelId] ? { ...x, [m.channelId]: { ...x[m.channelId], list: x[m.channelId].list.filter(y => y.clientId !== m.clientId) } } : x));
   }
 
   async function saveEdit() {
     const body = text.trim();
-    if (!body) return;
     const m = editing;
-    setEditing(null); setText('');
-    setMsgs(x => ({ ...x, [m.channelId]: { ...x[m.channelId], list: x[m.channelId].list.map(y => y.id === m.id ? { ...y, text: body, editedAt: new Date().toISOString() } : y) } }));
-    try { await chat.edit(m.id, body); } catch (e) { setError(e.message); }
+    if (!body || !m) return;
+    const restore = preEdit;
+    setEditing(null); setText(restore); setPreEdit('');
+    if (body === m.text) return;
+    patchMsg(m.channelId, byMsgId(m.id), { text: body, editedAt: new Date().toISOString() });
+    try { await chat.edit(m.id, body); }
+    catch (e) {
+      patchMsg(m.channelId, byMsgId(m.id), { text: m.text, editedAt: m.editedAt });
+      toast.error('Could not save your edit', e);
+      // hand the edit back so nothing typed is lost
+      const c = composeRef.current;
+      if (activeIdRef.current === m.channelId && !c.editing && c.text === restore) { setPreEdit(restore); setEditing(m); setText(body); }
+    }
   }
 
   async function removeMsg(m) {
-    setMsgs(x => ({ ...x, [m.channelId]: { ...x[m.channelId], list: x[m.channelId].list.map(y => y.id === m.id ? { ...y, deleted: true, text: '', attachments: [] } : y) } }));
-    try { await chat.remove(m.id); } catch (e) { setError(e.message); }
+    patchMsg(m.channelId, byMsgId(m.id), { deleted: true, text: '', attachments: [] });
+    setPins(ps => ps.filter(p => p.id !== m.id));
+    try { await chat.remove(m.id); }
+    catch (e) {
+      patchMsg(m.channelId, byMsgId(m.id), { deleted: m.deleted, text: m.text, attachments: m.attachments });
+      if (m.pinned) setPins(ps => (ps.some(p => p.id === m.id) ? ps : [m, ...ps]));
+      toast.error('Could not delete the message', e);
+    }
   }
 
   async function togglePin(m) {
-    setMsgs(x => ({ ...x, [m.channelId]: { ...x[m.channelId], list: x[m.channelId].list.map(y => y.id === m.id ? { ...y, pinned: !m.pinned } : y) } }));
-    try { await chat.setPinned(m.id, !m.pinned); } catch (e) { setError(e.message); }
+    const next = !m.pinned;
+    patchMsg(m.channelId, byMsgId(m.id), { pinned: next });
+    setPins(ps => { const rest = ps.filter(p => p.id !== m.id); return next ? [{ ...m, pinned: true }, ...rest] : rest; });
+    try { await chat.setPinned(m.id, next); }
+    catch (e) {
+      patchMsg(m.channelId, byMsgId(m.id), { pinned: m.pinned });
+      setPins(ps => { const rest = ps.filter(p => p.id !== m.id); return m.pinned ? [m, ...rest] : rest; });
+      toast.error(next ? 'Could not pin the message' : 'Could not unpin the message', e);
+    }
   }
 
   async function toggleReaction(m, emoji) {
-    setReactFor(null);
     const mine = reactions.find(r => r.messageId === m.id && r.emoji === emoji && sameId({ kind: r.personKind, id: r.personId }, me));
-    try {
-      if (mine) { setReactions(rs => rs.filter(r => r.id !== mine.id)); await chat.unreact(mine.id); }
-      else { const r = await chat.react({ message: m, emoji, me }); setReactions(rs => rs.some(x => x.id === r.id) ? rs : [...rs, r]); }
-    } catch (e) { setError(e.message); }
+    if (mine) {
+      setReactions(rs => rs.filter(r => r.id !== mine.id));
+      try { await chat.unreact(mine.id); }
+      catch (e) { setReactions(rs => (rs.some(r => r.id === mine.id) ? rs : [...rs, mine])); toast.error('Could not remove the reaction', e); }
+    } else {
+      try { const r = await chat.react({ message: m, emoji }); setReactions(rs => (rs.some(x => x.id === r.id) ? rs : [...rs, r])); }
+      catch (e) { toast.error('Could not add the reaction', e); }
+    }
+  }
+
+  async function copyText(m) {
+    try { await navigator.clipboard.writeText(m.text); toast.success('Copied'); }
+    catch (e) { toast.error('Could not copy the message', e); }
   }
 
   // ── conversations ───────────────────────────────────────────────
@@ -294,104 +613,192 @@ export default function Chat() {
     if (c.type === 'group') return c.name || 'Group';
     return (c.members || []).find(m => !sameId(m, me))?.name || 'Direct message';
   }
-  const dmOther = c => c?.type === 'dm' ? (c.members || []).find(m => !sameId(m, me)) : null;
-  const isAdmin = c => isPartner || (c?.createdBy === me?.name) || (c?.admins || []).some(a => sameId(a, me));
+  const dmOther = c => (c?.type === 'dm' ? (c.members || []).find(m => !sameId(m, me)) : null);
+  const isAdmin = c => isPartner || (c?.admins || []).some(a => sameId(a, me));
 
-  async function startChat({ mode, picked, name, description }) {
-    if (mode === 'dm') {
+  // One person → direct message (re-using the existing one), several → group.
+  async function startChat({ picked, name, description }) {
+    let c;
+    if (picked.length === 1) {
       const other = picked[0];
-      const existing = channels.find(c => c.type === 'dm' && c.members.length === 2 && c.members.some(m => sameId(m, other)));
-      if (existing) { setActiveId(existing.id); return; }
-      const c = await chat.createChannel({ type: 'dm', members: [me, other], createdBy: me.name });
-      setChannels(cs => sortChannels([c, ...cs.filter(x => x.id !== c.id)])); setActiveId(c.id);
+      const isDmWith = x => x.type === 'dm' && x.members.length === 2 && x.members.some(m => sameId(m, other)) && x.members.some(m => sameId(m, me));
+      let existing = channelsRef.current.find(isDmWith);
+      if (!existing) {
+        // the local list can be stale — ask the server before creating a second one
+        const all = (await chat.channels()).filter(isMine);
+        existing = all.find(isDmWith);
+        if (existing) setChannels(sortChannels(all));
+      }
+      if (existing) { openChat(existing.id); return; }
+      c = await chat.createChannel({ type: 'dm', members: [me, other] });
     } else {
-      const c = await chat.createChannel({ type: 'group', name, description, members: [me, ...picked], createdBy: me.name, admins: [{ kind: me.kind, id: me.id }] });
-      setChannels(cs => sortChannels([c, ...cs.filter(x => x.id !== c.id)])); setActiveId(c.id);
+      c = await chat.createChannel({ type: 'group', name, description, members: [me, ...picked] });
     }
+    setChannels(cs => sortChannels([c, ...cs.filter(x => x.id !== c.id)]));
+    openChat(c.id);
   }
 
   async function updateActive(patch) {
-    try { const c = await chat.updateChannel(active.id, patch); setChannels(cs => cs.map(x => x.id === c.id ? c : x)); return c; }
-    catch (e) { setError(e.message); }
+    const c = await chat.updateChannel(active.id, { ...patch, version: active.version });
+    setChannels(cs => cs.map(x => (x.id === c.id ? c : x)));
+    return c;
+  }
+
+  async function runConfirm() {
+    const c = confirm;
+    if (!c) return;
+    if (c.kind === 'msg') { removeMsg(c.m); return; }   // optimistic; rolls back with a toast
+    const id = c.channel.id;
+    if (c.kind === 'member') {
+      await updateActive({ members: c.channel.members.filter(x => !sameId(x, c.member)) });
+      toast.success(`${c.member.name} removed`);
+      return;
+    }
+    if (c.kind === 'leave') {
+      try { await chat.leaveChannel(id); }
+      catch (e) {
+        // the request may have gone through even though the answer was lost — check before calling it a failure
+        const still = await chat.channels().then(all => all.some(x => x.id === id && isMine(x))).catch(() => true);
+        if (still) throw e;
+      }
+      toast.success(`You left ${channelLabel(c.channel)}`);
+    } else {
+      await chat.deleteChannel(id);
+      toast.success('Conversation deleted');
+    }
+    setInfo(null);
+    closeChat();
+    setChannels(cs => cs.filter(x => x.id !== id));
   }
 
   // ── derived ──────────────────────────────────────────────────────
+  const unreadChats = useMemo(() => channels.filter(c => unread[c.id]?.unread > 0).length, [channels, unread]);
+
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
     return channels.filter(c => {
-      if (tab === 'unread' && !(ctx.unread[c.id]?.unread > 0)) return false;
-      if (tab === 'groups' && c.type !== 'group') return false;
-      if (tab === 'dms' && c.type !== 'dm') return false;
+      if (filter === 'unread' && !(unread[c.id]?.unread > 0)) return false;
+      if (filter === 'groups' && c.type !== 'group') return false;
+      if (filter === 'dms' && c.type !== 'dm') return false;
       return !s || channelLabel(c).toLowerCase().includes(s) || (c.members || []).some(m => m.name?.toLowerCase().includes(s));
     });
-  }, [channels, tab, q, ctx.unread]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [channels, filter, q, unread, meKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reactionsByMsg = useMemo(() => {
-    const m = new Map();
-    reactions.forEach(r => { if (!m.has(r.messageId)) m.set(r.messageId, new Map()); const g = m.get(r.messageId); if (!g.has(r.emoji)) g.set(r.emoji, []); g.get(r.emoji).push(r); });
-    return m;
+    const map = new Map();
+    reactions.forEach(r => { if (!map.has(r.messageId)) map.set(r.messageId, new Map()); const g = map.get(r.messageId); if (!g.has(r.emoji)) g.set(r.emoji, []); g.get(r.emoji).push(r); });
+    return map;
   }, [reactions]);
+  const byId = useMemo(() => new Map(list.map(m => [m.id, m])), [list]);
 
+  // ── states before the two-pane app ──────────────────────────────
+  if (!me) {
+    return (
+      <div className="chat-root">
+        <Header title="Chat" />
+        <div className="page-body">
+          <EmptyPanel icon={UserX} title="Your profile has no display name — ask an admin"
+            text="Chat needs a name to show next to your messages. An admin can set it in Users & Access; then reload this page." />
+        </div>
+      </div>
+    );
+  }
+  if (load.status !== 'ready') {
+    return (
+      <div className="chat-root">
+        <Header title="Chat" subtitle={load.status === 'loading' ? 'Loading conversations…' : undefined} />
+        <div className="page-body">
+          {load.status === 'loading' ? <SkeletonRows rows={7} />
+            : <ErrorPanel title="Could not load your conversations" error={load.error} onRetry={() => { setLoad({ status: 'loading', error: null }); setReloadKey(k => k + 1); }} />}
+        </div>
+      </div>
+    );
+  }
+
+  const filtered = filter !== 'all' || q.trim().length > 0;
+  const clearFilters = () => { setFilter('all'); setQ(''); };
   const othersReads = reads.filter(r => !sameId(r, me));
   const seenBy = m => othersReads.filter(r => r.lastReadAt >= m.createdAt);
-  const lastMine = [...list].reverse().find(m => sameId({ kind: m.senderKind, id: m.senderId }, me) && !m.deleted && !m.status);
+  const lastMine = [...list].reverse().find(m => sameId(senderOf(m), me) && !m.deleted && !m.status);
   const typingNames = Object.values(typing).map(t => t.name);
-  const refMsg = id => byId.get(id) || (msgs[`ref:${activeId}`]?.list || []).find(m => m.id === id);
-  const pinnedList = list.filter(m => m.pinned && !m.deleted);
-  const sharedFiles = list.filter(m => !m.deleted).flatMap(m => m.attachments.map(a => ({ ...a, at: m.createdAt, by: m.senderName })));
-
-  if (!me || loading) return <div style={{ height: '100%' }}><Header title="Chat" /><PageLoader /></div>;
+  const refMsg = id => byId.get(id) || quotedExtra.find(m => m.id === id);
+  const pinnedList = [...new Map([...pins, ...list.filter(m => m.pinned)].map(m => [m.id, byId.get(m.id) || m])).values()]
+    .filter(m => m.pinned && !m.deleted).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const sharedFiles = list.filter(m => !m.deleted && !m.status).flatMap(m => m.attachments.map(a => ({ ...a, at: m.createdAt, by: m.senderName })));
+  const other = dmOther(active);
+  const label = channelLabel(active);
+  const isMuted = active ? !!muted[active.id] : false;
+  const menuMsg = menu ? byId.get(menu.id) : null;
+  const subtitle = `${channels.length} conversation${channels.length === 1 ? '' : 's'}${totalUnread ? ` · ${totalUnread} unread` : ''}`;
 
   return (
-    <div className="chat-root">
-      <Header title="Chat" subtitle={`${channels.length} conversation${channels.length === 1 ? '' : 's'}${ctx.totalUnread ? ` · ${ctx.totalUnread} unread` : ''}`}
+    <div className={`chat-root ${active ? 'has-active' : ''}`}>
+      <Header title="Chat" subtitle={subtitle}
         actions={<>
-          {typeof Notification !== 'undefined' && Notification.permission === 'default' && (
-            <button onClick={() => Notification.requestPermission().then(() => setError(''))} className="mac-btn mac-btn-secondary" style={{ fontSize: 12.5 }}><Bell size={13} /> <span className="chat-btn-label">Desktop alerts</span></button>
+          {notifPerm === 'default' && (
+            <button className="mac-btn mac-btn-secondary" onClick={() => Notification.requestPermission().then(setNotifPerm).catch(() => {})}><Bell size={14} /> Turn on alerts</button>
           )}
-          {canStart && <button onClick={() => setShowNew('dm')} className="mac-btn mac-btn-secondary" style={{ fontSize: 13 }}><MessageSquare size={13} /> <span className="chat-btn-label">New chat</span></button>}
-          {canStart && <button onClick={() => setShowNew('group')} className="mac-btn mac-btn-primary" style={{ fontSize: 13 }}><Users size={13} /> <span className="chat-btn-label">New group</span></button>}
+          {canStart && <button className="mac-btn mac-btn-primary" onClick={() => setShowNew(true)}><Plus size={15} /> New chat</button>}
         </>} />
 
-      {error && <div className="chat-error"><AlertCircle size={13} /> {error}<button onClick={() => setError('')} aria-label="Dismiss"><X size={12} /></button></div>}
-
-      <div className={`chat-shell ${activeId ? 'has-active' : ''}`}>
+      <div className="chat-shell">
         {/* ── conversation list ── */}
-        <aside className="chat-list">
-          <div style={{ padding: '12px 12px 8px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ position: 'relative' }}>
-              <Search size={13} style={{ position: 'absolute', left: 10, top: 11, color: '#AEAEB2' }} />
-              <input className="mac-input" value={q} onChange={e => setQ(e.target.value)} placeholder="Search chats & messages" style={{ paddingLeft: 30, fontSize: 13 }} aria-label="Search chats and messages" />
+        <aside className="chat-list" aria-label="Conversations">
+          <div className="chat-list-top">
+            <div className="toolbar-search">
+              <Search size={15} aria-hidden="true" />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search chats and messages" aria-label="Search chats and messages" />
+              {q && <button onClick={() => setQ('')} aria-label="Clear search"><X size={14} /></button>}
             </div>
-            <div className="tab-bar">
-              {[['all', 'All'], ['unread', 'Unread'], ['groups', 'Groups'], ['dms', 'Direct']].map(([k, l]) => (
-                <button key={k} className={`tab-item ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)} style={{ flex: 1, fontSize: 12, padding: '4px 6px' }}>{l}</button>
-              ))}
-            </div>
+            <Chips label="Filter conversations" value={filter} onChange={setFilter} options={[
+              { value: 'all', label: 'All' },
+              { value: 'unread', label: 'Unread', count: unreadChats || undefined },
+              { value: 'groups', label: 'Groups' },
+              { value: 'dms', label: 'Direct' },
+            ]} />
+            {filtered && (
+              <div className="chat-list-count">
+                <span>{shown.length} of {channels.length}</span>
+                <button className="chat-link-btn" onClick={clearFilters}>Clear</button>
+              </div>
+            )}
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: '0 8px 8px' }}>
-            {shown.length === 0 && <div className="chat-empty">{channels.length ? 'Nothing here' : canStart ? 'No conversations yet — start one above.' : 'No conversations yet. Someone will add you soon.'}</div>}
+          <div className="chat-list-scroll">
+            {shown.length === 0 && found.length === 0 && (
+              channels.length === 0 ? (
+                <div className="chat-empty">
+                  <MessageSquare size={26} aria-hidden="true" />
+                  <strong>No conversations yet</strong>
+                  {canStart ? <button className="mac-btn mac-btn-primary" onClick={() => setShowNew(true)}><Plus size={15} /> New chat</button>
+                    : <span>You will see a conversation here as soon as someone adds you to one.</span>}
+                </div>
+              ) : (
+                <div className="chat-empty">
+                  <strong>Nothing matches</strong>
+                  <span>{filter === 'unread' && !q.trim() ? 'You are all caught up.' : 'Try a different search or filter.'}</span>
+                  <button className="mac-btn mac-btn-secondary" onClick={clearFilters}>Show all conversations</button>
+                </div>
+              )
+            )}
             {shown.map(c => {
-              const u = ctx.unread[c.id] || {};
-              const other = dmOther(c);
-              const label = channelLabel(c);
-              const muted = ctx.muted[c.id];
+              const u = unread[c.id] || {};
+              const name = channelLabel(c);
+              const quiet = !!muted[c.id];
               return (
-                <button key={c.id} onClick={() => setActiveId(c.id)} className={`chat-row ${c.id === activeId ? 'on' : ''}`}>
-                  <span style={{ position: 'relative', flexShrink: 0 }}>
-                    <Avatar name={label} group={c.type === 'group'} size={40} />
-                    {other && ctx.isOnline(other) && <span className="chat-dot" title="Online" />}
-                  </span>
-                  <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                    <span style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
-                      <span className="chat-row-name" style={{ fontWeight: u.unread ? 700 : 560 }}>{label}</span>
-                      <span style={{ fontSize: 10.5, color: u.unread && !muted ? '#0071E3' : '#AEAEB2', flexShrink: 0 }}>{fmtListTime(c.lastMessageAt)}</span>
+                <button key={c.id} onClick={() => openChat(c.id)} className={`chat-row ${c.id === activeId ? 'on' : ''} ${u.unread ? 'unread' : ''}`} aria-current={c.id === activeId ? 'true' : undefined}>
+                  <ChatAvatar name={name} group={c.type === 'group'} size={42} online={isOnline(dmOther(c))} />
+                  <span className="chat-row-main">
+                    <span className="chat-row-line">
+                      <span className="chat-row-name">{name}</span>
+                      <span className="chat-row-time">{fmtListTime(c.lastMessageAt)}</span>
                     </span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span className="chat-row-prev" style={{ color: u.unread ? '#3C3C43' : '#8E8E93' }}>{c.lastMessagePreview || (c.type === 'group' ? `${c.members.length} members` : 'Say hello 👋')}</span>
-                      {muted && <BellOff size={11} color="#AEAEB2" />}
-                      {u.mentions > 0 && <span className="chat-badge at">@</span>}
-                      {u.unread > 0 && <span className={`chat-badge ${muted ? 'muted' : ''}`}>{u.unread > 99 ? '99+' : u.unread}</span>}
+                    <span className="chat-row-line">
+                      <span className="chat-row-prev">{c.lastMessagePreview || (c.type === 'group' ? `${c.members.length} members` : 'Say hello 👋')}</span>
+                      <span className="chat-row-flags">
+                        {quiet && <BellOff size={13} aria-label="Muted" />}
+                        {u.mentions > 0 && <span className="chat-badge at" aria-label="You were mentioned">@</span>}
+                        {u.unread > 0 && <span className={`chat-badge ${quiet ? 'muted' : ''}`} aria-label={`${u.unread} unread`}>{u.unread > 99 ? '99+' : u.unread}</span>}
+                      </span>
                     </span>
                   </span>
                 </button>
@@ -400,492 +807,578 @@ export default function Chat() {
             {found.length > 0 && (
               <>
                 <div className="chat-sec">Messages</div>
-                {found.map(f => {
-                  const c = channels.find(x => x.id === f.channel_id);
-                  return (
-                    <button key={f.id} className="chat-row" onClick={() => { setActiveId(f.channel_id); setTimeout(() => jumpTo(f.id), 700); }}>
-                      <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                        <span style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, color: '#8E8E93' }}><span>{channelLabel(c)} · {f.sender_name}</span><span>{fmtListTime(f.created_at)}</span></span>
-                        <span className="chat-row-prev" style={{ color: '#1D1D1F' }}>{f.text}</span>
+                {found.map(f => (
+                  <button key={f.id} className="chat-row" onClick={() => openFound(f)}>
+                    <span className="chat-row-main">
+                      <span className="chat-row-line">
+                        <span className="chat-row-prev">{channelLabel(channels.find(x => x.id === f.channelId))} · {f.senderName}</span>
+                        <span className="chat-row-time">{fmtListTime(f.createdAt)}</span>
                       </span>
-                    </button>
-                  );
-                })}
+                      <span className="chat-row-name" style={{ fontWeight: 500 }}>{f.text}</span>
+                    </span>
+                  </button>
+                ))}
               </>
             )}
           </div>
         </aside>
 
         {/* ── conversation ── */}
-        <section className="chat-thread" onDragOver={e => { if (active) { e.preventDefault(); setDragOver(true); } }} onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false); }}
+        <section className="chat-thread" aria-label={active ? `Conversation with ${label}` : 'Conversation'}
+          onDragOver={e => { if (active) { e.preventDefault(); setDragOver(true); } }}
+          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget)) setDragOver(false); }}
           onDrop={e => { e.preventDefault(); setDragOver(false); if (active && e.dataTransfer.files?.length) addFiles([...e.dataTransfer.files]); }}>
           {!active ? (
-            <div className="chat-placeholder"><MessageSquare size={34} color="#C7C7CC" /><div>Select a conversation{canStart ? ' or start a new one' : ''}</div></div>
+            <div className="chat-placeholder">
+              <MessageSquare size={32} aria-hidden="true" />
+              <div>Pick a conversation{canStart ? ' or start a new one' : ''}</div>
+            </div>
           ) : (
             <>
               <div className="chat-head">
-                <button className="chat-back" onClick={() => setActiveId(null)} aria-label="Back to conversations"><ArrowLeft size={16} /></button>
-                <span style={{ position: 'relative' }}><Avatar name={channelLabel(active)} group={active.type === 'group'} size={36} />{dmOther(active) && ctx.isOnline(dmOther(active)) && <span className="chat-dot" />}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14.5, fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{channelLabel(active)}</div>
-                  <div style={{ fontSize: 11.5, color: typingNames.length ? '#0071E3' : '#8E8E93', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <button className="icon-btn plain chat-back" onClick={closeChat} aria-label="Back to conversations"><ArrowLeft size={18} /></button>
+                <ChatAvatar name={label} group={active.type === 'group'} size={38} online={isOnline(other)} />
+                <button className="chat-head-text" onClick={() => setInfo('about')} aria-label={`${label} — open details`}>
+                  <div className="chat-head-name">{label}</div>
+                  <div className={`chat-head-sub ${typingNames.length ? 'typing' : ''}`}>
                     {typingNames.length ? `${typingNames.join(', ')} ${typingNames.length > 1 ? 'are' : 'is'} typing…`
-                      : active.type === 'dm' ? (ctx.isOnline(dmOther(active)) ? 'Online' : 'Offline')
-                        : `${active.members.filter(m => ctx.isOnline(m)).length} online · ${active.members.map(m => sameId(m, me) ? 'You' : m.name.split(' ')[0]).join(', ')}`}
+                      : active.type === 'dm' ? (isOnline(other) ? 'Online' : 'Offline')
+                        : `${active.members.filter(m => isOnline(m)).length} online · ${active.members.map(m => (sameId(m, me) ? 'You' : (m.name || '').split(' ')[0])).join(', ')}`}
                   </div>
-                </div>
-                {pinnedList.length > 0 && <button className="mac-btn mac-btn-secondary" style={{ fontSize: 12 }} onClick={() => setShowInfo('pins')}><Pin size={12} /> {pinnedList.length}</button>}
-                <button className="chat-icon" onClick={() => ctx.toggleMute(active.id)} title={ctx.muted[active.id] ? 'Unmute' : 'Mute'} aria-label="Mute">{ctx.muted[active.id] ? <BellOff size={15} /> : <Bell size={15} />}</button>
-                <button className="chat-icon" onClick={() => setShowInfo(s => s ? false : 'info')} title="Details" aria-label="Conversation details"><Info size={15} /></button>
+                </button>
+                {pinnedList.length > 0 && <button className="mac-btn mac-btn-secondary" style={{ padding: '8px 10px' }} onClick={() => setInfo('pins')} aria-label={`${pinnedList.length} pinned messages`}><Pin size={14} /> {pinnedList.length}</button>}
+                <button className="icon-btn plain" onClick={() => toggleMute(active.id)} aria-label={isMuted ? 'Unmute notifications' : 'Mute notifications'} aria-pressed={isMuted} title={isMuted ? 'Unmute' : 'Mute'}>{isMuted ? <BellOff size={17} /> : <Bell size={17} />}</button>
+                <button className="icon-btn plain" onClick={() => setInfo('about')} aria-label="Conversation details" title="Details"><Info size={17} /></button>
               </div>
 
               <div className="chat-body">
                 <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
-                  {loadingOlder && <div className="chat-sys"><Loader2 size={13} className="spin" /> Loading earlier messages…</div>}
-                  {!msgs[activeId]?.hasMore && list.length > 0 && <div className="chat-sys">This is the start of your conversation with {channelLabel(active)}</div>}
-                  {loadingMsgs && !list.length ? <PageLoader /> : list.length === 0 ? <div className="chat-placeholder" style={{ flex: 1 }}><span style={{ fontSize: 30 }}>👋</span><div>No messages yet. Say hello!</div></div> : list.map((m, i) => {
-                    const prev = list[i - 1];
-                    const mine = sameId({ kind: m.senderKind, id: m.senderId }, me);
-                    const newDay = !prev || fmtDay(prev.createdAt) !== fmtDay(m.createdAt);
-                    const grouped = prev && !newDay && prev.senderId === m.senderId && prev.senderKind === m.senderKind && (new Date(m.createdAt) - new Date(prev.createdAt)) < 5 * 60000 && !prev.deleted;
-                    const rx = reactionsByMsg.get(m.id);
-                    const quoted = m.replyTo ? refMsg(m.replyTo) : null;
-                    const seen = mine && m === lastMine ? seenBy(m) : null;
-                    return (
-                      <Fragment key={m.clientId || m.id}>
-                        {newDay && <div className="chat-day"><span>{fmtDay(m.createdAt)}</span></div>}
-                        {m.id === firstUnreadId && <div className="chat-new"><span>New messages</span></div>}
-                        <div id={`msg-${m.id}`} className={`chat-msg ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''} ${highlight === m.id ? 'flash' : ''}`}>
-                          {!mine && <span className="chat-msg-av">{!grouped && <Avatar name={m.senderName} size={30} />}</span>}
-                          <div className="chat-msg-col">
-                            {!mine && !grouped && active.type === 'group' && <span className="chat-sender" style={{ color: colorFor(m.senderName) }}>{m.senderName}</span>}
-                            <div className={`chat-bubble-wrap ${tapped === m.id ? 'tapped' : ''}`} onClick={e => { if (!e.target.closest('a, .chat-actions, .chat-quote')) setTapped(t => t === m.id ? null : m.id); }}>
-                              <div className={`chat-bubble ${m.deleted ? 'deleted' : ''} ${m.pinned ? 'pinned' : ''}`}>
-                                {m.pinned && !m.deleted && <span className="chat-pin"><Pin size={10} /> Pinned</span>}
-                                {quoted && !m.deleted && (
-                                  <button className="chat-quote" onClick={() => jumpTo(quoted.id)}>
-                                    <strong>{sameId({ kind: quoted.senderKind, id: quoted.senderId }, me) ? 'You' : quoted.senderName}</strong>
-                                    <span>{quoted.deleted ? 'This message was deleted' : quoted.text || (quoted.attachments.length ? '📎 Attachment' : '')}</span>
-                                  </button>
-                                )}
-                                {m.deleted ? <em>🚫 This message was deleted</em> : <>
-                                  {m.text && <div className="chat-text"><Rich text={m.text} mine={mine} /></div>}
-                                  {m.attachments.length > 0 && <Attachments items={m.attachments} mine={mine} hasText={!!m.text} />}
-                                </>}
-                                <span className="chat-meta">
-                                  {m.editedAt && !m.deleted && <span>edited</span>}
-                                  {fmtTime(m.createdAt)}
-                                  {mine && !m.deleted && (m.status === 'sending' ? <Loader2 size={11} className="spin" /> : m.status === 'failed' ? <AlertCircle size={11} color="#FF3B30" />
-                                    : (active.type === 'dm' && seenBy(m).length) ? <CheckCheck size={13} color={mine ? '#BFE0FF' : '#0071E3'} aria-label="Seen" /> : <Check size={12} aria-label="Sent" />)}
-                                </span>
-                              </div>
-                              {!m.deleted && !m.status && (
-                                <div className="chat-actions">
-                                  <button onClick={() => setReactFor(reactFor === m.id ? null : m.id)} title="React" aria-label="React"><Smile size={14} /></button>
-                                  <button onClick={() => { setReplyTo(m); setEditing(null); inputRef.current?.focus(); }} title="Reply" aria-label="Reply"><Reply size={14} /></button>
-                                  {m.text && <button onClick={() => navigator.clipboard?.writeText(m.text)} title="Copy" aria-label="Copy"><Copy size={13} /></button>}
-                                  <button onClick={() => togglePin(m)} title={m.pinned ? 'Unpin' : 'Pin'} aria-label="Pin">{m.pinned ? <PinOff size={13} /> : <Pin size={13} />}</button>
-                                  {mine && m.text && <button onClick={() => { setEditing(m); setReplyTo(null); setText(m.text); inputRef.current?.focus(); }} title="Edit" aria-label="Edit"><Pencil size={13} /></button>}
-                                  {mine && <button onClick={() => setConfirm({ kind: 'msg', m })} title="Delete" aria-label="Delete"><Trash2 size={13} /></button>}
-                                  {reactFor === m.id && (
-                                    <div className="chat-react-pop">{QUICK_REACTIONS.map(e => <button key={e} onClick={() => toggleReaction(m, e)}>{e}</button>)}</div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                            {m.status === 'failed' && <button className="chat-retry" onClick={() => send(m)}><RotateCcw size={11} /> Not sent — tap to retry</button>}
-                            {rx && (
-                              <div className="chat-rx">
-                                {[...rx.entries()].map(([emoji, rs]) => {
-                                  const minePick = rs.some(r => sameId({ kind: r.personKind, id: r.personId }, me));
-                                  return <button key={emoji} className={minePick ? 'on' : ''} title={rs.map(r => r.personName).join(', ')} onClick={() => toggleReaction(m, emoji)}>{emoji} {rs.length}</button>;
-                                })}
-                              </div>
-                            )}
-                            {seen && active.type === 'group' && seen.length > 0 && <span className="chat-seen">Seen by {seen.map(r => active.members.find(x => sameId(x, r))?.name?.split(' ')[0] || '').filter(Boolean).join(', ')}</span>}
-                          </div>
-                        </div>
-                      </Fragment>
-                    );
-                  })}
-                  {typingNames.length > 0 && <div className="chat-typing"><span /><span /><span /> <em>{typingNames.join(', ')} typing</em></div>}
+                  {thread.loading && !list.length ? (
+                    <div className="chat-skel" aria-busy="true" aria-label="Loading messages"><span /><span /><span /><span /><span /></div>
+                  ) : thread.error && !list.length ? (
+                    <div style={{ margin: 'auto', width: '100%', maxWidth: 420 }}>
+                      <ErrorPanel title="Could not load this conversation" error={thread.error} onRetry={() => setOpenTick(t => t + 1)} />
+                    </div>
+                  ) : list.length === 0 ? (
+                    <div className="chat-placeholder"><span style={{ fontSize: 30 }} aria-hidden="true">👋</span><div>No messages yet. Say hello!</div></div>
+                  ) : (
+                    <>
+                      {hasMore ? (!loadingOlder && <button className="chat-link-btn chat-sys" onClick={loadOlder}>Load earlier messages</button>)
+                        : <div className="chat-sys">This is the start of your conversation with {label}</div>}
+                      {list.map((m, i) => {
+                        const prev = list[i - 1];
+                        const mine = sameId(senderOf(m), me);
+                        const newDay = !prev || fmtDay(prev.createdAt) !== fmtDay(m.createdAt);
+                        const isNew = m.id === firstUnreadId;
+                        const grouped = !!prev && !newDay && !isNew && !prev.deleted && prev.senderId === m.senderId && prev.senderKind === m.senderKind
+                          && (new Date(m.createdAt) - new Date(prev.createdAt)) < 5 * 60000;
+                        const seen = mine && !m.status && !m.deleted ? seenBy(m) : [];
+                        return (
+                          <Fragment key={m.clientId || m.id}>
+                            {newDay && <div className="chat-day"><span>{fmtDay(m.createdAt)}</span></div>}
+                            {isNew && <div className="chat-new" role="separator">New messages</div>}
+                            <MessageRow m={m} mine={mine} grouped={grouped} me={me} isGroup={active.type === 'group'}
+                              reactions={reactionsByMsg.get(m.id)} quoted={m.replyTo ? refMsg(m.replyTo) : null}
+                              seenTick={active.type === 'dm' && seen.length > 0}
+                              seenNames={active.type === 'group' && m === lastMine ? seen.map(r => active.members.find(x => sameId(x, r))?.name?.split(' ')[0]).filter(Boolean) : null}
+                              highlight={highlight === m.id} menuOpen={menu?.id === m.id}
+                              onMenu={rect => setMenu({ id: m.id, rect })} onJump={jumpTo} onReact={toggleReaction}
+                              onRetry={retrySend} onDiscard={discardFailed} onMediaLoad={stickToBottom} />
+                          </Fragment>
+                        );
+                      })}
+                    </>
+                  )}
+                  {typingNames.length > 0 && <div className="chat-typing" aria-live="polite"><span /><span /><span /> {typingNames.join(', ')} typing</div>}
                 </div>
-                {!atBottom && <button className="chat-jump" onClick={() => { scrollToBottom(true); ctx.markRead(activeId); }} aria-label="Scroll to latest">{newBelow > 0 && <span>{newBelow}</span>}<ArrowDown size={16} /></button>}
-                {dragOver && <div className="chat-drop">Drop files to send</div>}
+                {loadingOlder && <div className="chat-older"><Loader2 size={13} className="chat-spin" /> Loading earlier messages…</div>}
+                {!atBottom && (
+                  <button className={`chat-jump ${newBelow ? 'has-new' : ''}`} onClick={() => { scrollToBottom(true); markRead(activeId); }} aria-label={newBelow ? `${newBelow} new messages — go to latest` : 'Go to latest message'}>
+                    <ArrowDown size={16} />{newBelow > 0 && <span>{newBelow === 1 ? 'New message' : `${newBelow} new messages`}</span>}
+                  </button>
+                )}
+                {dragOver && <div className="chat-drop">Drop files to attach</div>}
               </div>
 
               {/* composer */}
               <div className="chat-compose">
                 {(replyTo || editing) && (
                   <div className="chat-compose-bar">
-                    {editing ? <Pencil size={13} color="#0071E3" /> : <Reply size={13} color="#0071E3" />}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11.5, fontWeight: 650, color: '#0071E3' }}>{editing ? 'Editing message' : `Replying to ${sameId({ kind: replyTo.senderKind, id: replyTo.senderId }, me) ? 'yourself' : replyTo.senderName}`}</div>
-                      <div style={{ fontSize: 12, color: '#6E6E73', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(editing || replyTo).text || '📎 Attachment'}</div>
+                    {editing ? <Pencil size={15} aria-hidden="true" /> : <Reply size={15} aria-hidden="true" />}
+                    <div className="chat-compose-bar-text">
+                      <div className="chat-compose-bar-title">{editing ? 'Editing message' : `Replying to ${sameId(senderOf(replyTo), me) ? 'yourself' : replyTo.senderName}`}</div>
+                      <div className="chat-compose-bar-prev">{previewOf(editing || replyTo)}</div>
                     </div>
-                    <button className="chat-icon" onClick={() => { setReplyTo(null); if (editing) { setEditing(null); setText(''); } }} aria-label="Cancel"><X size={14} /></button>
+                    <button className="icon-btn plain" onClick={() => (editing ? cancelEdit() : setReplyTo(null))} aria-label={editing ? 'Cancel edit' : 'Cancel reply'}><X size={16} /></button>
                   </div>
                 )}
                 {files.length > 0 && (
                   <div className="chat-files">
                     {files.map((f, i) => (
-                      <div key={i} className="chat-file">
-                        {f.url ? <img src={f.url} alt={f.file.name} /> : <FileText size={20} color="#8E8E93" />}
+                      <div key={`${f.file.name}-${f.file.lastModified}-${i}`} className="chat-file">
+                        {f.url ? <img src={f.url} alt="" /> : <FileText size={20} aria-hidden="true" />}
                         <span>{f.file.name}</span>
-                        <button onClick={() => setFiles(fs => fs.filter((_, k) => k !== i))} aria-label={`Remove ${f.file.name}`}><X size={11} /></button>
+                        <button className="icon-btn plain" onClick={() => removeFile(i)} aria-label={`Remove ${f.file.name}`}><X size={14} /></button>
                       </div>
                     ))}
                   </div>
                 )}
                 <div className="chat-compose-row">
                   <input ref={fileRef} type="file" multiple hidden onChange={e => { addFiles([...(e.target.files || [])]); e.target.value = ''; }} />
-                  <button className="chat-icon" onClick={() => fileRef.current?.click()} title="Attach files" aria-label="Attach files"><Paperclip size={17} /></button>
-                  <div style={{ position: 'relative' }}>
-                    <button className="chat-icon" onClick={() => setEmojiOpen(o => !o)} title="Emoji" aria-label="Emoji"><Smile size={17} /></button>
-                    {emojiOpen && <div className="chat-emoji">{EMOJIS.map(e => <button key={e} onClick={() => { setText(t => t + e); inputRef.current?.focus(); }}>{e}</button>)}</div>}
+                  <button className="icon-btn plain" onClick={() => fileRef.current?.click()} disabled={!!editing} title="Attach files" aria-label="Attach files"><Paperclip size={18} /></button>
+                  <div className="chat-pop-wrap" ref={emojiRef}>
+                    <button className="icon-btn plain" onClick={() => setEmojiOpen(o => !o)} title="Emoji" aria-label="Emoji" aria-expanded={emojiOpen}><Smile size={18} /></button>
+                    {emojiOpen && (
+                      <div className="chat-emoji" role="listbox" aria-label="Emoji">
+                        {EMOJIS.map(e => <button key={e} onClick={() => { setText(t => t + e); if (!coarse) inputRef.current?.focus(); }}>{e}</button>)}
+                      </div>
+                    )}
                   </div>
-                  <Composer inputRef={inputRef} text={text} setText={setText} people={active.members.filter(p => !sameId(p, me))}
-                    onEnter={() => send()} onTyping={signalTyping} onPasteFiles={addFiles}
-                    onEscape={() => { if (editing) { setEditing(null); setText(''); } setReplyTo(null); setEmojiOpen(false); }}
-                    onArrowUpEmpty={() => { if (lastMine?.text) { setEditing(lastMine); setText(lastMine.text); } }} />
-                  <button onClick={() => send()} disabled={!text.trim() && !files.length} className="chat-send" aria-label={editing ? 'Save edit' : 'Send'}>{editing ? <Check size={17} /> : <Send size={16} />}</button>
+                  <Composer inputRef={inputRef} text={text} setText={setText} coarse={coarse}
+                    people={(active.members || []).filter(p => !sameId(p, me))}
+                    onSend={submit} onTyping={signalTyping} onPasteFiles={addFiles}
+                    onEscape={() => { if (emojiOpen) setEmojiOpen(false); else if (editing) cancelEdit(); else setReplyTo(null); }}
+                    onArrowUpEmpty={() => { if (lastMine?.text) startEdit(lastMine); }} />
+                  <button className="chat-send" onMouseDown={e => e.preventDefault()} onClick={submit} disabled={!text.trim() && !files.length} aria-label={editing ? 'Save edit' : 'Send message'}>
+                    {editing ? <Check size={18} /> : <Send size={17} />}
+                  </button>
                 </div>
-                <div className="chat-hint">Enter to send · Shift+Enter new line · ↑ edit last · *bold* _italic_ `code` · @ to mention · paste or drop files</div>
+                <div className="chat-hint">Enter to send · Shift+Enter for a new line · ↑ edits your last message · *bold* _italic_ `code` · @ to mention</div>
               </div>
             </>
           )}
         </section>
-
-        {/* ── details panel ── */}
-        {active && showInfo && (
-          <InfoPanel tab={showInfo} setTab={setShowInfo} channel={active} me={me} label={channelLabel(active)} people={people} isAdmin={isAdmin(active)} isPartner={isPartner}
-            online={ctx.isOnline} muted={ctx.muted[active.id]} onMute={() => ctx.toggleMute(active.id)} pinned={pinnedList} files={sharedFiles}
-            onJump={id => jumpTo(id)} onUpdate={updateActive}
-            onLeave={() => setConfirm({ kind: 'leave' })} onDelete={() => setConfirm({ kind: 'delete' })} onClose={() => setShowInfo(false)} />
-        )}
       </div>
 
-      {showNew && <NewChatModal mode={showNew} people={people.filter(p => !sameId(p, me))} online={ctx.isOnline} onClose={() => setShowNew(false)}
-        onCreate={async v => { try { await startChat(v); setShowNew(false); } catch (e) { setError(e.message); } }} />}
+      {menuMsg && !menuMsg.deleted && !menuMsg.status && (
+        <MessageMenu m={menuMsg} rect={menu.rect} mine={sameId(senderOf(menuMsg), me)} onClose={() => setMenu(null)}
+          myEmojis={reactions.filter(r => r.messageId === menuMsg.id && sameId({ kind: r.personKind, id: r.personId }, me)).map(r => r.emoji)}
+          onReact={e => toggleReaction(menuMsg, e)} onReply={() => startReply(menuMsg)} onCopy={() => copyText(menuMsg)}
+          onPin={() => togglePin(menuMsg)} onEdit={() => startEdit(menuMsg)} onDelete={() => setConfirm({ kind: 'msg', m: menuMsg })} />
+      )}
 
-      <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)}
-        title={confirm?.kind === 'msg' ? 'Delete message' : confirm?.kind === 'leave' ? 'Leave group' : 'Delete conversation'}
+      {active && (
+        <InfoDrawer tab={info} setTab={setInfo} channel={active} me={me} label={label} people={people} isAdmin={isAdmin(active)} isPartner={isPartner}
+          online={isOnline} muted={isMuted} onMute={() => toggleMute(active.id)} pinned={pinnedList} files={sharedFiles}
+          onJump={id => { setInfo(null); requestAnimationFrame(() => jumpTo(id)); }} onUpdate={updateActive}
+          onRemoveMember={member => setConfirm({ kind: 'member', channel: active, member })}
+          onLeave={() => setConfirm({ kind: 'leave', channel: active })} onDelete={() => setConfirm({ kind: 'delete', channel: active })} />
+      )}
+
+      {showNew && <NewChatModal people={people.filter(p => !sameId(p, me))} online={isOnline} onClose={() => setShowNew(false)} onCreate={startChat} />}
+
+      <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={runConfirm}
+        title={confirm?.kind === 'msg' ? 'Delete message' : confirm?.kind === 'leave' ? 'Leave group' : confirm?.kind === 'member' ? 'Remove member' : 'Delete conversation'}
+        confirmLabel={confirm?.kind === 'leave' ? 'Leave' : confirm?.kind === 'member' ? 'Remove' : 'Delete'}
         message={confirm?.kind === 'msg' ? 'Delete this message for everyone? Others will see “This message was deleted”.'
-          : confirm?.kind === 'leave' ? `You will stop receiving messages from ${channelLabel(active)}.` : 'Permanently delete this conversation and all its messages for everyone?'}
-        onConfirm={async () => {
-          const c = confirm; setConfirm(null);
-          try {
-            if (c.kind === 'msg') await removeMsg(c.m);
-            if (c.kind === 'leave') { await chat.updateChannel(active.id, { members: active.members.filter(m => !sameId(m, me)) }); setChannels(cs => cs.filter(x => x.id !== active.id)); setActiveId(null); setShowInfo(false); }
-            if (c.kind === 'delete') { await chat.deleteChannel(active.id); setChannels(cs => cs.filter(x => x.id !== active.id)); setActiveId(null); setShowInfo(false); }
-          } catch (e) { setError(e.message); }
-        }} />
-
-      <style>{CHAT_CSS}</style>
+          : confirm?.kind === 'leave' ? `You will stop receiving messages from ${channelLabel(confirm.channel)}. Someone in the group will have to add you back.`
+            : confirm?.kind === 'member' ? `Remove ${confirm.member.name} from ${channelLabel(confirm.channel)}? They will no longer see this conversation.`
+              : 'Permanently delete this conversation and all its messages for everyone? This cannot be undone.'} />
     </div>
   );
 }
 
-const sortChannels = cs => [...cs].sort((a, b) => new Date(b.lastMessageAt || b.createdAt || 0) - new Date(a.lastMessageAt || a.createdAt || 0));
-
-function Avatar({ name, group, size = 36 }) {
-  const c = colorFor(name || '');
-  return <span className="chat-av" style={{ width: size, height: size, borderRadius: group ? size * 0.3 : '50%', background: group ? 'linear-gradient(135deg,#AF52DE,#5856D6)' : c, fontSize: size * 0.36 }}>
-    {group ? <Hash size={size * 0.42} /> : initialsOf(name)}
-  </span>;
+function ChatAvatar({ name, group, size = 36, online }) {
+  return (
+    <span className="chat-av-wrap">
+      {group
+        ? <span className="avatar chat-av-group" style={{ width: size, height: size }} title={name}><Users size={Math.round(size * 0.46)} /></span>
+        : <Avatar name={name || ''} size={size} />}
+      {online && <span className="chat-dot" title="Online" />}
+    </span>
+  );
 }
 
-function Rich({ text, mine }) {
+function Rich({ text }) {
   return formatSegments(text).map((s, i) => {
-    if (s.t === 'link') return <a key={i} href={s.v} target="_blank" rel="noreferrer" style={{ color: mine ? '#fff' : '#0071E3', textDecoration: 'underline' }}>{s.v}</a>;
+    if (s.t === 'link') return <a key={i} href={s.v} target="_blank" rel="noreferrer">{s.v}</a>;
     if (s.t === 'code') return <code key={i} className="chat-code">{s.v}</code>;
     if (s.t === 'bold') return <strong key={i}>{s.v}</strong>;
     if (s.t === 'italic') return <em key={i}>{s.v}</em>;
-    if (s.t === 'mention') return <span key={i} style={{ fontWeight: 650, color: mine ? '#fff' : '#0071E3', background: mine ? 'rgba(255,255,255,0.18)' : 'rgba(0,113,227,0.08)', borderRadius: 4, padding: '0 3px' }}>{s.v}</span>;
+    if (s.t === 'mention') return <span key={i} className="chat-at">{s.v}</span>;
     return <Fragment key={i}>{s.v}</Fragment>;
   });
 }
 
-function Attachments({ items, mine, hasText }) {
+const fmtSize = n => (n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toFixed(1)} MB`);
+
+function Attachments({ items, below, onMediaLoad }) {
   const imgs = items.filter(a => a.type?.startsWith('image/'));
   const docs = items.filter(a => !a.type?.startsWith('image/'));
+  const urlOf = useFileUrls(items);   // stored links expire; these are fresh ones
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: hasText ? 6 : 0 }}>
-      {imgs.length > 0 && <div className={`chat-imgs n${Math.min(imgs.length, 4)}`}>{imgs.slice(0, 4).map((a, i) => (
-        <a key={i} href={a.uploading ? undefined : a.url} target="_blank" rel="noreferrer" style={{ position: 'relative' }}>
-          <img src={a.url} alt={a.name} style={{ opacity: a.uploading ? 0.5 : 1 }} />
-          {i === 3 && imgs.length > 4 && <span className="chat-more">+{imgs.length - 4}</span>}
-        </a>
-      ))}</div>}
+    <div className={`chat-att ${below ? 'below' : ''}`}>
+      {imgs.length > 0 && (
+        <div className={`chat-imgs n${Math.min(imgs.length, 4)}`}>
+          {imgs.slice(0, 4).map((a, i) => (
+            <a key={i} href={a.uploading ? undefined : urlOf(a)} target="_blank" rel="noreferrer">
+              <img src={a.uploading ? a.url : urlOf(a)} alt={a.name} className={a.uploading ? 'uploading' : ''} onLoad={onMediaLoad} />
+              {i === 3 && imgs.length > 4 && <span className="chat-imgs-more">+{imgs.length - 4}</span>}
+            </a>
+          ))}
+        </div>
+      )}
       {docs.map((a, i) => (
-        <a key={i} href={a.uploading ? undefined : a.url} target="_blank" rel="noreferrer" className="chat-doc" style={{ background: mine ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.05)' }}>
-          {a.uploading ? <Loader2 size={15} className="spin" /> : <FileText size={15} />}
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</span>
-          {a.size ? <span style={{ opacity: 0.7, fontSize: 10.5, flexShrink: 0 }}>{a.size < 1048576 ? `${Math.round(a.size / 1024)} KB` : `${(a.size / 1048576).toFixed(1)} MB`}</span> : null}
+        <a key={i} href={a.uploading ? undefined : urlOf(a)} target="_blank" rel="noreferrer" className="chat-doc">
+          {a.uploading ? <Loader2 size={15} className="chat-spin" /> : <FileText size={15} />}
+          <span>{a.name}</span>
+          {a.size ? <span className="chat-doc-size">{fmtSize(a.size)}</span> : null}
         </a>
       ))}
     </div>
   );
 }
 
-// Auto-growing input with @mention suggestions
-function Composer({ inputRef, text, setText, people, onEnter, onTyping, onPasteFiles, onEscape, onArrowUpEmpty }) {
+function MessageRow({ m, mine, grouped, me, isGroup, reactions, quoted, seenTick, seenNames, highlight, menuOpen, onMenu, onJump, onReact, onRetry, onDiscard, onMediaLoad }) {
+  const press = useRef(null);
+  const canAct = !m.deleted && !m.status;
+  const rectOf = wrap => (wrap.querySelector('.chat-bubble') || wrap).getBoundingClientRect();
+  const stopPress = () => clearTimeout(press.current);
+  useEffect(() => () => clearTimeout(press.current), []);
+  // long-press (touch) and right-click both open the one action menu
+  const touch = canAct ? {
+    onTouchStart: e => { const wrap = e.currentTarget; stopPress(); press.current = setTimeout(() => onMenu(rectOf(wrap)), 450); },
+    onTouchEnd: stopPress, onTouchMove: stopPress, onTouchCancel: stopPress,
+    onContextMenu: e => { if (e.target.closest('a')) return; e.preventDefault(); stopPress(); onMenu(rectOf(e.currentTarget)); },
+  } : {};
+  return (
+    <div id={`msg-${m.id}`} className={`chat-msg ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''} ${highlight ? 'flash' : ''}`}>
+      {!mine && <span className="chat-msg-av">{!grouped && <Avatar name={m.senderName || ''} size={30} />}</span>}
+      <div className="chat-msg-col">
+        {!mine && !grouped && isGroup && <span className="chat-sender" style={{ color: colorFor(m.senderName) }}>{m.senderName}</span>}
+        <div className={`chat-bubble-wrap ${menuOpen ? 'menu-open' : ''}`} {...touch}>
+          <div className={`chat-bubble ${m.deleted ? 'deleted' : ''} ${m.status === 'failed' ? 'failed' : ''}`}>
+            {m.pinned && !m.deleted && <span className="chat-pin"><Pin size={11} /> Pinned</span>}
+            {quoted && !m.deleted && (
+              <button className="chat-quote" onClick={() => onJump(quoted.id)}>
+                <strong>{sameId(senderOf(quoted), me) ? 'You' : quoted.senderName}</strong>
+                <span>{previewOf(quoted)}</span>
+              </button>
+            )}
+            {m.deleted ? <span>This message was deleted</span> : (
+              <>
+                {m.text && <div className="chat-text"><Rich text={m.text} /></div>}
+                {m.attachments.length > 0 && <Attachments items={m.attachments} below={!!m.text} onMediaLoad={onMediaLoad} />}
+              </>
+            )}
+            <span className="chat-meta">
+              {m.editedAt && !m.deleted && <span>edited ·</span>}
+              {fmtTime(m.createdAt)}
+              {mine && !m.deleted && (m.status === 'sending' ? <Loader2 size={12} className="chat-spin" aria-label="Sending" />
+                : m.status === 'failed' ? <AlertCircle size={12} aria-label="Not sent" />
+                  : seenTick ? <CheckCheck size={14} className="seen" aria-label="Seen" /> : <Check size={13} aria-label="Sent" />)}
+            </span>
+          </div>
+          {canAct && (
+            <button className="chat-more-btn" aria-label="Message actions" aria-haspopup="menu" aria-expanded={menuOpen}
+              onClick={e => onMenu(rectOf(e.currentTarget.parentElement))}><MoreHorizontal size={16} /></button>
+          )}
+        </div>
+        {m.status === 'failed' && (
+          <div className="chat-failed" role="alert">
+            <AlertCircle size={13} aria-hidden="true" /> Failed —
+            <button onClick={() => onRetry(m)}>Retry</button>
+            <button className="quiet" onClick={() => onDiscard(m)}>Discard</button>
+          </div>
+        )}
+        {reactions && (
+          <div className="chat-rx">
+            {[...reactions.entries()].map(([emoji, rs]) => (
+              <button key={emoji} className={rs.some(r => sameId({ kind: r.personKind, id: r.personId }, me)) ? 'on' : ''}
+                title={rs.map(r => r.personName).join(', ')} onClick={() => onReact(m, emoji)}>{emoji} {rs.length}</button>
+            ))}
+          </div>
+        )}
+        {seenNames?.length > 0 && <span className="chat-seen">Seen by {seenNames.join(', ')}</span>}
+      </div>
+    </div>
+  );
+}
+
+// One small menu for every message action. Anchored to the bubble on desktop,
+// a bottom sheet on phones (see Chat.css).
+function MessageMenu({ m, rect, mine, myEmojis, onClose, onReact, onReply, onCopy, onPin, onEdit, onDelete }) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const pad = 8, w = el.offsetWidth, h = el.offsetHeight;
+    const left = Math.min(Math.max(pad, mine ? rect.right - w : rect.left), window.innerWidth - w - pad);
+    const below = rect.bottom + 6;
+    const top = below + h > window.innerHeight - pad ? Math.max(pad, rect.top - h - 6) : below;
+    el.style.left = `${left}px`; el.style.top = `${top}px`; el.style.visibility = 'visible';
+    el.querySelector('.menu-item')?.focus();
+  }, [rect, mine]);
+  useEffect(() => {
+    const onKey = e => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [onClose]);
+  const run = fn => () => { onClose(); fn(); };
+  return (
+    <div className="chat-menu-layer" onClick={onClose} onContextMenu={e => { e.preventDefault(); onClose(); }}>
+      <div ref={ref} className="chat-menu" role="menu" aria-label="Message actions" style={{ visibility: 'hidden' }} onClick={e => e.stopPropagation()}>
+        <div className="chat-menu-rx">
+          {QUICK_REACTIONS.map(e => <button key={e} className={myEmojis.includes(e) ? 'on' : ''} onClick={run(() => onReact(e))} aria-label={`React ${e}`}>{e}</button>)}
+        </div>
+        <button className="menu-item" role="menuitem" onClick={run(onReply)}><Reply size={15} /> Reply</button>
+        {m.text && <button className="menu-item" role="menuitem" onClick={run(onCopy)}><Copy size={15} /> Copy text</button>}
+        <button className="menu-item" role="menuitem" onClick={run(onPin)}>{m.pinned ? <><PinOff size={15} /> Unpin</> : <><Pin size={15} /> Pin</>}</button>
+        {mine && m.text && <button className="menu-item" role="menuitem" onClick={run(onEdit)}><Pencil size={15} /> Edit</button>}
+        {mine && <button className="menu-item danger" role="menuitem" onClick={run(onDelete)}><Trash2 size={15} /> Delete</button>}
+      </div>
+    </div>
+  );
+}
+
+// Auto-growing input with @mention suggestions (members of this conversation only).
+function Composer({ inputRef, text, setText, people, coarse, onSend, onTyping, onPasteFiles, onEscape, onArrowUpEmpty }) {
   const [sel, setSel] = useState(0);
   const query = (text.match(/(?:^|\s)@([\w]*)$/) || [])[1];
-  const opts = query != null ? people.filter(p => p.name.toLowerCase().split(' ').some(w => w.startsWith(query.toLowerCase()))).slice(0, 6) : [];
+  const opts = query != null ? people.filter(p => (p.name || '').toLowerCase().split(' ').some(w => w.startsWith(query.toLowerCase()))).slice(0, 6) : [];
   useEffect(() => {
     const el = inputRef.current;
-    if (el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 160) + 'px'; }
+    if (el) { el.style.height = 'auto'; el.style.height = `${Math.min(el.scrollHeight, 160)}px`; }
   }, [text, inputRef]);
   const pick = p => { setText(text.replace(/@[\w]*$/, `@${p.name} `)); setSel(0); inputRef.current?.focus(); };
   return (
-    <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+    <div className="chat-compose-field">
       {opts.length > 0 && (
-        <div className="chat-mention">
-          {opts.map((p, i) => <button key={personKey(p)} className={i === sel ? 'on' : ''} onMouseDown={e => { e.preventDefault(); pick(p); }}><Avatar name={p.name} size={22} /> {p.name}</button>)}
+        <div className="chat-mention" role="listbox" aria-label="Mention someone">
+          {opts.map((p, i) => (
+            <button key={personKey(p)} role="option" aria-selected={i === sel} className={i === sel ? 'on' : ''} onMouseDown={e => { e.preventDefault(); pick(p); }}>
+              <Avatar name={p.name} size={24} /> {p.name}
+            </button>
+          ))}
         </div>
       )}
-      <textarea ref={inputRef} rows={1} className="chat-input" value={text} placeholder="Type a message" aria-label="Message"
+      <textarea ref={inputRef} rows={1} className="chat-input" value={text} placeholder="Message" aria-label="Message"
+        enterKeyHint={coarse ? 'enter' : 'send'}
         onChange={e => { setText(e.target.value); onTyping(); }}
         onPaste={e => { const fs = [...(e.clipboardData?.files || [])]; if (fs.length) { e.preventDefault(); onPasteFiles(fs); } }}
         onKeyDown={e => {
+          // never act on keys that belong to an IME composition (Gujarati / Hindi keyboards etc.)
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
           if (opts.length) {
             if (e.key === 'ArrowDown') { e.preventDefault(); setSel(s => (s + 1) % opts.length); return; }
             if (e.key === 'ArrowUp') { e.preventDefault(); setSel(s => (s - 1 + opts.length) % opts.length); return; }
             if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(opts[sel] || opts[0]); return; }
           }
-          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); onEnter(); }
-          if (e.key === 'Escape') onEscape();
+          // desktop: Enter sends, Shift+Enter is a new line. Touch keyboards: Enter is a new line, the Send button sends.
+          if (e.key === 'Enter' && !e.shiftKey && !coarse) { e.preventDefault(); onSend(); return; }
+          if (e.key === 'Escape') { onEscape(); return; }
           if (e.key === 'ArrowUp' && !text) { e.preventDefault(); onArrowUpEmpty(); }
         }} />
     </div>
   );
 }
 
-function NewChatModal({ mode: initial, people, online, onClose, onCreate }) {
-  const [mode, setMode] = useState(initial);
+// One picker for both kinds: one person = direct message, several + a name = group.
+function NewChatModal({ people, online, onClose, onCreate }) {
+  const toast = useToast();
   const [picked, setPicked] = useState([]);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
-  const toggle = p => setPicked(ps => ps.some(x => sameId(x, p)) ? ps.filter(x => !sameId(x, p)) : mode === 'dm' ? [p] : [...ps, p]);
-  const shown = people.filter(p => p.name.toLowerCase().includes(q.toLowerCase()));
-  const ok = mode === 'dm' ? picked.length === 1 : name.trim() && picked.length > 0;
+  const [errors, setErrors] = useState({});
+  const group = picked.length > 1;
+  const toggle = p => { setErrors({}); setPicked(ps => (ps.some(x => sameId(x, p)) ? ps.filter(x => !sameId(x, p)) : [...ps, p])); };
+  const shown = people.filter(p => p.name.toLowerCase().includes(q.trim().toLowerCase()));
+  // start in the search box on desktop; on phones leave the keyboard down so the list is visible
+  const searchRef = useRef(null);
+  useEffect(() => { if (!isCoarse()) searchRef.current?.focus(); }, []);
+
+  async function submit(e) {
+    e?.preventDefault();
+    if (busy) return;
+    const next = {};
+    if (!picked.length) next.people = 'Pick at least one person.';
+    if (group && !name.trim()) next.name = 'Give the group a name.';
+    setErrors(next);
+    if (Object.keys(next).length) return;
+    setBusy(true);
+    try {
+      await onCreate({ picked, name: name.trim(), description: desc.trim() });
+      onClose();
+    } catch (err) {
+      toast.error(group ? 'Could not create the group' : 'Could not start the chat', err);
+      setBusy(false);
+    }
+  }
+
   return (
-    <Modal isOpen onClose={onClose} title={mode === 'dm' ? 'New chat' : 'New group'} size="sm">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="tab-bar">{[['dm', 'Direct message'], ['group', 'Group']].map(([k, l]) => <button key={k} className={`tab-item ${mode === k ? 'active' : ''}`} style={{ flex: 1 }} onClick={() => { setMode(k); setPicked([]); }}>{l}</button>)}</div>
-        {mode === 'group' && <>
-          <input className="mac-input" value={name} onChange={e => setName(e.target.value)} placeholder="Group name, e.g. Vedora team" autoFocus aria-label="Group name" />
-          <input className="mac-input" value={desc} onChange={e => setDesc(e.target.value)} placeholder="What is this group for? (optional)" aria-label="Group description" />
-        </>}
-        <input className="mac-input" value={q} onChange={e => setQ(e.target.value)} placeholder="Search people" aria-label="Search people" />
-        <div style={{ maxHeight: 280, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
+    <Modal isOpen onClose={busy ? undefined : onClose} title="New chat" size="sm"
+      footer={<>
+        <button type="button" className="mac-btn mac-btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+        <button type="submit" form="new-chat-form" className="mac-btn mac-btn-primary" disabled={busy}>
+          {busy ? (group ? 'Creating…' : 'Opening…') : group ? `Create group (${picked.length + 1})` : picked.length === 1 ? `Message ${picked[0].name.split(' ')[0]}` : 'Start chat'}
+        </button>
+      </>}>
+      <form id="new-chat-form" className="chat-stack" onSubmit={submit} noValidate>
+        <Field label="People" required error={errors.people} hint="Pick one person for a direct message, or several to make a group.">
+          {id => (
+            <div className="toolbar-search" style={{ maxWidth: 'none', flex: 'none' }}>
+              <Search size={15} aria-hidden="true" />
+              <input id={id} ref={searchRef} value={q} onChange={e => setQ(e.target.value)} placeholder="Search people" />
+              {q && <button type="button" onClick={() => setQ('')} aria-label="Clear search"><X size={14} /></button>}
+            </div>
+          )}
+        </Field>
+        {picked.length > 0 && (
+          <div className="chat-picked" aria-label="Selected people">
+            {picked.map(p => <button type="button" key={personKey(p)} onClick={() => toggle(p)} aria-label={`Remove ${p.name}`}>{p.name} <X size={13} /></button>)}
+          </div>
+        )}
+        <div className="chat-people" role="listbox" aria-multiselectable="true" aria-label="People">
+          {shown.length === 0 && <div className="chat-empty">{people.length ? 'No one matches that search.' : 'There is no one else to chat with yet.'}</div>}
           {shown.map(p => {
             const on = picked.some(x => sameId(x, p));
             return (
-              <button key={personKey(p)} className={`chat-row ${on ? 'on' : ''}`} onClick={() => toggle(p)} onDoubleClick={() => mode === 'dm' && onCreate({ mode, picked: [p] })}>
-                <span style={{ position: 'relative' }}><Avatar name={p.name} size={32} />{online(p) && <span className="chat-dot" />}</span>
-                <span style={{ flex: 1, textAlign: 'left' }}><span style={{ display: 'block', fontSize: 13, fontWeight: 560 }}>{p.name}</span><span style={{ fontSize: 11, color: '#8E8E93' }}>{p.role}{online(p) ? ' · online' : ''}</span></span>
-                {on && <Check size={15} color="#0071E3" />}
+              <button type="button" key={personKey(p)} role="option" aria-selected={on} className={`chat-row chat-person ${on ? 'on' : ''}`} onClick={() => toggle(p)}>
+                <ChatAvatar name={p.name} size={34} online={online(p)} />
+                <span className="chat-row-main">
+                  <span className="chat-row-name">{p.name}</span>
+                  <span className="chat-row-prev">{p.role}{online(p) ? ' · online' : ''}</span>
+                </span>
+                <span className="chat-person-check" aria-hidden="true">{on && <Check size={14} />}</span>
               </button>
             );
           })}
         </div>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button onClick={onClose} className="mac-btn mac-btn-secondary" style={{ fontSize: 13 }}>Cancel</button>
-          <button disabled={!ok || busy} onClick={async () => { setBusy(true); await onCreate({ mode, picked, name: name.trim(), description: desc.trim() }); setBusy(false); }} className="mac-btn mac-btn-primary" style={{ fontSize: 13 }}>
-            {mode === 'dm' ? 'Start chat' : `Create group${picked.length ? ` (${picked.length + 1})` : ''}`}
-          </button>
-        </div>
-      </div>
+        {group && (
+          <>
+            <Field label="Group name" required error={errors.name}>
+              {id => <input id={id} className="mac-input" value={name} onChange={e => { setName(e.target.value); setErrors(x => ({ ...x, name: undefined })); }} placeholder="e.g. Vedora team" maxLength={60} />}
+            </Field>
+            <Field label="What is it for?" hint="Optional">
+              {id => <input id={id} className="mac-input" value={desc} onChange={e => setDesc(e.target.value)} maxLength={140} />}
+            </Field>
+          </>
+        )}
+      </form>
     </Modal>
   );
 }
 
-function InfoPanel({ tab, setTab, channel, me, label, people, isAdmin, isPartner, online, muted, onMute, pinned, files, onJump, onUpdate, onLeave, onDelete, onClose }) {
+function InfoDrawer({ tab, setTab, channel, me, label, people, isAdmin, isPartner, online, muted, onMute, pinned, files, onJump, onUpdate, onRemoveMember, onLeave, onDelete }) {
+  const toast = useToast();
+  const urlOf = useFileUrls(files);
   const [name, setName] = useState(channel.name || '');
   const [desc, setDesc] = useState(channel.description || '');
+  const [nameError, setNameError] = useState('');
   const [adding, setAdding] = useState(false);
-  useEffect(() => { setName(channel.name || ''); setDesc(channel.description || ''); }, [channel.id, channel.name, channel.description]);
+  const [busy, setBusy] = useState(false);
+  // reset the form when another conversation is shown, or someone else edits this one
+  const [seen, setSeen] = useState({ id: channel.id, name: channel.name, description: channel.description });
+  if (seen.id !== channel.id || seen.name !== channel.name || seen.description !== channel.description) {
+    setSeen({ id: channel.id, name: channel.name, description: channel.description });
+    setName(channel.name || ''); setDesc(channel.description || ''); setNameError('');
+    if (seen.id !== channel.id) setAdding(false);
+  }
   const group = channel.type === 'group';
+  const other = group ? null : channel.members.find(m => !sameId(m, me));
   const notIn = people.filter(p => !channel.members.some(m => sameId(m, p)));
+  const dirty = name.trim() !== (channel.name || '') || desc.trim() !== (channel.description || '');
+
+  async function saveAbout(e) {
+    e.preventDefault();
+    if (busy || !dirty) return;
+    if (!name.trim()) { setNameError('A group needs a name.'); return; }
+    setBusy(true);
+    try { await onUpdate({ name: name.trim(), description: desc.trim() }); toast.success('Group details saved'); }
+    catch (err) { toast.error('Could not save the group details', err); }
+    setBusy(false);
+  }
+  async function addMember(p) {
+    if (busy) return;
+    setBusy(true);
+    try { await onUpdate({ members: [...channel.members, { id: p.id, name: p.name, kind: p.kind }] }); toast.success(`${p.name} added`); }
+    catch (err) { toast.error(`Could not add ${p.name}`, err); }
+    setBusy(false);
+  }
+
   return (
-    <aside className="chat-info">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: '1px solid rgba(0,0,0,0.07)' }}>
-        <div className="tab-bar" style={{ flex: 1 }}>
-          {[['info', 'About'], ['pins', `Pinned${pinned.length ? ` ${pinned.length}` : ''}`], ['files', 'Files']].map(([k, l]) => <button key={k} className={`tab-item ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)} style={{ flex: 1, fontSize: 12 }}>{l}</button>)}
-        </div>
-        <button className="chat-icon" onClick={onClose} aria-label="Close details"><X size={15} /></button>
-      </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {tab === 'info' && <>
-          <div style={{ textAlign: 'center' }}><Avatar name={label} group={group} size={64} /><div style={{ fontSize: 15, fontWeight: 680, marginTop: 8 }}>{label}</div>
-            <div style={{ fontSize: 12, color: '#8E8E93' }}>{group ? `Group · ${channel.members.length} members` : online(channel.members.find(m => !sameId(m, me))) ? 'Online' : 'Offline'}</div></div>
-          {group && isAdmin && <>
-            <input className="mac-input" value={name} onChange={e => setName(e.target.value)} onBlur={() => name.trim() && name !== channel.name && onUpdate({ name: name.trim() })} aria-label="Group name" />
-            <textarea className="mac-input" rows={2} value={desc} onChange={e => setDesc(e.target.value)} onBlur={() => desc !== (channel.description || '') && onUpdate({ description: desc })} placeholder="Add a description" aria-label="Description" />
-          </>}
-          {group && !isAdmin && channel.description && <div style={{ fontSize: 12.5, color: '#3C3C43' }}>{channel.description}</div>}
-          <button className="mac-btn mac-btn-secondary" style={{ fontSize: 12.5 }} onClick={onMute}>{muted ? <><Bell size={13} /> Unmute notifications</> : <><BellOff size={13} /> Mute notifications</>}</button>
+    <Drawer isOpen={!!tab} onClose={() => setTab(null)} width={420} title={label}
+      subtitle={group ? `Group · ${channel.members.length} members` : online(other) ? 'Online' : 'Offline'}>
+      <Chips label="Details" value={tab} onChange={setTab} options={[
+        { value: 'about', label: 'About' },
+        { value: 'pins', label: 'Pinned', count: pinned.length || undefined },
+        { value: 'files', label: 'Files', count: files.length || undefined },
+      ]} />
+
+      {tab === 'about' && (
+        <div className="chat-stack">
+          {group && isAdmin && (
+            <form className="chat-stack" onSubmit={saveAbout} noValidate>
+              <Field label="Group name" required error={nameError}>
+                {id => <input id={id} className="mac-input" value={name} onChange={e => { setName(e.target.value); setNameError(''); }} maxLength={60} />}
+              </Field>
+              <Field label="Description">
+                {id => <textarea id={id} className="mac-input" rows={2} value={desc} onChange={e => setDesc(e.target.value)} placeholder="What is this group for?" maxLength={140} />}
+              </Field>
+              {dirty && <button type="submit" className="mac-btn mac-btn-primary" disabled={busy} style={{ alignSelf: 'flex-end' }}>{busy ? 'Saving…' : 'Save changes'}</button>}
+            </form>
+          )}
+          {group && !isAdmin && channel.description && <p className="muted" style={{ fontSize: 'var(--fs-md)' }}>{channel.description}</p>}
+
+          <button className="mac-btn mac-btn-secondary" onClick={onMute} aria-pressed={!!muted}>
+            {muted ? <><Bell size={15} /> Unmute notifications</> : <><BellOff size={15} /> Mute notifications</>}
+          </button>
+
           {group && (
-            <div>
-              <div className="chat-sec" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>Members {isAdmin && <button className="mac-btn mac-btn-ghost" style={{ fontSize: 11.5, padding: '2px 6px' }} onClick={() => setAdding(a => !a)}><UserPlus size={12} /> Add</button>}</div>
-              {adding && notIn.map(p => <button key={personKey(p)} className="chat-row" onClick={() => onUpdate({ members: [...channel.members, { id: p.id, name: p.name, kind: p.kind }] })}><Plus size={13} color="#0071E3" /> <span style={{ fontSize: 12.5 }}>{p.name}</span></button>)}
+            <section>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                <h3 className="section-title">Members · {channel.members.length}</h3>
+                {isAdmin && <button className="mac-btn mac-btn-ghost" onClick={() => setAdding(a => !a)} aria-expanded={adding}><UserPlus size={15} /> {adding ? 'Done' : 'Add people'}</button>}
+              </div>
+              {adding && (notIn.length === 0 ? <p className="faint" style={{ fontSize: 'var(--fs-sm)', padding: '6px 0' }}>Everyone is already in this group.</p> : notIn.map(p => (
+                <button key={personKey(p)} className="chat-row" disabled={busy} onClick={() => addMember(p)}>
+                  <ChatAvatar name={p.name} size={30} online={online(p)} />
+                  <span className="chat-row-main"><span className="chat-row-name">{p.name}</span><span className="chat-row-prev">{p.role}</span></span>
+                  <Plus size={16} aria-hidden="true" />
+                </button>
+              )))}
               {channel.members.map(m => {
-                const admin = channel.createdBy === m.name || (channel.admins || []).some(a => sameId(a, m));
+                const admin = (channel.admins || []).some(a => sameId(a, m));
                 return (
-                  <div key={personKey(m)} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px' }}>
-                    <span style={{ position: 'relative' }}><Avatar name={m.name} size={28} />{online(m) && <span className="chat-dot" />}</span>
-                    <span style={{ flex: 1, fontSize: 12.5 }}>{m.name}{sameId(m, me) && <span style={{ color: '#AEAEB2' }}> (you)</span>}</span>
-                    {admin && <span style={{ fontSize: 10, color: '#8E8E93', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 4, padding: '0 4px' }}>admin</span>}
-                    {isAdmin && !sameId(m, me) && <button className="chat-icon" style={{ width: 24, height: 24 }} onClick={() => onUpdate({ members: channel.members.filter(x => !sameId(x, m)) })} aria-label={`Remove ${m.name}`}><X size={12} color="#FF3B30" /></button>}
+                  <div key={personKey(m)} className="chat-member">
+                    <ChatAvatar name={m.name} size={30} online={online(m)} />
+                    <span className="chat-member-name">{m.name}{sameId(m, me) && <span className="faint"> (you)</span>}</span>
+                    {admin && <span className="badge" style={{ background: 'var(--surface-2)', color: 'var(--ink-2)' }}>Admin</span>}
+                    {isAdmin && !sameId(m, me) && <button className="icon-btn plain" onClick={() => onRemoveMember(m)} aria-label={`Remove ${m.name}`}><X size={16} /></button>}
                   </div>
                 );
               })}
-            </div>
+            </section>
           )}
-          {group && <button className="mac-btn mac-btn-secondary" style={{ fontSize: 12.5, color: '#FF3B30' }} onClick={onLeave}><LogOut size={13} /> Leave group</button>}
-          {isPartner && <button className="mac-btn mac-btn-danger" style={{ fontSize: 12.5 }} onClick={onDelete}><Trash2 size={13} /> Delete conversation</button>}
-        </>}
-        {tab === 'pins' && (pinned.length ? pinned.map(m => (
-          <button key={m.id} className="chat-row" onClick={() => onJump(m.id)} style={{ alignItems: 'flex-start' }}>
-            <Pin size={13} color="#E0A100" style={{ marginTop: 3 }} />
-            <span style={{ flex: 1, textAlign: 'left' }}><span style={{ display: 'block', fontSize: 11, color: '#8E8E93' }}>{m.senderName} · {fmtDay(m.createdAt)}</span><span style={{ fontSize: 12.5 }}>{m.text || '📎 Attachment'}</span></span>
-          </button>
-        )) : <div className="chat-empty">No pinned messages. Hover a message and tap the pin.</div>)}
-        {tab === 'files' && (files.length ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-            {files.map((f, i) => f.type?.startsWith('image/')
-              ? <a key={i} href={f.url} target="_blank" rel="noreferrer"><img src={f.url} alt={f.name} style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 8 }} /></a>
-              : <a key={i} href={f.url} target="_blank" rel="noreferrer" title={f.name} style={{ gridColumn: 'span 3', display: 'flex', gap: 6, alignItems: 'center', fontSize: 12, padding: 8, borderRadius: 8, background: 'rgba(0,0,0,0.03)', color: '#1D1D1F', textDecoration: 'none' }}><FileText size={14} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span></a>)}
-          </div>
-        ) : <div className="chat-empty">No files shared in the loaded messages yet.</div>)}
-      </div>
-    </aside>
+
+          {group && <button className="mac-btn mac-btn-secondary" onClick={onLeave}><LogOut size={15} /> Leave group</button>}
+          {isPartner && <button className="mac-btn mac-btn-danger" onClick={onDelete}><Trash2 size={15} /> Delete conversation</button>}
+        </div>
+      )}
+
+      {tab === 'pins' && (pinned.length ? (
+        <div>
+          {pinned.map(m => (
+            <button key={m.id} className="chat-row" onClick={() => onJump(m.id)}>
+              <Pin size={15} aria-hidden="true" style={{ flexShrink: 0, color: 'var(--warn)' }} />
+              <span className="chat-row-main">
+                <span className="chat-row-prev">{m.senderName} · {fmtDay(m.createdAt)}</span>
+                <span className="chat-row-name" style={{ fontWeight: 500 }}>{previewOf(m)}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : <div className="chat-empty">Nothing pinned yet. Open a message’s menu and choose Pin to keep it here.</div>)}
+
+      {tab === 'files' && (files.length ? (
+        <div className="chat-file-grid">
+          {files.map((f, i) => (f.type?.startsWith('image/')
+            ? <a key={i} href={urlOf(f)} target="_blank" rel="noreferrer"><img src={urlOf(f)} alt={f.name} loading="lazy" /></a>
+            : <a key={i} href={urlOf(f)} target="_blank" rel="noreferrer" className="chat-doc" title={`${f.name} — ${f.by}`}><FileText size={15} /><span>{f.name}</span></a>))}
+        </div>
+      ) : <div className="chat-empty">No files in the messages loaded so far. Scroll up in the conversation to load older ones.</div>)}
+    </Drawer>
   );
 }
-
-const CHAT_CSS = `
-.chat-root { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-.chat-shell { flex: 1; min-height: 0; display: flex; background: #fff; }
-.chat-error { display: flex; align-items: center; gap: 6px; margin: 8px 16px 0; padding: 8px 12px; border-radius: 10px; background: rgba(255,59,48,0.07); color: #D70015; font-size: 12.5px; }
-.chat-error button { margin-left: auto; border: none; background: none; cursor: pointer; color: inherit; }
-.chat-list { width: 320px; min-width: 280px; border-right: 1px solid rgba(0,0,0,0.07); display: flex; flex-direction: column; background: #FBFBFD; }
-.chat-row { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: none; background: transparent; border-radius: 12px; cursor: pointer; font-family: inherit; margin-bottom: 2px; color: inherit; }
-.chat-row:hover { background: rgba(0,0,0,0.04); }
-.chat-row.on { background: rgba(0,113,227,0.1); }
-.chat-row-name { font-size: 13.5px; color: #1D1D1F; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-row-prev { flex: 1; min-width: 0; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
-.chat-badge { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #0071E3; color: #fff; font-size: 10.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.chat-badge.muted { background: #C7C7CC; } .chat-badge.at { background: #FF9500; }
-.chat-dot { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; background: #34C759; border: 2px solid #fff; }
-.chat-av { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; flex-shrink: 0; }
-.chat-sec { font-size: 11px; font-weight: 650; color: #8E8E93; text-transform: uppercase; letter-spacing: .4px; padding: 10px 6px 6px; }
-.chat-empty { text-align: center; color: #AEAEB2; font-size: 12.5px; padding: 28px 12px; }
-.chat-thread { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
-.chat-placeholder { flex: 1; display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; color: #AEAEB2; font-size: 13px; }
-.chat-head { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid rgba(0,0,0,0.07); background: #fff; }
-.chat-back { display: none; border: none; background: none; cursor: pointer; padding: 4px; }
-.chat-icon { width: 32px; height: 32px; border-radius: 9px; border: none; background: transparent; color: #6E6E73; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.chat-icon:hover { background: rgba(0,0,0,0.05); color: #1D1D1F; }
-.chat-body { flex: 1; min-height: 0; position: relative; background: #F4F5F7; }
-.chat-scroll { position: absolute; inset: 0; overflow-y: auto; padding: 12px 16px 8px; display: flex; flex-direction: column; }
-.chat-sys { text-align: center; font-size: 11.5px; color: #8E8E93; margin: 6px 0 10px; display: flex; gap: 6px; justify-content: center; align-items: center; }
-.chat-day, .chat-new { display: flex; align-items: center; justify-content: center; margin: 12px 0 8px; position: sticky; top: 0; z-index: 1; }
-.chat-day span { font-size: 11px; font-weight: 600; color: #6E6E73; background: rgba(255,255,255,0.92); padding: 3px 10px; border-radius: 100px; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
-.chat-new { position: static; } .chat-new span { font-size: 11px; font-weight: 650; color: #FF3B30; } .chat-new::before, .chat-new::after { content: ''; flex: 1; height: 1px; background: rgba(255,59,48,0.35); margin: 0 8px; }
-.chat-msg { display: flex; gap: 8px; margin-top: 8px; max-width: 100%; }
-.chat-msg.grouped { margin-top: 2px; }
-.chat-msg.mine { justify-content: flex-end; }
-.chat-msg.flash .chat-bubble { box-shadow: 0 0 0 3px rgba(255,204,0,0.7); }
-.chat-msg-av { width: 30px; flex-shrink: 0; }
-.chat-msg-col { display: flex; flex-direction: column; max-width: min(72%, 560px); min-width: 0; }
-.chat-msg.mine .chat-msg-col { align-items: flex-end; }
-.chat-sender { font-size: 11.5px; font-weight: 650; margin: 0 0 2px 10px; }
-.chat-bubble-wrap { position: relative; display: flex; align-items: center; gap: 4px; max-width: 100%; }
-.chat-msg.mine .chat-bubble-wrap { flex-direction: row-reverse; }
-.chat-bubble { position: relative; padding: 7px 10px 6px; border-radius: 16px; background: #fff; color: #1D1D1F; box-shadow: 0 1px 1px rgba(0,0,0,0.06); min-width: 70px; max-width: 100%; }
-.chat-msg:not(.grouped):not(.mine) .chat-bubble { border-top-left-radius: 5px; }
-.chat-msg.mine .chat-bubble { background: #0071E3; color: #fff; }
-.chat-msg.mine:not(.grouped) .chat-bubble { border-top-right-radius: 5px; }
-.chat-bubble.deleted { background: transparent !important; color: #8E8E93 !important; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.1); font-size: 12.5px; }
-.chat-bubble.pinned { box-shadow: 0 0 0 1.5px #E0A100; }
-.chat-pin { display: flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 650; opacity: 0.75; margin-bottom: 2px; }
-.chat-text { font-size: 13.8px; line-height: 1.42; white-space: pre-wrap; word-break: break-word; }
-.chat-code { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: rgba(0,0,0,0.08); padding: 1px 4px; border-radius: 4px; }
-.chat-msg.mine .chat-code { background: rgba(255,255,255,0.2); }
-.chat-meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; font-size: 10.5px; opacity: 0.7; margin-top: 2px; white-space: nowrap; }
-.chat-quote { display: flex; flex-direction: column; text-align: left; gap: 1px; width: 100%; border: none; cursor: pointer; font-family: inherit; padding: 5px 8px; margin-bottom: 4px; border-radius: 8px; border-left: 3px solid #0071E3; background: rgba(0,0,0,0.05); color: inherit; font-size: 12px; }
-.chat-msg.mine .chat-quote { background: rgba(255,255,255,0.16); border-left-color: #fff; }
-.chat-quote span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85; max-width: 320px; }
-.chat-actions { display: flex; gap: 1px; opacity: 0; transition: opacity .12s; background: #fff; border-radius: 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.12); padding: 2px; position: relative; }
-.chat-actions button { width: 26px; height: 26px; border: none; background: none; border-radius: 6px; cursor: pointer; color: #6E6E73; display: inline-flex; align-items: center; justify-content: center; }
-.chat-actions button:hover { background: rgba(0,0,0,0.06); color: #1D1D1F; }
-.chat-bubble-wrap:hover .chat-actions, .chat-actions:focus-within { opacity: 1; }
-@media (hover: none) {
-  .chat-actions { display: none; }
-  .chat-bubble-wrap.tapped .chat-actions { display: flex; opacity: 1; position: absolute; bottom: calc(100% + 4px); z-index: 4; }
-  .chat-msg.mine .chat-bubble-wrap.tapped .chat-actions { right: 0; }
-  .chat-msg:not(.mine) .chat-bubble-wrap.tapped .chat-actions { left: 0; }
-  .chat-actions button { width: 34px; height: 34px; }
-}
-.chat-react-pop { position: absolute; bottom: 110%; right: 0; display: flex; gap: 2px; background: #fff; border-radius: 100px; padding: 4px 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.18); z-index: 5; }
-.chat-msg:not(.mine) .chat-react-pop { right: auto; left: 0; }
-.chat-react-pop button { width: 32px !important; height: 32px !important; font-size: 19px; border-radius: 50% !important; }
-.chat-react-pop button:hover { transform: scale(1.2); background: rgba(0,0,0,0.04) !important; }
-.chat-rx { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
-.chat-rx button { border: 1px solid rgba(0,0,0,0.08); background: #fff; border-radius: 100px; padding: 1px 7px; font-size: 12px; cursor: pointer; font-family: inherit; }
-.chat-rx button.on { border-color: #0071E3; background: rgba(0,113,227,0.08); color: #0060C0; font-weight: 600; }
-.chat-seen { font-size: 10.5px; color: #8E8E93; margin-top: 2px; }
-.chat-retry { border: none; background: none; color: #FF3B30; font-size: 11px; cursor: pointer; display: inline-flex; gap: 4px; align-items: center; margin-top: 2px; font-family: inherit; }
-.chat-imgs { display: grid; gap: 3px; border-radius: 12px; overflow: hidden; max-width: 300px; }
-.chat-imgs.n1 { grid-template-columns: 1fr; } .chat-imgs.n2, .chat-imgs.n3, .chat-imgs.n4 { grid-template-columns: 1fr 1fr; }
-.chat-imgs img { width: 100%; height: 100%; max-height: 260px; object-fit: cover; display: block; }
-.chat-imgs.n2 img, .chat-imgs.n3 img, .chat-imgs.n4 img { aspect-ratio: 1; }
-.chat-more { position: absolute; inset: 0; background: rgba(0,0,0,0.45); color: #fff; font-size: 20px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
-.chat-doc { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border-radius: 10px; color: inherit; text-decoration: none; font-size: 12.5px; max-width: 280px; }
-.chat-typing { display: flex; align-items: center; gap: 3px; margin: 8px 0 4px 38px; color: #8E8E93; font-size: 11.5px; }
-.chat-typing span { width: 6px; height: 6px; border-radius: 3px; background: #AEAEB2; animation: chatdot 1.2s infinite; }
-.chat-typing span:nth-child(2) { animation-delay: .2s; } .chat-typing span:nth-child(3) { animation-delay: .4s; }
-@keyframes chatdot { 0%, 60%, 100% { opacity: .3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
-.chat-jump { position: absolute; right: 18px; bottom: 14px; width: 40px; height: 40px; border-radius: 50%; border: none; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.18); cursor: pointer; display: flex; align-items: center; justify-content: center; color: #48484A; }
-.chat-jump span { position: absolute; top: -6px; right: -4px; background: #0071E3; color: #fff; font-size: 10px; font-weight: 700; border-radius: 9px; padding: 1px 5px; }
-.chat-drop { position: absolute; inset: 8px; border: 2px dashed #0071E3; border-radius: 14px; background: rgba(0,113,227,0.06); display: flex; align-items: center; justify-content: center; color: #0071E3; font-weight: 650; pointer-events: none; }
-.chat-compose { border-top: 1px solid rgba(0,0,0,0.07); padding: 8px 12px 6px; background: #fff; }
-.chat-compose-bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px; margin-bottom: 6px; border-radius: 10px; background: rgba(0,113,227,0.06); border-left: 3px solid #0071E3; }
-.chat-files { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
-.chat-file { position: relative; display: flex; align-items: center; gap: 6px; padding: 4px 24px 4px 4px; border-radius: 10px; background: rgba(0,0,0,0.04); font-size: 11.5px; max-width: 220px; }
-.chat-file img { width: 40px; height: 40px; object-fit: cover; border-radius: 7px; }
-.chat-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-file button { position: absolute; top: 4px; right: 4px; border: none; background: rgba(0,0,0,0.5); color: #fff; width: 16px; height: 16px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-.chat-compose-row { display: flex; align-items: flex-end; gap: 4px; }
-.chat-input { width: 100%; resize: none; border: 1px solid rgba(0,0,0,0.1); border-radius: 20px; padding: 9px 14px; font-size: 14px; font-family: inherit; line-height: 1.4; outline: none; max-height: 160px; background: #F6F6F8; }
-.chat-input:focus { border-color: #0071E3; background: #fff; }
-.chat-send { width: 38px; height: 38px; border-radius: 50%; border: none; background: #0071E3; color: #fff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.chat-send:disabled { background: #C7C7CC; cursor: default; }
-.chat-hint { font-size: 10.5px; color: #AEAEB2; padding: 4px 6px 0; }
-.chat-emoji { position: absolute; bottom: 42px; left: 0; width: 280px; display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; padding: 8px; background: #fff; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,0.18); z-index: 10; }
-.chat-emoji button { border: none; background: none; font-size: 20px; cursor: pointer; border-radius: 8px; padding: 3px; }
-.chat-emoji button:hover { background: rgba(0,0,0,0.06); }
-.chat-mention { position: absolute; bottom: 110%; left: 0; min-width: 220px; background: #fff; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,0.18); padding: 4px; z-index: 10; }
-.chat-mention button { display: flex; align-items: center; gap: 8px; width: 100%; border: none; background: none; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; font-family: inherit; text-align: left; }
-.chat-mention button.on, .chat-mention button:hover { background: rgba(0,113,227,0.08); }
-.chat-info { width: 300px; min-width: 260px; border-left: 1px solid rgba(0,0,0,0.07); display: flex; flex-direction: column; background: #fff; }
-.spin { animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 900px) {
-  .chat-info { position: absolute; right: 0; top: 0; bottom: 0; z-index: 20; box-shadow: -8px 0 30px rgba(0,0,0,0.15); }
-  .chat-shell { position: relative; }
-}
-@media (max-width: 768px) {
-  .chat-list { width: 100%; min-width: 0; border-right: none; }
-  .chat-shell.has-active .chat-list { display: none; }
-  .chat-shell:not(.has-active) .chat-thread { display: none; }
-  .chat-back { display: inline-flex; }
-  .chat-msg-col { max-width: 84%; }
-  .chat-hint { display: none; }
-  .chat-info { width: 100%; }
-}
-@media (max-width: 640px) { .chat-btn-label { display: none; } }
-`;

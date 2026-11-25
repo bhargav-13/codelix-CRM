@@ -1,0 +1,162 @@
+/* ═══════════════════════════════════════════════════════════════
+   Codelix brand layer on top of the generated AlignUI theme.
+   Everything that makes the theme "ours" is here, so alignui.css can
+   be regenerated with the CLI at any time without losing it.
+
+   Brand blue: the logo colour #3E7DFC is step 500. The other steps keep
+   its hue (OKLCH h≈262) and walk lightness/chroma up and down.
+     white text on 500 = 3.79:1  → too low for text, so 500 is used for
+       the logo, rings, charts and gradients only
+     white text on 600 = 5.00:1  → every text-bearing fill (primary-base)
+     white text on 700 = 7.22:1  → hover / pressed
+     400 on the dark surface = 6.66:1 → links and brand text in dark mode
+═══════════════════════════════════════════════════════════════ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme static {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+
+  /* Brand scale (replaces AlignUI's stock blue) */
+  --color-blue-950: #0d1f52;
+  --color-blue-900: #152f77;
+  --color-blue-800: #1a3e9d;
+  --color-blue-700: #1f4ec0;
+  --color-blue-600: #2c67e7;
+  --color-blue-500: #3e7dfc;
+  --color-blue-400: #6fa0fe;
+  --color-blue-300: #a1c2ff;
+  --color-blue-200: #c7dbff;
+  --color-blue-100: #e1ecff;
+  --color-blue-50: #f1f6fe;
+  --color-blue-alpha-24: #3e7dfc3d;
+  --color-blue-alpha-16: #3e7dfc29;
+  --color-blue-alpha-10: #3e7dfc1a;
+
+  /* Cool neutrals to sit next to the blue: AlignUI's slate scale */
+  --color-neutral-950: var(--color-slate-950);
+  --color-neutral-900: var(--color-slate-900);
+  --color-neutral-800: var(--color-slate-800);
+  --color-neutral-700: var(--color-slate-700);
+  --color-neutral-600: var(--color-slate-600);
+  --color-neutral-500: var(--color-slate-500);
+  --color-neutral-400: var(--color-slate-400);
+  --color-neutral-300: var(--color-slate-300);
+  --color-neutral-200: var(--color-slate-200);
+  --color-neutral-100: var(--color-slate-100);
+  --color-neutral-50: var(--color-slate-50);
+  --color-neutral-0: var(--color-slate-0);
+  --color-neutral-alpha-24: var(--color-slate-alpha-24);
+  --color-neutral-alpha-16: var(--color-slate-alpha-16);
+  --color-neutral-alpha-10: var(--color-slate-alpha-10);
+  --color-overlay: var(--color-overlay-slate);
+
+  /* Primary: 600 carries white text at 5:1 */
+  --color-primary-base: var(--color-blue-600);
+  --color-primary-darker: var(--color-blue-700);
+  --color-primary-dark: var(--color-blue-800);
+  /* brand-coloured TEXT on a surface (links, active nav, ghost buttons) */
+  --color-primary-text: var(--color-blue-600);
+  /* the exact logo colour, for marks, rings and decoration */
+  --color-primary-logo: var(--color-blue-500);
+
+  /* page background behind cards */
+  --color-bg-canvas: var(--color-neutral-100);
+
+  --shadow-regular-lg: 0 24px 56px -16px #0e121b2e, 0 4px 12px -2px #0e121b14;
+  --shadow-focus-ring: 0 0 0 2px var(--color-bg-white-0), 0 0 0 4px var(--color-blue-alpha-24);
+
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out-soft: cubic-bezier(0.65, 0, 0.35, 1);
+
+  --radius-12: 0.75rem;
+  --radius-16: 1rem;
+}
+
+/* ── Dark mode: the `dark` class on <html> (set by components/ui/theme.js) ── */
+.dark {
+  color-scheme: dark;
+
+  /* One step lighter than AlignUI's defaults: cards (bg-white-0) sit on a darker canvas */
+  --color-bg-canvas: var(--color-neutral-950);
+  --color-bg-white-0: var(--color-neutral-900);
+  --color-bg-weak-25: #1d202a;
+  --color-bg-weak-50: var(--color-neutral-800);
+  --color-bg-soft-200: var(--color-neutral-700);
+  --color-bg-sub-300: var(--color-neutral-600);
+  --color-stroke-soft-200: var(--color-neutral-700);
+  --color-stroke-sub-300: #3a404d;
+  --color-stroke-white-0: var(--color-neutral-900);
+  --color-text-white-0: var(--color-neutral-900);
+  --color-text-soft-400: #868d9b;
+
+  --color-primary-base: var(--color-blue-600);
+  --color-primary-darker: var(--color-blue-500);
+  --color-primary-dark: var(--color-blue-400);
+  --color-primary-text: var(--color-blue-400);
+  --color-primary-light: var(--color-blue-alpha-24);
+  --color-primary-lighter: var(--color-blue-alpha-16);
+  --color-overlay: #05070ba8;
+
+  --shadow-regular-xs: 0 1px 2px 0 #00000052;
+  --shadow-regular-sm: 0 2px 6px #00000052;
+  --shadow-regular-md: 0 16px 32px -12px #000000a3, 0 0 0 1px #ffffff0a;
+  --shadow-regular-lg: 0 24px 56px -16px #000000c2, 0 0 0 1px #ffffff0f;
+  --shadow-tooltip: 0 12px 24px 0 #00000066, 0 1px 2px 0 #0000003d;
+  --shadow-focus-ring: 0 0 0 2px var(--color-bg-white-0), 0 0 0 4px #6fa0fe66;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Motion — shared keyframes for Radix-driven overlays.
+   Components opt in with the .ui-* classes; Radix keeps the element
+   mounted until the closing animation has finished.
+═══════════════════════════════════════════════════════════════ */
+@keyframes ui-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ui-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes ui-pop-in { from { opacity: 0; transform: scale(0.96) translateY(-2px); } to { opacity: 1; transform: none; } }
+@keyframes ui-pop-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.97); } }
+@keyframes ui-dialog-in { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes ui-dialog-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(6px) scale(0.985); } }
+@keyframes ui-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
+@keyframes ui-sheet-out { from { transform: none; } to { transform: translateY(100%); } }
+@keyframes ui-drawer-in { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes ui-drawer-out { from { transform: none; } to { transform: translateX(100%); } }
+@keyframes ui-toast-in { from { opacity: 0; transform: translateY(12px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes ui-toast-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateX(24px); } }
+@keyframes ui-rise-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes ui-bar-in { from { opacity: 0; transform: translate(-50%, 16px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes shimmer { to { background-position: -200% 0; } }
+
+.ui-overlay[data-state='open'] { animation: ui-fade-in 180ms ease-out; }
+.ui-overlay[data-state='closed'] { animation: ui-fade-out 150ms ease-in forwards; }
+
+/* menus, selects, hover cards, tooltips: grow out of the trigger */
+.ui-pop { transform-origin: var(--ui-origin, center top); will-change: transform, opacity; }
+.ui-pop[data-state='open'], .ui-pop[data-state='delayed-open'], .ui-pop[data-state='instant-open'] { animation: ui-pop-in 160ms var(--ease-out-soft); }
+.ui-pop[data-state='closed'] { animation: ui-pop-out 110ms ease-in forwards; }
+
+.ui-dialog[data-state='open'] { animation: ui-dialog-in 220ms var(--ease-out-soft); }
+.ui-dialog[data-state='closed'] { animation: ui-dialog-out 140ms ease-in forwards; }
+.ui-drawer[data-state='open'] { animation: ui-drawer-in 260ms var(--ease-out-soft); }
+.ui-drawer[data-state='closed'] { animation: ui-drawer-out 180ms ease-in forwards; }
+
+.ui-toast[data-state='open'] { animation: ui-toast-in 240ms var(--ease-out-soft); }
+.ui-toast[data-state='closed'] { animation: ui-toast-out 180ms ease-in forwards; }
+.ui-toast[data-swipe='move'] { transform: translateX(var(--radix-toast-swipe-move-x)); }
+.ui-toast[data-swipe='cancel'] { transform: translateX(0); transition: transform 180ms ease-out; }
+.ui-toast[data-swipe='end'] { animation: ui-toast-out 140ms ease-out forwards; }
+
+@media (max-width: 768px) {
+  /* dialogs become bottom sheets on phones */
+  .ui-dialog[data-state='open'] { animation: ui-sheet-in 280ms var(--ease-out-soft); }
+  .ui-dialog[data-state='closed'] { animation: ui-sheet-out 200ms ease-in forwards; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,13 +1,12 @@
-export default function EmptyState({ icon: Icon, title, subtitle }) {
+// "Nothing here" placeholder. Same look as kit's EmptyPanel, without the card,
+// so it can sit inside an existing card or table.
+export default function EmptyState({ icon: Icon, title, subtitle, action }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      {Icon && (
-        <div className="w-12 h-12 rounded-2xl bg-black/[0.04] flex items-center justify-center mb-3">
-          <Icon size={22} className="text-[#AEAEB2]" />
-        </div>
-      )}
-      <p className="text-sm font-medium text-[#3C3C43]">{title}</p>
-      {subtitle && <p className="text-xs text-[#AEAEB2] mt-1">{subtitle}</p>}
+    <div className="empty-panel">
+      {Icon && <span className="empty-icon"><Icon size={22} /></span>}
+      <div className="empty-title">{title}</div>
+      {subtitle && <div className="empty-text">{subtitle}</div>}
+      {action}
     </div>
   );
 }

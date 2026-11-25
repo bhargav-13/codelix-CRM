@@ -1,65 +1,72 @@
 /* eslint-disable react-refresh/only-export-components */
+// Small building blocks shared by the Work views. Layout lives in work.css.
 import { useState, useRef, useEffect } from 'react';
 import {
   ChevronsUp, ChevronUp, ChevronDown, ChevronsDown, Equal, Bug, CheckSquare, Bookmark, Zap,
-  CornerDownRight, X, Check,
+  CornerDownRight, X, Check, Plus, Loader2,
 } from 'lucide-react';
+import { STATUSES } from '../../lib/work';
+import { todayLocal } from '../ui/kit';
 
+// Hues are the --wk-<hue> variables in work.css (text/icon colour, -bg tint, -solid fill),
+// which have a .dark override — never a literal colour here.
+const hue = h => ({ color: `var(--wk-${h})`, bg: `var(--wk-${h}-bg)`, solid: `var(--wk-${h}-solid)` });
 export const STATUS_META = {
-  'Backlog':     { dot: '#8E8E93', bg: 'rgba(142,142,147,0.12)', text: '#6E6E73' },
-  'To Do':       { dot: '#0071E3', bg: 'rgba(0,113,227,0.10)',   text: '#0060C0' },
-  'In Progress': { dot: '#FF9500', bg: 'rgba(255,149,0,0.12)',   text: '#B25E00' },
-  'In Review':   { dot: '#AF52DE', bg: 'rgba(175,82,222,0.12)',  text: '#8A3DB5' },
-  'Done':        { dot: '#34C759', bg: 'rgba(52,199,89,0.12)',   text: '#248A3D' },
+  'Backlog':     { dot: 'var(--ink-3)',           bg: 'var(--surface-2)',      text: 'var(--ink-2)' },
+  'To Do':       { dot: 'var(--wk-blue)',         bg: 'var(--wk-blue-bg)',     text: 'var(--wk-blue)' },
+  'In Progress': { dot: 'var(--wk-orange)',       bg: 'var(--wk-orange-bg)',   text: 'var(--wk-orange)' },
+  'In Review':   { dot: 'var(--wk-purple)',       bg: 'var(--wk-purple-bg)',   text: 'var(--wk-purple)' },
+  'Done':        { dot: 'var(--wk-green)',        bg: 'var(--wk-green-bg)',    text: 'var(--wk-green)' },
 };
 export const TYPE_META = {
-  Epic:    { icon: Zap,             color: '#AF52DE', bg: 'rgba(175,82,222,0.14)' },
-  Story:   { icon: Bookmark,        color: '#34C759', bg: 'rgba(52,199,89,0.14)' },
-  Task:    { icon: CheckSquare,     color: '#0071E3', bg: 'rgba(0,113,227,0.12)' },
-  Bug:     { icon: Bug,             color: '#FF3B30', bg: 'rgba(255,59,48,0.12)' },
-  Subtask: { icon: CornerDownRight, color: '#5AC8FA', bg: 'rgba(90,200,250,0.16)' },
+  Epic:    { icon: Zap,             ...hue('purple') },
+  Story:   { icon: Bookmark,        ...hue('green') },
+  Task:    { icon: CheckSquare,     ...hue('blue') },
+  Bug:     { icon: Bug,             ...hue('red') },
+  Subtask: { icon: CornerDownRight, ...hue('sky') },
 };
 export const PRIORITY_META = {
-  Highest: { icon: ChevronsUp,   color: '#FF3B30' },
-  High:    { icon: ChevronUp,    color: '#FF9500' },
-  Medium:  { icon: Equal,        color: '#E0A100' },
-  Low:     { icon: ChevronDown,  color: '#0071E3' },
-  Lowest:  { icon: ChevronsDown, color: '#8E8E93' },
+  Highest: { icon: ChevronsUp,   color: 'var(--wk-red)' },
+  High:    { icon: ChevronUp,    color: 'var(--wk-orange)' },
+  Medium:  { icon: Equal,        color: 'var(--wk-yellow)' },
+  Low:     { icon: ChevronDown,  color: 'var(--wk-blue)' },
+  Lowest:  { icon: ChevronsDown, color: 'var(--wk-grey)' },
 };
-const PERSON_COLORS = ['#0071E3', '#34C759', '#FF9500', '#AF52DE', '#FF2D55', '#5AC8FA', '#E0A100', '#30B0C7'];
-const LABEL_COLORS = ['#0071E3', '#34C759', '#FF9500', '#AF52DE', '#FF3B30', '#30B0C7', '#FF2D55'];
+const PERSON_COLORS = ['blue', 'green', 'orange', 'purple', 'pink', 'sky', 'yellow', 'teal'].map(h => hue(h).solid);
+const LABEL_COLORS = ['blue', 'green', 'orange', 'purple', 'red', 'teal', 'pink'].map(hue);
 const hash = s => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; };
-export const personColor = p => PERSON_COLORS[hash(`${p?.kind}:${p?.id ?? p?.name ?? ''}`) % PERSON_COLORS.length];
-export const labelColor = l => LABEL_COLORS[hash(l) % LABEL_COLORS.length];
-export const initials = (n = '') => n.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase();
-export const samePerson = (a, b) => a && b && a.kind === b.kind && String(a.id) === String(b.id);
+const personColor = p => PERSON_COLORS[hash(`${p?.kind}:${p?.id ?? p?.name ?? ''}`) % PERSON_COLORS.length];
+const labelColor = l => LABEL_COLORS[hash(l) % LABEL_COLORS.length];
+const initials = (n = '') => n.split(' ').filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase();
 
-export const FF = ({ label, children, required, hint }) => (
-  <div style={{ minWidth: 0 }}>
-    <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#6E6E73', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-      {label}{required && <span style={{ color: '#FF3B30', marginLeft: 2 }}>*</span>}
-    </label>
-    {children}
-    {hint && <div style={{ fontSize: 11, color: '#AEAEB2', marginTop: 4 }}>{hint}</div>}
-  </div>
-);
+export const samePerson = (a, b) => !!a && !!b && a.kind === b.kind && String(a.id) === String(b.id);
+export const personKey = p => `${p.kind}:${p.id}`;
+export const asPerson = p => ({ id: p.id, name: p.name, kind: p.kind });
+
+// ── Local calendar dates (YYYY-MM-DD). Never built with toISOString(), which is UTC. ──
+const pad = n => String(n).padStart(2, '0');
+export const isoOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+export const dayOf = iso => new Date(`${String(iso).slice(0, 10)}T00:00:00`);
+export const addDays = (iso, n) => { const d = dayOf(iso); d.setDate(d.getDate() + n); return isoOf(d); };
+export const mondayOf = iso => addDays(iso, -((dayOf(iso).getDay() + 6) % 7));
+export const shortDate = iso => (iso ? dayOf(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '');
+export const dateTime = ts => (ts ? new Date(ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
+export const isLate = t => !!t.dueDate && t.status !== 'Done' && t.dueDate < todayLocal();
+export const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export function Avatar({ p, size = 22, ring = true }) {
-  const c = personColor(p);
   return (
-    <span title={`${p?.name || 'Unassigned'}${p?.kind === 'partner' ? ' · Partner' : ''}`} style={{
-      width: size, height: size, borderRadius: '50%', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-      background: c, color: '#fff', fontSize: Math.max(8, size * 0.38), fontWeight: 700, border: ring ? '1.5px solid #fff' : 'none',
-    }}>{initials(p?.name)}</span>
+    <span className={`wk-avatar ${ring ? 'ring' : ''}`} title={`${p?.name || 'Unassigned'}${p?.kind === 'partner' ? ' · Partner' : ''}`}
+      style={{ width: size, height: size, background: personColor(p), fontSize: Math.max(8, size * 0.38) }}>{initials(p?.name)}</span>
   );
 }
 
 export function AvatarStack({ people = [], max = 3, size = 22 }) {
-  if (!people.length) return <span title="Unassigned" style={{ width: size, height: size, borderRadius: '50%', border: '1.5px dashed #C7C7CC', display: 'inline-block' }} />;
+  if (!people.length) return <span className="wk-avatar none" title="Unassigned" style={{ width: size, height: size }} />;
   return (
-    <span style={{ display: 'inline-flex' }}>
-      {people.slice(0, max).map((p, i) => <span key={`${p.kind}:${p.id}`} style={{ marginLeft: i ? -6 : 0 }}><Avatar p={p} size={size} /></span>)}
-      {people.length > max && <span style={{ marginLeft: -6, width: size, height: size, borderRadius: '50%', background: '#E5E5EA', color: '#6E6E73', fontSize: 9.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '1.5px solid #fff' }}>+{people.length - max}</span>}
+    <span className="wk-stack">
+      {people.slice(0, max).map(p => <Avatar key={personKey(p)} p={p} size={size} />)}
+      {people.length > max && <span className="wk-avatar ring more" style={{ width: size, height: size, fontSize: 9.5 }}>+{people.length - max}</span>}
     </span>
   );
 }
@@ -76,22 +83,58 @@ export function PriorityGlyph({ priority, size = 15 }) {
   return <span title={`${priority} priority`} style={{ display: 'inline-flex', flexShrink: 0 }}><I size={size} color={m.color} strokeWidth={2.6} /></span>;
 }
 
-export function StatusPill({ status, small }) {
+export function StatusPill({ status }) {
   const m = STATUS_META[status] || STATUS_META.Backlog;
-  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: small ? '1px 7px' : '3px 9px', borderRadius: 100, background: m.bg, color: m.text, fontSize: small ? 10.5 : 11.5, fontWeight: 600, whiteSpace: 'nowrap' }}>
-    <span style={{ width: 6, height: 6, borderRadius: 3, background: m.dot }} />{status}
-  </span>;
+  return <span className="wk-pill" style={{ background: m.bg, color: m.text }}><i style={{ background: m.dot }} />{status}</span>;
+}
+
+// Native select dressed as a status pill: one tap opens the system picker,
+// which works the same on phones and never gets clipped by a scrolling parent.
+export function StatusSelect({ status, onChange, label = 'Status' }) {
+  const m = STATUS_META[status] || STATUS_META.Backlog;
+  return (
+    <select className="wk-status" aria-label={label} value={status} style={{ backgroundColor: m.bg, color: m.text }}
+      onClick={e => e.stopPropagation()} onChange={e => onChange(e.target.value)}>
+      {STATUSES.map(s => <option key={s}>{s}</option>)}
+    </select>
+  );
 }
 
 export function LabelPill({ label, onRemove }) {
   const c = labelColor(label);
-  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 7px', borderRadius: 5, background: `${c}18`, color: c, fontSize: 10.5, fontWeight: 600 }}>
-    {label}{onRemove && <X size={10} style={{ cursor: 'pointer' }} onClick={onRemove} />}
-  </span>;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 7px', borderRadius: 5, background: c.bg, color: c.color, fontSize: 11, fontWeight: 600 }}>
+      {label}
+      {onRemove && <button type="button" onClick={onRemove} aria-label={`Remove label ${label}`} style={{ display: 'flex', padding: 2, border: 'none', background: 'none', color: 'inherit', cursor: 'pointer' }}><X size={11} /></button>}
+    </span>
+  );
 }
 
-// Multi-select people picker (assignees, watchers)
-export function PeoplePicker({ value = [], onChange, people, placeholder = 'Add people…', disabled }) {
+// Single-line "Add a task…" box. Enter creates; the text stays if creating fails.
+export function QuickAdd({ onAdd, placeholder = 'Add a task…', label, className = '' }) {
+  const [v, setV] = useState('');
+  const [busy, setBusy] = useState(false);
+  async function submit() {
+    const title = v.trim();
+    if (!title || busy) return;
+    setBusy(true);
+    try { await onAdd(title); setV(''); } catch { /* the caller already showed the error; keep what was typed */ }
+    setBusy(false);
+  }
+  return (
+    <div className={`wk-quickadd ${busy ? 'busy' : ''} ${className}`}>
+      {busy ? <Loader2 size={14} className="spin" aria-hidden="true" /> : <Plus size={14} aria-hidden="true" />}
+      <input value={v} onChange={e => setV(e.target.value)} placeholder={placeholder} aria-label={label || placeholder} enterKeyHint="done"
+        onKeyDown={e => {
+          if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); }
+          if (e.key === 'Escape' && v) { e.stopPropagation(); setV(''); }
+        }} />
+    </div>
+  );
+}
+
+// Multi-select people picker (assignees)
+export function PeoplePicker({ value = [], onChange, people, placeholder = 'Add people…', disabled, label = 'People' }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const ref = useRef(null);
@@ -102,30 +145,36 @@ export function PeoplePicker({ value = [], onChange, people, placeholder = 'Add 
     return () => document.removeEventListener('mousedown', close);
   }, [open]);
   const has = p => value.some(v => samePerson(v, p));
-  const toggle = p => onChange(has(p) ? value.filter(v => !samePerson(v, p)) : [...value, { id: p.id, name: p.name, kind: p.kind }]);
+  const toggle = p => onChange(has(p) ? value.filter(v => !samePerson(v, p)) : [...value, asPerson(p)]);
   const shown = people.filter(p => p.name.toLowerCase().includes(q.toLowerCase()));
+  const flip = () => { if (!disabled) setOpen(o => !o); };
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <div onClick={() => !disabled && setOpen(o => !o)} className="mac-input" style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', minHeight: 36, cursor: disabled ? 'default' : 'pointer', padding: '4px 8px' }}>
-        {value.length === 0 && <span style={{ color: '#C7C7CC', fontSize: 13 }}>{placeholder}</span>}
+    <div ref={ref} className="wk-picker">
+      <div className={`mac-input wk-picker-box ${disabled ? 'off' : ''}`} role="button" tabIndex={disabled ? -1 : 0} aria-label={label} aria-expanded={open}
+        onClick={flip} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); flip(); } if (e.key === 'Escape' && open) { e.stopPropagation(); setOpen(false); } }}>
+        {value.length === 0 && <span className="wk-placeholder">{placeholder}</span>}
         {value.map(v => (
-          <span key={`${v.kind}:${v.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 6px 2px 2px', borderRadius: 100, background: 'rgba(0,0,0,0.05)', fontSize: 12 }}>
+          <span key={personKey(v)} className="wk-person">
             <Avatar p={v} size={18} ring={false} />{v.name}
-            {!disabled && <X size={11} onClick={e => { e.stopPropagation(); toggle(v); }} />}
+            {!disabled && <button type="button" aria-label={`Remove ${v.name}`} onClick={e => { e.stopPropagation(); toggle(v); }}><X size={12} /></button>}
           </span>
         ))}
       </div>
       {open && (
-        <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: '#fff', borderRadius: 10, boxShadow: '0 8px 30px rgba(0,0,0,0.15)', border: '1px solid rgba(0,0,0,0.08)', zIndex: 30, maxHeight: 240, overflowY: 'auto', padding: 4 }}>
-          <input autoFocus className="mac-input" value={q} onChange={e => setQ(e.target.value)} placeholder="Search…" style={{ marginBottom: 4, fontSize: 12.5 }} />
+        <div className="wk-pop fill">
+          <input autoFocus className="mac-input" value={q} onChange={e => setQ(e.target.value)} placeholder="Search people…" aria-label="Search people" style={{ marginBottom: 4 }}
+            onKeyDown={e => {
+              if (e.key === 'Escape') { e.stopPropagation(); setOpen(false); }
+              if (e.key === 'Enter') { e.preventDefault(); if (shown.length === 1 && !e.nativeEvent.isComposing) { toggle(shown[0]); setQ(''); } }   // never submit the surrounding form
+            }} />
           {shown.map(p => (
-            <button key={`${p.kind}:${p.id}`} type="button" onClick={() => toggle(p)} style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '6px 8px', border: 'none', background: has(p) ? 'rgba(0,113,227,0.08)' : 'transparent', borderRadius: 7, cursor: 'pointer', fontSize: 12.5, fontFamily: 'inherit', textAlign: 'left' }}>
-              <Avatar p={p} size={20} ring={false} /><span style={{ flex: 1 }}>{p.name}</span>
-              <span style={{ fontSize: 10.5, color: '#AEAEB2' }}>{p.kind === 'partner' ? 'Partner' : p.role || 'Team'}</span>
-              {has(p) && <Check size={13} color="#0071E3" />}
+            <button key={personKey(p)} type="button" onClick={() => toggle(p)} className={`wk-pop-item ${has(p) ? 'on' : ''}`}>
+              <Avatar p={p} size={20} ring={false} /><span>{p.name}</span>
+              <span className="role">{p.kind === 'partner' ? 'Partner' : p.role || 'Team'}</span>
+              {has(p) && <Check size={14} />}
             </button>
           ))}
-          {!shown.length && <div style={{ padding: 10, fontSize: 12, color: '#AEAEB2' }}>No match</div>}
+          {!shown.length && <div className="wk-note" style={{ padding: 10 }}>No match</div>}
         </div>
       )}
     </div>
@@ -137,19 +186,17 @@ export function LabelsInput({ value = [], onChange, suggestions = [] }) {
   const add = v => { const x = v.trim().toLowerCase(); if (x && !value.includes(x)) onChange([...value, x]); setT(''); };
   return (
     <div>
-      <div className="mac-input" style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center', minHeight: 36, padding: '4px 8px' }}>
+      <div className="mac-input wk-picker-box off">
         {value.map(l => <LabelPill key={l} label={l} onRemove={() => onChange(value.filter(x => x !== l))} />)}
-        <input value={t} onChange={e => setT(e.target.value)} list="label-suggestions"
-          onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(t); } if (e.key === 'Backspace' && !t && value.length) onChange(value.slice(0, -1)); }}
-          onBlur={() => t && add(t)} placeholder={value.length ? '' : 'Type and press Enter'} style={{ border: 'none', outline: 'none', flex: 1, minWidth: 80, fontSize: 13, background: 'transparent', fontFamily: 'inherit' }} />
+        <input className="wk-labels-input" value={t} onChange={e => setT(e.target.value)} list="label-suggestions" aria-label="Add a label"
+          onKeyDown={e => { if ((e.key === 'Enter' || e.key === ',') && !e.nativeEvent.isComposing) { e.preventDefault(); add(t); } if (e.key === 'Backspace' && !t && value.length) onChange(value.slice(0, -1)); }}
+          onBlur={() => t && add(t)} placeholder={value.length ? '' : 'Type and press Enter'} />
       </div>
       <datalist id="label-suggestions">{suggestions.filter(s => !value.includes(s)).map(s => <option key={s} value={s} />)}</datalist>
     </div>
   );
 }
 
-export const btnIcon = { width: 28, height: 28, borderRadius: 8, border: 'none', background: 'rgba(0,0,0,0.05)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 };
-
 export function EmptyNote({ children }) {
-  return <div style={{ padding: '28px 12px', textAlign: 'center', fontSize: 12.5, color: '#AEAEB2' }}>{children}</div>;
+  return <div className="wk-note">{children}</div>;
 }

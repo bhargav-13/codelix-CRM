@@ -1,35 +1,50 @@
-import { X } from 'lucide-react';
-import { useEffect } from 'react';
+/* eslint-disable react-refresh/only-export-components */
+// Modal on Radix Dialog. Same props as before (isOpen, onClose, title, size,
+// footer) — plus optional `description` and `initialFocus` (a ref).
+//  • Esc closes; a press that STARTS on the backdrop closes (selecting text and
+//    releasing outside does not).
+//  • Focus is trapped inside and returns to the opener on close.
+//  • Opens and closes with an animation; a bottom sheet on phones.
+// Pass `footer` for the action row so it stays visible while the body scrolls.
+import * as Dialog from '@radix-ui/react-dialog';
+import { RiCloseLine } from '@remixicon/react';
 
-const SIZES = { sm:'440px', md:'560px', lg:'680px', xl:'860px', full:'1060px' };
+const SIZES = { sm: '440px', md: '560px', lg: '680px', xl: '860px', full: '1060px' };
 
-export default function Modal({ isOpen, onClose, title, children, size = 'md' }) {
-  useEffect(() => {
-    if (isOpen) document.body.style.overflow = 'hidden';
-    else document.body.style.overflow = '';
-    return () => { document.body.style.overflow = ''; };
-  }, [isOpen]);
+// Keep a control the page focused itself (autoFocus); otherwise the first form
+// field; otherwise the panel, so screen readers start at the title.
+export function focusOnOpen(event, initialFocus) {
+  const panel = event.currentTarget;
+  event.preventDefault();
+  if (initialFocus?.current) { initialFocus.current.focus(); return; }
+  if (panel.contains(document.activeElement) && document.activeElement !== panel) return;
+  const first = panel.querySelector('input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea:not([disabled])');
+  (first || panel).focus({ preventScroll: true });
+}
 
-  if (!isOpen) return null;
-
+export default function Modal({ isOpen, onClose, title, description, children, size = 'md', footer, initialFocus, className = '' }) {
   return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="modal-content" style={{ maxWidth: SIZES[size] || SIZES.md }}>
-        {/* Header */}
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 22px 16px', borderBottom:'1px solid rgba(0,0,0,0.07)' }}>
-          <h2 style={{ fontSize:15.5, fontWeight:660, color:'#1D1D1F', letterSpacing:'-0.3px' }}>{title}</h2>
-          <button
-            onClick={onClose}
-            style={{ width:28, height:28, borderRadius:'50%', background:'rgba(0,0,0,0.06)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', transition:'background 0.12s' }}
-            onMouseEnter={e=>e.currentTarget.style.background='rgba(0,0,0,0.1)'}
-            onMouseLeave={e=>e.currentTarget.style.background='rgba(0,0,0,0.06)'}
+    <Dialog.Root open={!!isOpen} onOpenChange={open => { if (!open) onClose?.(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="modal-overlay ui-overlay">
+          <Dialog.Content
+            className={`modal-content ui-dialog ${className}`}
+            style={{ maxWidth: SIZES[size] || SIZES.md }}
+            onOpenAutoFocus={e => focusOnOpen(e, initialFocus)}
+            {...(description ? {} : { 'aria-describedby': undefined })}
           >
-            <X size={14} color="#48484A" />
-          </button>
-        </div>
-        {/* Body */}
-        <div style={{ padding:'20px 22px' }}>{children}</div>
-      </div>
-    </div>
+            <div className="modal-head">
+              <div style={{ minWidth: 0 }}>
+                <Dialog.Title className="modal-title">{title || 'Dialog'}</Dialog.Title>
+                {description && <Dialog.Description className="drawer-sub">{description}</Dialog.Description>}
+              </div>
+              <Dialog.Close className="icon-btn plain" aria-label="Close"><RiCloseLine size={20} /></Dialog.Close>
+            </div>
+            <div className="modal-body">{children}</div>
+            {footer && <div className="modal-foot">{footer}</div>}
+          </Dialog.Content>
+        </Dialog.Overlay>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

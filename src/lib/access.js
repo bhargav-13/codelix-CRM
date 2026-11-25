@@ -1,9 +1,9 @@
 // ================================================================
 // Codelix OMS — employee access model (shared by UI and routing)
-// Stored per employee in app_users.permissions as { module: [actions] }.
-// The database (supabase/security.sql + work.sql) enforces the same keys.
+// Stored per user as { module: [actions] } (GET/PUT /users/{id}/permissions).
+// The server enforces the same keys as `module:ACTION` authorities.
 // ================================================================
-import { supabase } from './supabase';
+import { http } from './http';
 
 export const MODULES = [
   { key: 'tasks', label: 'Tasks', desc: 'Tasks assigned to them, tasks they created, and tasks in projects they can open',
@@ -56,23 +56,33 @@ export function permSummary(perms) {
   return names.length ? names.join(', ') : 'No access';
 }
 
-// Only access admins pass the database rule on app_users.
+// Access admins only — the server refuses everyone else.
+// A login row: { userId, email, role ('partner' | 'employee'), displayName, employeeId,
+//                isAccessAdmin, permissions, mustChangePassword, active, createdAt }
+const loginRow = l => ({
+  ...l, role: String(l.role || '').toUpperCase() === 'PARTNER' ? 'partner' : 'employee', permissions: l.permissions || {},
+});
+
 export const accessDB = {
-  // Partners can read every app_users row (RLS), so listing logins does not
-  // need the admin-users Edge Function — only create/reset/revoke do.
-  listLogins: async () => {
-    const { data, error } = await supabase.from('app_users')
-      .select('user_id, email, role, display_name, employee_id, is_access_admin, permissions, must_change_password, created_at')
-      .order('created_at');
-    if (error) throw error;
-    return data || [];
+  listLogins: async () => ((await http.get('/access/logins')) || []).map(loginRow),
+  // Partners only: whether this partner may manage logins and access. Resolves to the saved login row.
+  // The server refuses to remove the last one ("At least one partner must manage access.").
+  setAccessAdmin: async (userId, isAccessAdmin) => {
+    const row = await http.put(`/users/${userId}/access-admin`, { isAccessAdmin: !!isAccessAdmin });
+    return row && typeof row === 'object' ? loginRow(row) : null;
   },
-  setPermissions: async (employeeId, permissions) => {
-    const { data, error } = await supabase.from('app_users')
-      .update({ permissions: normalizePerms(permissions) })
-      .eq('employee_id', employeeId).select('permissions');
-    if (error) throw error;
-    if (!data?.length) throw new Error('This employee has no login yet — create one first.');
-    return data[0].permissions;
+  // The person keeps their password but must choose a new one at their next sign-in.
+  requirePasswordChange: async userId => { await http.post(`/users/${userId}/require-password-change`); },
+  getPermissions: async userId => normalizePerms(await http.get(`/users/${userId}/permissions`)),
+  // Per-user grants, on top of whatever the role gives. Resolves to what was saved.
+  setPermissions: async (userId, permissions) => {
+    if (!userId) throw new Error('This employee has no login yet — create one first.');
+    const body = normalizePerms(permissions);
+    const saved = await http.put(`/users/${userId}/permissions`, body);
+    return normalizePerms(saved && typeof saved === 'object' ? saved : body);
   },
+  // Employee logins: the temporary password is shown once and must be changed at first sign-in.
+  createLogin: async employeeId => (await http.post(`/employees/${employeeId}/login`)).tempPassword,
+  resetLogin: async employeeId => (await http.post(`/employees/${employeeId}/login/reset`)).tempPassword,
+  revokeLogin: async employeeId => { await http.del(`/employees/${employeeId}/login`); },
 };

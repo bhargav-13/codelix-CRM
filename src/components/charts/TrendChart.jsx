@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, useLayoutEffect } from 'react';
 import { fmtCompact, fmtINR, fmtPct } from '../../lib/finance';
 
 import { SERIES } from './palette';
-const INK = { primary: '#1D1D1F', secondary: '#6E6E73', muted: '#AEAEB2', grid: 'rgba(0,0,0,0.06)', axis: 'rgba(0,0,0,0.14)' };
+const INK = { primary: 'var(--ink)', secondary: 'var(--ink-2)', muted: 'var(--ink-3)', grid: 'var(--line)', axis: 'var(--line-strong)' };
 
 function niceMax(v) {
   if (v <= 0) return 0;
@@ -89,7 +89,7 @@ export default function TrendChart({ points, height = 260, onSelect }) {
           const x = cx(i);
           return (
             <g key={p.label + i}>
-              {hover === i && <rect x={x - band / 2} y={pad.t} width={band} height={geo.ih} fill="rgba(0,0,0,0.035)" rx="6" />}
+              {hover === i && <rect x={x - band / 2} y={pad.t} width={band} height={geo.ih} fill="var(--line)" rx="6" />}
               <path d={barPath(x - bw - 1, y0, bw, y(Math.max(0, p.revenue)))} fill={SERIES.revenue} />
               <path d={barPath(x + 1, y0, bw, y(Math.max(0, p.expense)))} fill={SERIES.expense} />
               {i % labelEvery === 0 && (
@@ -101,7 +101,7 @@ export default function TrendChart({ points, height = 260, onSelect }) {
 
         <path d={linePath} fill="none" stroke={SERIES.profit} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
         {points.map((p, i) => (
-          <circle key={i} cx={cx(i)} cy={y(p.profit)} r={hover === i ? 5 : 4} fill={SERIES.profit} stroke="#fff" strokeWidth="2" />
+          <circle key={i} cx={cx(i)} cy={y(p.profit)} r={hover === i ? 5 : 4} fill={SERIES.profit} stroke="var(--surface)" strokeWidth="2" />
         ))}
 
         {/* hit targets: whole band per period */}
@@ -116,8 +116,8 @@ export default function TrendChart({ points, height = 260, onSelect }) {
         <div style={{
           position: 'absolute', top: 30, pointerEvents: 'none',
           left: Math.min(Math.max(0, cx(hover) + 14), width - 200),
-          background: '#fff', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10,
-          boxShadow: '0 6px 24px rgba(0,0,0,0.12)', padding: '10px 12px', fontSize: 12, minWidth: 180, zIndex: 2,
+          background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 'var(--r-sm)',
+          boxShadow: 'var(--shadow-pop)', padding: '10px 12px', fontSize: 12, minWidth: 180, zIndex: 2,
         }}>
           <div style={{ fontWeight: 650, color: INK.primary, marginBottom: 6 }}>{h.fullLabel || h.label}</div>
           {[['Revenue', h.revenue, SERIES.revenue], ['Expenses', h.expense, SERIES.expense], ['Net profit', h.profit, SERIES.profit]].map(([l, v, c]) => (
@@ -128,7 +128,7 @@ export default function TrendChart({ points, height = 260, onSelect }) {
               <span style={{ color: INK.primary, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{fmtINR(v)}</span>
             </div>
           ))}
-          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(0,0,0,0.06)', marginTop: 4, paddingTop: 4, color: INK.secondary }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--line)', marginTop: 4, paddingTop: 4, color: INK.secondary }}>
             <span>Margin</span><span style={{ color: INK.primary, fontWeight: 600 }}>{fmtPct(h.margin)}</span>
           </div>
           {onSelect && <div style={{ fontSize: 10.5, color: INK.muted, marginTop: 4 }}>Click to open this period</div>}
@@ -158,8 +158,8 @@ export function RankedBars({ items, color = SERIES.revenue, total, onSelect, max
               {fmtINR(r.value)} <span style={{ color: INK.muted }}>· {sum > 0 ? Math.round(r.value / sum * 100) : 0}%</span>
             </span>
           </div>
-          <div style={{ height: 8, borderRadius: 4, background: 'rgba(0,0,0,0.05)' }}>
-            <div style={{ width: `${Math.max(1.5, r.value / top * 100)}%`, height: '100%', borderRadius: 4, background: r.other ? '#C7C7CC' : color }} />
+          <div style={{ height: 8, borderRadius: 4, background: 'var(--surface-2)' }}>
+            <div style={{ width: `${Math.max(1.5, r.value / top * 100)}%`, height: '100%', borderRadius: 4, background: r.other ? 'var(--ink-3)' : color }} />
           </div>
         </div>
       ))}

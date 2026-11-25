@@ -1,16 +1,11 @@
-import { Search } from 'lucide-react';
+import { Search, X } from 'lucide-react';
 
-export default function SearchBar({ value, onChange, placeholder = 'Search...' }) {
+export default function SearchBar({ value, onChange, placeholder = 'Search…' }) {
   return (
-    <div style={{ position: 'relative' }}>
-      <Search size={14} color="#AEAEB2" style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }} />
-      <input
-        className="mac-input"
-        style={{ paddingLeft: 34, height: 36 }}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-      />
+    <div className="toolbar-search">
+      <Search size={15} aria-hidden="true" />
+      <input type="text" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder} />
+      {value && <button type="button" onClick={() => onChange('')} aria-label="Clear search"><X size={14} /></button>}
     </div>
   );
 }

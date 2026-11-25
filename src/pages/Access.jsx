@@ -1,384 +1,493 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Header from '../components/layout/Header';
 import Modal from '../components/ui/Modal';
-import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import Badge from '../components/ui/Badge';
-import { PageLoader } from '../components/ui/CodelixLoader';
-import { employeesDB, auditDB, adminUsersAPI } from '../lib/db';
+import { Switch } from '../components/ui/Switch';
+import { Avatar, Chips, Drawer, EmptyPanel, ErrorPanel, RowMenu, SkeletonRows, Toolbar, useToast } from '../components/ui/kit';
+import { employeesDB, auditDB } from '../lib/db';
 import { MODULES, TEMPLATES, normalizePerms, togglePerm, samePerms, matchTemplate, permSummary, accessDB } from '../lib/access';
-
-// Turn a failed Edge Function call into something actionable
-const fnError = e => /Failed to send a request|Failed to fetch|404|not found/i.test(e?.message || '')
-  ? 'The admin-users Edge Function is not deployed yet (Supabase → Edge Functions). Logins and permissions still show; only create / reset / revoke need it.'
-  : (e?.message || 'Something went wrong');
 import { useAuth } from '../contexts/AuthContext';
-import {
-  Power, Trash2, KeyRound, Copy, CheckCheck, ShieldCheck, ShieldOff, Loader2, History,
-  Lock, Save, Undo2, Crown, UserRound, AlertTriangle,
-} from 'lucide-react';
+import './Access.css';
+import { Trash2, KeyRound, Copy, CheckCheck, ShieldOff, History, Power, RefreshCw, AlertTriangle, SearchX, Users } from 'lucide-react';
 
-const INK = { primary: '#1D1D1F', secondary: '#6E6E73', muted: '#AEAEB2' };
+const STATES = {
+  active: { label: 'Active', tone: 'good' },
+  reset: { label: 'Must change password', tone: 'warn' },
+  none: { label: 'No login', tone: '' },
+  off: { label: 'Deactivated', tone: 'bad' },
+};
 
-// "Users & Access" — only access admins (Bhargav, Manas) can open this page;
-// the database refuses changes from anyone else as well.
-export default function Access() {
-  const { user, displayName } = useAuth();
-  const currentUser = displayName || user?.email || 'Unknown';
+// Say what actually went wrong when a login could not be created, reset or removed
+function loginServiceError(e, doing) {
+  if (e?.status === 0) return `Could not ${doing}: the server cannot be reached. Check your connection and try again.`;
+  if (e?.status === 403) return `Could not ${doing}: only people who manage access can do this.`;
+  return `Could not ${doing}: ${e?.message || 'something went wrong'}`;
+}
 
-  const [emps, setEmps] = useState([]);
-  const [logins, setLogins] = useState([]);           // app_users rows (partners + employees)
-  const [loginsError, setLoginsError] = useState('');
-  const [audit, setAudit] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('all');        // all | login | nologin | inactive
-  const [selId, setSelId] = useState(null);
-  const [draft, setDraft] = useState({});
-  const [pickedTpl, setPickedTpl] = useState(null);   // remembers which template was chosen when two are identical
-  const [busy, setBusy] = useState('');
-  const [saveMsg, setSaveMsg] = useState('');
-  const [creds, setCreds] = useState(null);           // { name, email, action, password, error }
-  const [copied, setCopied] = useState(false);
-  const [confirm, setConfirm] = useState(null);       // { kind: 'revoke'|'delete', emp }
-  const [showAudit, setShowAudit] = useState(false);
+const fmtWhen = ts => (ts ? new Date(ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
 
-  const fetchAll = useCallback(async () => {
-    try {
-      const [e, a] = await Promise.all([employeesDB.getAll(), auditDB.getAll()]);
-      setEmps(e);
-      setAudit(a.filter(x => x.entity === 'access' || x.entity === 'employee'));
-    } catch (err) { console.error(err); }
-    try { setLogins(await accessDB.listLogins()); setLoginsError(''); }
-    catch (err) { console.error(err); setLoginsError(err.message || 'Could not load logins'); }
-    setLoading(false);
-  }, []);
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+function StateBadge({ state }) {
+  const s = STATES[state] || STATES.none;
+  return <span className={`badge acc-badge ${s.tone}`}>{s.label}</span>;
+}
 
-  const loginFor = useCallback(emp => logins.find(l => l.employee_id === emp?.id) || null, [logins]);
-  const partners = logins.filter(l => l.role === 'partner');
-  const sel = emps.find(e => e.id === selId) || null;
-  const selLogin = loginFor(sel);
-  const savedPerms = useMemo(() => normalizePerms(selLogin?.permissions || {}), [selLogin]);
-  const dirty = selLogin && !samePerms(draft, savedPerms);
-
-  useEffect(() => { setDraft(savedPerms); setSaveMsg(''); }, [selId, savedPerms]);
-
-  const list = useMemo(() => emps.filter(e => {
-    const q = search.toLowerCase();
-    const l = loginFor(e);
-    if (q && !(e.name || '').toLowerCase().includes(q) && !(e.email || '').toLowerCase().includes(q) && !(e.role || '').toLowerCase().includes(q)) return false;
-    if (filter === 'login') return !!l;
-    if (filter === 'nologin') return !l;
-    if (filter === 'inactive') return e.status !== 'Active';
-    return true;
-  }), [emps, search, filter, loginFor]);
-
-  async function log(entityId, action, description, prevData, nextData) {
-    try {
-      await auditDB.log({ entity: 'access', entityId, action, description, by: currentUser, prevData, nextData });
-      setAudit(a => [{ id: Date.now(), entity: 'access', entityId, action, description, by: currentUser, prevData, nextData, createdAt: new Date().toISOString() }, ...a]);
-    } catch (e) { console.error(e); }
-  }
-
-  function selectEmp(id) {
-    if (dirty && !window.confirm('You have unsaved access changes. Discard them?')) return;
-    setSelId(id);
-    setPickedTpl(null);
-  }
-
-  async function savePerms() {
-    if (!sel || !dirty) return;
-    setBusy('save'); setSaveMsg('');
-    try {
-      const saved = await accessDB.setPermissions(sel.id, draft);
-      setLogins(ls => ls.map(l => l.employee_id === sel.id ? { ...l, permissions: saved } : l));
-      await log(sel.id, 'Access changed', `${sel.name}: ${permSummary(savedPerms)} → ${permSummary(saved)}`, savedPerms, saved);
-      setSaveMsg('Saved. Takes effect on their next page load.');
-    } catch (e) { setSaveMsg(e.message || 'Could not save'); }
-    setBusy('');
-  }
-
-  async function loginAction(emp) {
-    const existing = loginFor(emp);
-    setBusy('login');
-    try {
-      const password = existing ? await adminUsersAPI.reset(emp.id) : await adminUsersAPI.create(emp.id);
-      setCreds({ name: emp.name, email: emp.email, action: existing ? 'reset' : 'created', password });
-      await log(emp.id, existing ? 'Password reset' : 'Login created', emp.name);
-      setLogins(await accessDB.listLogins());
-    } catch (e) {
-      setCreds({ name: emp.name, email: emp.email, action: existing ? 'reset' : 'created', error: fnError(e) });
-    }
-    setBusy('');
-  }
-
-  async function toggleActive(emp) {
-    const next = emp.status === 'Active' ? 'Inactive' : 'Active';
-    setBusy('status');
-    try {
-      const updated = await employeesDB.update(emp.id, { ...emp, status: next });
-      setEmps(es => es.map(x => x.id === emp.id ? updated : x));
-      await log(emp.id, next === 'Active' ? 'Activated' : 'Deactivated', `${emp.name}${next === 'Inactive' ? ' — all access paused' : ''}`);
-    } catch (e) { alert(e.message); }
-    setBusy('');
-  }
-
-  async function runConfirm() {
-    const { kind, emp } = confirm;
-    setBusy(kind);
-    try {
-      if (loginFor(emp)) await adminUsersAPI.revoke(emp.id);
-      setLogins(ls => ls.filter(l => l.employee_id !== emp.id));
-      if (kind === 'delete') {
-        await employeesDB.delete(emp.id);
-        setEmps(es => es.filter(x => x.id !== emp.id));
-        setSelId(null);
-        await log(emp.id, 'Deleted', `${emp.name} — record and login removed`);
-      } else {
-        await log(emp.id, 'Login revoked', emp.name);
-      }
-    } catch (e) { alert(fnError(e)); await fetchAll(); }
-    setBusy(''); setConfirm(null);
-  }
-
-  async function copyPw() {
-    try { await navigator.clipboard.writeText(creds.password); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { /* blocked */ }
-  }
-
-  if (loading) return <div><Header title="Users & Access" /><PageLoader /></div>;
-
-  const picked = TEMPLATES.find(t => t.id === pickedTpl);
-  const tpl = picked && samePerms(picked.perms, draft) ? picked.id : matchTemplate(draft);
-  const selHistory = sel ? audit.filter(a => a.entityId === sel.id) : [];
-
+function HistoryRow({ h }) {
   return (
-    <div>
-      <Header title="Users & Access" subtitle="Employee logins and what each person can open · only Bhargav and Manas can change this"
-        actions={<button onClick={() => setShowAudit(true)} className="mac-btn mac-btn-secondary" style={{ fontSize: 13 }}><History size={13} /> History</button>} />
-
-      <div className="page-body">
-        {loginsError && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '10px 14px', borderRadius: 10, background: 'rgba(255,149,0,0.08)', fontSize: 12.5, color: '#B25E00' }}>
-            <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
-            <span>Could not load logins: {loginsError}</span>
-          </div>
-        )}
-
-        {/* Partners (read-only) */}
-        {partners.length > 0 && (
-          <div className="mac-card" style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: INK.secondary, marginRight: 4 }}>Partners — full access</span>
-            {partners.map(p => (
-              <span key={p.user_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 100, background: 'rgba(0,0,0,0.04)', fontSize: 12.5 }}>
-                {p.is_access_admin ? <Crown size={12} color="#B07D00" /> : <UserRound size={12} color={INK.secondary} />}
-                {p.display_name || p.email}
-                {p.is_access_admin && <span style={{ fontSize: 10.5, color: '#B07D00' }}>manages access</span>}
-              </span>
-            ))}
-          </div>
-        )}
-
-        <div className="access-grid">
-          {/* ── Employee list ── */}
-          <div className="mac-card" style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0 }}>
-            <SearchBar value={search} onChange={setSearch} placeholder="Search employees…" />
-            <div className="tab-bar" style={{ flexWrap: 'wrap' }}>
-              {[['all', 'All'], ['login', 'Has login'], ['nologin', 'No login'], ['inactive', 'Inactive']].map(([k, l]) => (
-                <button key={k} className={`tab-item ${filter === k ? 'active' : ''}`} onClick={() => setFilter(k)} style={{ fontSize: 12, padding: '4px 10px' }}>{l}</button>
-              ))}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto', maxHeight: 'calc(100vh - 300px)' }}>
-              {list.length === 0 && <div style={{ textAlign: 'center', padding: 24, fontSize: 12.5, color: INK.muted }}>No employees</div>}
-              {list.map(e => {
-                const l = loginFor(e);
-                const active = e.id === selId;
-                return (
-                  <button key={e.id} onClick={() => selectEmp(e.id)} className="access-row"
-                    style={{ background: active ? 'rgba(0,113,227,0.08)' : 'transparent' }}>
-                    <div style={{ width: 32, height: 32, borderRadius: 9, background: e.status === 'Active' ? 'linear-gradient(135deg,#34C759,#30D158)' : '#C7C7CC', color: '#fff', fontSize: 11.5, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      {(e.name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: INK.primary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</div>
-                      <div style={{ fontSize: 11, color: INK.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {e.status !== 'Active' ? 'Inactive · ' : ''}{l ? permSummary(l.permissions) : 'No login'}
-                      </div>
-                    </div>
-                    {l ? <ShieldCheck size={14} color="#34C759" /> : <ShieldOff size={14} color="#C7C7CC" />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* ── Detail ── */}
-          {!sel ? (
-            <div className="mac-card" style={{ padding: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, textAlign: 'center' }}>
-              <Lock size={26} color={INK.muted} />
-              <div style={{ fontSize: 14, fontWeight: 600 }}>Select an employee</div>
-              <div style={{ fontSize: 12.5, color: INK.secondary, maxWidth: 380 }}>New employees start with <strong>no access</strong>. Create a login, then tick exactly what they may open. Partners always have full access.</div>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-              {/* identity + login */}
-              <div className="mac-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 200 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 16, fontWeight: 680 }}>{sel.name}</span>
-                      <Badge color={sel.status === 'Active' ? 'active' : 'inactive'}>{sel.status}</Badge>
-                      {selLogin ? <Badge color="green">Login active</Badge> : <Badge color="gray">No login</Badge>}
-                      {selLogin?.must_change_password && <Badge color="yellow">Must set password</Badge>}
-                    </div>
-                    <div style={{ fontSize: 12, color: INK.secondary, marginTop: 3 }}>{sel.role || '—'} · {sel.email || 'no email on file'}{sel.empId ? ` · ${sel.empId}` : ''}</div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button onClick={() => toggleActive(sel)} disabled={!!busy} className="mac-btn mac-btn-secondary" style={{ fontSize: 12.5 }}>
-                      <Power size={12} color={sel.status === 'Active' ? '#FF9500' : '#34C759'} /> {sel.status === 'Active' ? 'Deactivate' : 'Activate'}
-                    </button>
-                    {sel.email && (
-                      <button onClick={() => loginAction(sel)} disabled={!!busy} className="mac-btn mac-btn-secondary" style={{ fontSize: 12.5 }}>
-                        {busy === 'login' ? <Loader2 size={12} className="spin" /> : <KeyRound size={12} />} {selLogin ? 'Reset password' : 'Create login'}
-                      </button>
-                    )}
-                    {selLogin && (
-                      <button onClick={() => setConfirm({ kind: 'revoke', emp: sel })} disabled={!!busy} className="mac-btn mac-btn-secondary" style={{ fontSize: 12.5 }}>
-                        <ShieldOff size={12} color="#FF9500" /> Revoke login
-                      </button>
-                    )}
-                    <button onClick={() => setConfirm({ kind: 'delete', emp: sel })} disabled={!!busy} className="mac-btn mac-btn-danger" style={{ fontSize: 12.5 }}>
-                      <Trash2 size={12} /> Delete
-                    </button>
-                  </div>
-                </div>
-                {!sel.email && <div style={{ fontSize: 12, color: '#B25E00' }}>Add an email on the Employees page before creating a login.</div>}
-                {sel.status !== 'Active' && <div style={{ fontSize: 12, color: '#B25E00' }}>Inactive employees cannot use the app, whatever is ticked below.</div>}
-              </div>
-
-              {/* permissions */}
-              <div className="mac-card" style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 14, opacity: selLogin ? 1 : 0.55 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 650 }}>What {sel.name.split(' ')[0]} can access</div>
-                    <div style={{ fontSize: 11.5, color: INK.muted }}>{selLogin ? 'Ticking any action also gives View. Money, clients and credentials are partner-only and never shown here.' : 'Create a login first.'}</div>
-                  </div>
-                  <select className="mac-select" value={tpl} disabled={!selLogin} onChange={e => { const t = TEMPLATES.find(x => x.id === e.target.value); if (t) { setPickedTpl(t.id); setDraft(normalizePerms(t.perms)); } }} style={{ width: 'auto', fontSize: 12.5 }} aria-label="Role template">
-                    {tpl === 'custom' && <option value="custom">Custom</option>}
-                    {TEMPLATES.map(t => <option key={t.id} value={t.id}>Template: {t.label}</option>)}
-                  </select>
-                </div>
-
-                <div style={{ overflowX: 'auto' }}>
-                  <table className="access-table">
-                    <thead><tr><th style={{ textAlign: 'left' }}>Module</th><th colSpan={4} style={{ textAlign: 'left' }}>Allowed actions</th></tr></thead>
-                    <tbody>
-                      {MODULES.map(m => (
-                        <tr key={m.key}>
-                          <td style={{ minWidth: 220 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600 }}>{m.label}</div>
-                            <div style={{ fontSize: 11, color: INK.muted, whiteSpace: 'normal', maxWidth: 300 }}>{m.desc}</div>
-                          </td>
-                          {m.actions.map(([a, label]) => {
-                            const on = (draft[m.key] || []).includes(a);
-                            return (
-                              <td key={a}>
-                                <label className={`perm-chip ${on ? 'on' : ''}`} style={{ cursor: selLogin ? 'pointer' : 'not-allowed' }}>
-                                  <input type="checkbox" checked={on} disabled={!selLogin} onChange={() => setDraft(d => togglePerm(d, m.key, a))} />
-                                  {label}
-                                </label>
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <button onClick={savePerms} disabled={!dirty || !!busy} className="mac-btn mac-btn-primary" style={{ fontSize: 13 }}>
-                    {busy === 'save' ? <Loader2 size={13} className="spin" /> : <Save size={13} />} Save access
-                  </button>
-                  <button onClick={() => setDraft(savedPerms)} disabled={!dirty} className="mac-btn mac-btn-secondary" style={{ fontSize: 13 }}><Undo2 size={13} /> Discard</button>
-                  {dirty && <span style={{ fontSize: 12, color: '#B25E00' }}>Unsaved changes</span>}
-                  {saveMsg && <span style={{ fontSize: 12, color: saveMsg.startsWith('Saved') ? '#248A3D' : '#D70015' }}>{saveMsg}</span>}
-                </div>
-              </div>
-
-              {/* history for this person */}
-              <div className="mac-card" style={{ padding: 18 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 650, marginBottom: 10 }}>History for {sel.name.split(' ')[0]}</div>
-                {selHistory.length === 0 ? <div style={{ fontSize: 12.5, color: INK.muted }}>No changes recorded yet</div> : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {selHistory.slice(0, 12).map(h => <HistoryRow key={h.id} h={h} />)}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={runConfirm}
-        title={confirm?.kind === 'delete' ? 'Delete employee' : 'Revoke login'}
-        message={confirm?.kind === 'delete'
-          ? `Permanently delete ${confirm?.emp?.name}'s record, salary history and login? This cannot be undone.`
-          : `${confirm?.emp?.name} will be signed out of the app and cannot sign in again until you create a new login.`} />
-
-      <Modal isOpen={!!creds} onClose={() => setCreds(null)} title={creds?.action === 'reset' ? 'Password reset' : 'Login created'} size="sm">
-        {creds && (creds.error ? (
-          <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(255,59,48,0.06)', fontSize: 12.5, color: '#D70015' }}><strong>Failed:</strong> {creds.error}</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ fontSize: 12.5, color: INK.secondary }}>Share these with {creds.name}. The password is shown <strong>only once</strong>; they must change it at first sign-in.{creds.action === 'created' ? ' The login has no access until you tick modules.' : ''}</div>
-            <div className="cred-box"><span>Email</span><strong>{creds.email}</strong></div>
-            <div className="cred-box"><span>Temporary password</span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <strong style={{ fontFamily: 'monospace', fontSize: 14 }}>{creds.password}</strong>
-                <button onClick={copyPw} className="mac-btn mac-btn-secondary" style={{ fontSize: 12, padding: '4px 8px' }}>{copied ? <CheckCheck size={12} color="#34C759" /> : <Copy size={12} />}</button>
-              </span>
-            </div>
-            <button onClick={() => setCreds(null)} className="mac-btn mac-btn-primary" style={{ fontSize: 13 }}>Done</button>
-          </div>
-        ))}
-      </Modal>
-
-      <Modal isOpen={showAudit} onClose={() => setShowAudit(false)} title="Access history" size="md">
-        {audit.length === 0 ? <p style={{ textAlign: 'center', color: INK.muted, padding: 24, fontSize: 13 }}>No entries yet</p> : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>{audit.slice(0, 100).map(h => <HistoryRow key={h.id} h={h} />)}</div>
-        )}
-      </Modal>
-
-      <style>{`
-        .access-grid { display: grid; grid-template-columns: 300px minmax(0,1fr); gap: 14px; align-items: start; }
-        @media (max-width: 860px) { .access-grid { grid-template-columns: minmax(0,1fr); } }
-        .access-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; border: none; cursor: pointer; font-family: inherit; width: 100%; }
-        .access-row:hover { background: rgba(0,0,0,0.04) !important; }
-        .access-table { border-collapse: collapse; width: 100%; }
-        .access-table th { font-size: 11px; color: #8E8E93; text-transform: uppercase; letter-spacing: .4px; padding: 6px 8px; border-bottom: 1px solid rgba(0,0,0,0.07); }
-        .access-table td { padding: 10px 8px; border-bottom: 1px solid rgba(0,0,0,0.05); vertical-align: middle; white-space: nowrap; }
-        .perm-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 100px; border: 1px solid rgba(0,0,0,0.1); font-size: 12px; color: #6E6E73; user-select: none; }
-        .perm-chip.on { border-color: rgba(0,113,227,0.35); background: rgba(0,113,227,0.08); color: #0060C0; font-weight: 550; }
-        .perm-chip input { margin: 0; accent-color: #0071E3; }
-        .cred-box { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,0.03); font-size: 12.5px; flex-wrap: wrap; }
-        .cred-box > span:first-child { color: #8E8E93; }
-        .spin { animation: spin .8s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }
-      `}</style>
+    <div className="acc-hrow">
+      <div><strong>{h.action}</strong>{h.description ? ` — ${h.description}` : ''}<div className="faint">by {h.by || '—'}</div></div>
+      <time>{fmtWhen(h.createdAt)}</time>
     </div>
   );
 }
 
-function HistoryRow({ h }) {
-  const ts = h.createdAt ? new Date(h.createdAt).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-  const color = /Deleted|revoked|Deactivated/i.test(h.action) ? 'red' : /created|Activated/i.test(h.action) ? 'green' : 'blue';
+// "Users & Access" — only access admins (Bhargav, Manas) can open this page;
+// the database refuses changes from anyone else as well.
+export default function Access() {
+  const { user, me, displayName, refreshMe } = useAuth();
+  const toast = useToast();
+  const currentUser = displayName || user?.email || 'Unknown';
+
+  const [emps, setEmps] = useState([]);
+  const [logins, setLogins] = useState([]);           // login rows from /access/logins (partners + employees)
+  const [loginsError, setLoginsError] = useState('');
+  const [audit, setAudit] = useState([]);
+  const [phase, setPhase] = useState('loading');      // loading | ready | failed
+  const [loadError, setLoadError] = useState(null);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState('all');        // all | login | nologin | inactive
+  const [selKey, setSelKey] = useState(null);         // 'e:<employee id>' | 'p:<user id>'
+  const [edit, setEdit] = useState(null);             // unsaved permissions; null = showing what is saved
+  const [pickedTpl, setPickedTpl] = useState(null);   // remembers which template was chosen when two are identical
+  const [busy, setBusy] = useState('');
+  const [secret, setSecret] = useState(null);         // { empId, password, action } — shown once
+  const [serviceError, setServiceError] = useState(null); // { empId, text }
+  const [copied, setCopied] = useState(false);
+  const [confirm, setConfirm] = useState(null);       // { kind, emp } | { kind: 'admin' | 'requirepw', login, name, next }
+  const [showAudit, setShowAudit] = useState(false);
+  const hasData = useRef(false);
+  const guard = useRef({});
+
+  const loadLogins = useCallback(async () => {
+    try { setLogins(await accessDB.listLogins()); setLoginsError(''); }
+    catch (err) { console.error(err); setLoginsError(err.message || 'Check your connection and try again.'); }
+  }, []);
+
+  const fetchAll = useCallback(async () => {
+    const [e, a] = await Promise.allSettled([
+      employeesDB.getAll(),
+      Promise.all([auditDB.getAll('access'), auditDB.getAll('employee')]).then(parts => parts.flat().sort((x, y) => String(y.createdAt).localeCompare(String(x.createdAt)))),
+    ]);
+    if (e.status === 'fulfilled') { setEmps(e.value); hasData.current = true; setLoadError(null); }
+    else if (!hasData.current) { setLoadError(e.reason); setPhase('failed'); return; }
+    if (a.status === 'fulfilled') setAudit(a.value);
+    else console.error(a.reason);
+    await loadLogins();
+    setPhase('ready');
+  }, [loadLogins]);
+  useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // ── derived ─────────────────────────────────────────────────────
+  const people = useMemo(() => {
+    const byEmp = new Map(logins.filter(l => l.employeeId).map(l => [l.employeeId, l]));
+    return [
+      ...emps.map(e => {
+        const login = byEmp.get(e.id) || null;
+        return {
+          key: `e:${e.id}`, kind: 'employee', emp: e, login, name: e.name || 'Unnamed', role: e.role || '—', email: e.email || '',
+          state: e.status !== 'Active' ? 'off' : !login ? 'none' : login.mustChangePassword ? 'reset' : 'active',
+          access: login ? permSummary(login.permissions) : 'No access',
+        };
+      }),
+      ...logins.filter(l => l.role === 'partner').map(p => ({
+        key: `p:${p.userId}`, kind: 'partner', login: p, name: p.displayName || p.email, role: p.isAccessAdmin ? 'Partner · manages access' : 'Partner', email: p.email || '',
+        state: p.mustChangePassword ? 'reset' : 'active', access: 'Full access',
+      })),
+    ];
+  }, [emps, logins]);
+
+  const counts = useMemo(() => ({
+    all: people.length,
+    login: people.filter(p => p.login).length,
+    nologin: people.filter(p => p.kind === 'employee' && !p.login).length,
+    inactive: people.filter(p => p.state === 'off').length,
+  }), [people]);
+
+  const list = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return people.filter(p => {
+      if (q && !`${p.name} ${p.email} ${p.role}`.toLowerCase().includes(q)) return false;
+      if (filter === 'login') return !!p.login;
+      if (filter === 'nologin') return p.kind === 'employee' && !p.login;
+      if (filter === 'inactive') return p.state === 'off';
+      return true;
+    });
+  }, [people, search, filter]);
+
+  const sel = people.find(p => p.key === selKey) || null;
+  const myId = me?.id ?? user?.id ?? null;
+  const isMe = l => !!l && myId != null && String(l.userId) === String(myId);
+  const emp = sel?.emp || null;
+  const selLogin = emp ? sel.login : null;
+  const savedPerms = useMemo(() => normalizePerms(selLogin?.permissions || {}), [selLogin]);
+  const draft = edit ?? savedPerms;
+  const dirty = !!selLogin && edit != null && !samePerms(edit, savedPerms);
+  const shownSecret = emp && secret?.empId === emp.id ? secret : null;
+  const shownError = emp && serviceError?.empId === emp.id ? serviceError.text : '';
+  const picked = TEMPLATES.find(t => t.id === pickedTpl);
+  const tpl = picked && samePerms(picked.perms, draft) ? picked.id : matchTemplate(draft);
+  const selHistory = emp ? audit.filter(a => a.entityId === emp.id) : [];
+  const filtering = !!search.trim() || filter !== 'all';
+
+  // Esc and the close button reach this through a handler captured when the Drawer
+  // opened, so it reads the latest state from a ref rather than from its closure.
+  useEffect(() => { guard.current = { dirty, secret: !!shownSecret, confirm: !!confirm, emp }; });
+
+  // ── actions ─────────────────────────────────────────────────────
+  async function log(entityId, action, description, prevData, nextData) {
+    try {
+      await auditDB.log({ entity: 'access', entityId, action, description, prevData, nextData });   // the server stamps who did it
+      setAudit(a => [{ id: Date.now(), entity: 'access', entityId, action, description, by: currentUser, prevData, nextData, createdAt: new Date().toISOString() }, ...a]);
+    } catch (e) { console.error(e); }
+  }
+
+  function openPerson(key) { setSelKey(key); setEdit(null); setPickedTpl(null); setSecret(null); setServiceError(null); setCopied(false); }
+  function closeDrawer() { setSelKey(null); setEdit(null); setPickedTpl(null); setSecret(null); setServiceError(null); setCopied(false); }
+  function requestClose() {
+    const g = guard.current;
+    if (g.confirm) return;                               // the confirmation on top handles this Esc
+    if (g.dirty) setConfirm({ kind: 'discard', emp: g.emp });
+    else if (g.secret) setConfirm({ kind: 'secret', emp: g.emp });
+    else closeDrawer();
+  }
+
+  async function savePerms() {
+    if (!emp || !dirty) return;
+    setBusy('save');
+    try {
+      const saved = await accessDB.setPermissions(selLogin?.userId, draft);
+      setLogins(ls => ls.map(l => (l.employeeId === emp.id ? { ...l, permissions: saved } : l)));
+      setEdit(null); setPickedTpl(null);
+      toast.success(`Access saved — ${emp.name.split(' ')[0]} sees it on their next page load`);
+      await log(emp.id, 'Access changed', `${emp.name}: ${permSummary(savedPerms)} → ${permSummary(saved)}`, savedPerms, saved);
+    } catch (e) { toast.error('Could not save access', e); }
+    setBusy('');
+  }
+
+  async function loginAction(e, existing) {
+    const doing = existing ? 'reset the password' : 'create the login';
+    setBusy('login'); setServiceError(null); setSecret(null); setCopied(false);
+    try {
+      const password = existing ? await accessDB.resetLogin(e.id) : await accessDB.createLogin(e.id);
+      setSecret({ empId: e.id, password, action: existing ? 'reset' : 'created' });
+      await log(e.id, existing ? 'Password reset' : 'Login created', e.name);
+      await loadLogins();
+    } catch (err) { console.error(err); setServiceError({ empId: e.id, text: loginServiceError(err, doing) }); }
+    setBusy('');
+  }
+
+  async function revokeLogin(e) {
+    setBusy('revoke'); setServiceError(null);
+    try {
+      await accessDB.revokeLogin(e.id);
+      setLogins(ls => ls.filter(l => l.employeeId !== e.id));
+      setEdit(null); setSecret(null);
+      toast.success(`${e.name}'s login was revoked`);
+      await log(e.id, 'Login revoked', e.name);
+    } catch (err) { console.error(err); setServiceError({ empId: e.id, text: loginServiceError(err, 'revoke the login') }); await loadLogins(); }
+    setBusy('');
+  }
+
+  // Only the status is sent: re-sending the whole employee record from this
+  // page's copy could overwrite newer salary or bank details saved elsewhere.
+  async function setStatus(e, next) {
+    setBusy('status');
+    try {
+      const updated = await employeesDB.setStatus(e.id, next);
+      setEmps(es => es.map(x => (x.id === e.id ? { ...x, ...(updated || {}), status: next } : x)));
+      toast.success(next === 'Active' ? `${e.name} is active again` : `${e.name} was deactivated`);
+      await log(e.id, next === 'Active' ? 'Activated' : 'Deactivated', `${e.name}${next === 'Inactive' ? ' — all access paused' : ''}`);
+    } catch (err) { toast.error(`Could not ${next === 'Active' ? 'activate' : 'deactivate'} ${e.name}`, err); }
+    setBusy('');
+  }
+
+  async function deleteEmployee(e, hadLogin) {
+    setBusy('delete'); setServiceError(null);
+    try {
+      if (hadLogin) {
+        try { await accessDB.revokeLogin(e.id); }
+        catch (err) { console.error(err); setServiceError({ empId: e.id, text: `${loginServiceError(err, 'remove the login')} Nothing was deleted.` }); setBusy(''); return; }
+        setLogins(ls => ls.filter(l => l.employeeId !== e.id));
+      }
+      await employeesDB.delete(e.id);
+      setEmps(es => es.filter(x => x.id !== e.id));
+      closeDrawer();
+      toast.success(`${e.name} was deleted`);
+      await log(e.id, 'Deleted', `${e.name} — record and login removed`);
+    } catch (err) { toast.error(`Could not delete ${e.name}`, err); await fetchAll(); }
+    setBusy('');
+  }
+
+  // Optimistic: the switch and the list badge flip at once, and flip back if the server refuses.
+  async function setAccessAdmin(login, next) {
+    const prev = !!login.isAccessAdmin;
+    const patch = v => setLogins(ls => ls.map(l => (l.userId === login.userId ? { ...l, ...v } : l)));
+    const who = login.displayName || login.email;
+    setBusy('admin');
+    patch({ isAccessAdmin: next });
+    try {
+      const row = await accessDB.setAccessAdmin(login.userId, next);
+      if (row) patch({ ...row, isAccessAdmin: !!row.isAccessAdmin });
+      toast.success(next ? `${who} can now manage user access` : `${who} no longer manages user access`);
+      if (isMe(login)) refreshMe?.();                    // my own rights changed — re-read them
+    } catch (err) {
+      patch({ isAccessAdmin: prev });
+      toast.error(`Could not change who manages access: ${err?.message || 'something went wrong'}`, err);
+    }
+    setBusy('');
+  }
+
+  async function requirePasswordChange(login, name) {
+    setBusy('requirepw');
+    try {
+      await accessDB.requirePasswordChange(login.userId);
+      setLogins(ls => ls.map(l => (l.userId === login.userId ? { ...l, mustChangePassword: true } : l)));
+      toast.success(isMe(login) ? 'You must choose a new password — you will be signed out' : `${name} must choose a new password at the next sign-in`);
+      if (login.employeeId) await log(login.employeeId, 'Password change required', name);
+    } catch (err) { toast.error(`Could not require a new password: ${err?.message || 'something went wrong'}`, err); }
+    setBusy('');
+  }
+
+  function toggleAccessAdmin(login, next) {
+    if (!next || isMe(login)) setConfirm({ kind: 'admin', login, next, name: login.displayName || login.email });
+    else setAccessAdmin(login, next);
+  }
+
+  async function copyPw() {
+    try { await navigator.clipboard.writeText(shownSecret.password); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch (e) { toast.error('Could not copy — select the password and copy it by hand', e); }
+  }
+
+  function runConfirm() {
+    const { kind, emp: e } = confirm;
+    const hadLogin = logins.some(l => l.employeeId === e?.id);
+    if (kind === 'admin') setAccessAdmin(confirm.login, confirm.next);
+    else if (kind === 'requirepw') requirePasswordChange(confirm.login, confirm.name);
+    else if (kind === 'create') loginAction(e, false);
+    else if (kind === 'reset') loginAction(e, true);
+    else if (kind === 'revoke') revokeLogin(e);
+    else if (kind === 'deactivate') setStatus(e, 'Inactive');
+    else if (kind === 'delete') deleteEmployee(e, hadLogin);
+    else closeDrawer();                                  // discard | secret
+  }
+
+  const cName = confirm?.emp?.name || confirm?.name || 'this person';
+  const cSelf = isMe(confirm?.login);
+  const CONFIRMS = {
+    create: { title: 'Create login', label: 'Create login', danger: false, message: `Create a login for ${cName} (${confirm?.emp?.email})? A temporary password is shown once for you to share. The login starts with no access until you tick modules.` },
+    reset: { title: 'Reset password', label: 'Reset password', message: `Reset ${cName}'s password? Their current password stops working straight away, and a new temporary password is shown once for you to share.` },
+    revoke: { title: 'Revoke login', label: 'Revoke login', message: `${cName} will be signed out of the app and cannot sign in again until you create a new login.` },
+    deactivate: { title: 'Deactivate', label: 'Deactivate', message: `Deactivate ${cName}? They cannot use the app until you activate them again. Their record, login and ticked access are kept.` },
+    delete: { title: 'Delete employee', label: 'Delete employee', message: `Permanently delete ${cName}'s record, salary history and login? This cannot be undone.` },
+    admin: confirm?.next
+      ? { title: 'Manage user access', label: 'Turn on', danger: false, message: 'Turn on managing user access for yourself? You will be able to create logins, reset passwords and change what each person can open.' }
+      : { title: 'Stop managing user access', label: 'Turn off', message: cSelf
+        ? 'Turn this off for yourself? You will no longer be able to open Users & Access, and another partner who manages access will have to turn it back on.'
+        : `${cName} will no longer be able to create logins, reset passwords or change what each person can open.` },
+    requirepw: { title: 'Require new password', label: 'Require new password', danger: false, message: cSelf
+      ? 'Require a new password for yourself? You will be signed out, and must choose a new password when you sign in again.'
+      : `${cName} keeps their current password for now, but must choose a new one at the next sign-in.` },
+    discard: { title: 'Discard unsaved changes?', label: 'Discard changes', message: `You changed what ${cName} can access but have not saved it.` },
+    secret: { title: 'Close without copying?', label: 'Close anyway', message: 'The temporary password will not be shown again. Make sure you have copied it before closing.' },
+  };
+  const cSpec = CONFIRMS[confirm?.kind] || {};
+
+  const noLogin = counts.nologin;
+  const summary = phase !== 'ready' ? (phase === 'loading' ? 'Loading…' : '')
+    : `${emps.length} employee${emps.length === 1 ? '' : 's'} · ${noLogin ? `${noLogin} without a login` : 'everyone has a login'}${counts.inactive ? ` · ${counts.inactive} deactivated` : ''}`;
+  const first = emp?.name?.split(' ')[0] || '';
+
   return (
-    <div style={{ padding: '8px 10px', borderRadius: 9, background: 'rgba(0,0,0,0.025)', display: 'flex', gap: 10, alignItems: 'flex-start', justifyContent: 'space-between' }}>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}><Badge color={color}>{h.action}</Badge><span style={{ fontSize: 12.5 }}>{h.description}</span></div>
-        <div style={{ fontSize: 11, color: '#8E8E93', marginTop: 2 }}>by {h.by || '—'}</div>
+    <div>
+      <Header title="Users & Access" subtitle={summary}
+        actions={<button onClick={() => setShowAudit(true)} className="mac-btn mac-btn-secondary"><History size={14} /> History</button>} />
+
+      <div className="page-body">
+        {phase === 'loading' && <SkeletonRows rows={6} />}
+        {phase === 'failed' && <ErrorPanel title="Could not load people" error={loadError} onRetry={() => { setPhase('loading'); fetchAll(); }} />}
+        {phase === 'ready' && <>
+          {loginsError && (
+            <div className="acc-strip" role="alert">
+              <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>Could not load logins, so login states below may be wrong. {loginsError}</span>
+              <button onClick={loadLogins}>Retry</button>
+            </div>
+          )}
+
+          <Toolbar search={search} onSearch={setSearch} placeholder="Search people"
+            right={filtering ? <><span>{list.length} of {people.length}</span><button className="mac-btn mac-btn-ghost" onClick={() => { setSearch(''); setFilter('all'); }}>Clear</button></> : null}>
+            <Chips label="Login state" value={filter} onChange={setFilter} options={[
+              { value: 'all', label: 'All', count: counts.all },
+              { value: 'login', label: 'Has login', count: counts.login },
+              { value: 'nologin', label: 'No login', count: counts.nologin },
+              { value: 'inactive', label: 'Deactivated', count: counts.inactive },
+            ]} />
+          </Toolbar>
+
+          {list.length === 0 ? (filtering
+            ? <EmptyPanel icon={SearchX} title="No one matches" text="Try a different name, or clear the filters." action={<button className="mac-btn mac-btn-secondary" onClick={() => { setSearch(''); setFilter('all'); }}>Clear filters</button>} />
+            : <EmptyPanel icon={Users} title="No employees yet" text="Add people on the Employees page, then come back here to give them a login." />
+          ) : <>
+            <div className="mac-card only-desktop">
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead><tr><th>Person</th><th>Role</th><th>Login</th><th>Can open</th></tr></thead>
+                  <tbody>
+                    {list.map(p => (
+                      <tr key={p.key} className="clickable" tabIndex={0} onClick={() => openPerson(p.key)} onKeyDown={e => { if (e.key === 'Enter') openPerson(p.key); }}>
+                        <td><div className="acc-person"><Avatar name={p.name} /><div><div className="cell-main">{p.name}</div><div className="cell-sub">{p.email || 'No email on file'}</div></div></div></td>
+                        <td>{p.role}</td>
+                        <td><StateBadge state={p.state} /></td>
+                        <td className="cell-sub">{p.access}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="only-mobile">
+              <div className="list-cards">
+                {list.map(p => (
+                  <button key={p.key} className="list-card" onClick={() => openPerson(p.key)}>
+                    <span className="acc-card-top">
+                      <span className="acc-person"><Avatar name={p.name} /><span style={{ minWidth: 0 }}><span className="cell-main" style={{ display: 'block' }}>{p.name}</span><span className="cell-sub" style={{ display: 'block' }}>{p.role}</span></span></span>
+                      <StateBadge state={p.state} />
+                    </span>
+                    <span className="cell-sub">Can open: {p.access}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>}
+        </>}
       </div>
-      <span style={{ fontSize: 11, color: '#AEAEB2', whiteSpace: 'nowrap' }}>{ts}</span>
+
+      {/* ── one person ── */}
+      <Drawer isOpen={!!sel} onClose={requestClose} width={600}
+        title={sel?.name} subtitle={sel ? `${sel.role} · ${sel.email || 'no email on file'}${emp?.empId ? ` · ${emp.empId}` : ''}` : ''}
+        actions={emp ? <RowMenu label="More actions" items={[{ label: 'Delete employee', icon: Trash2, danger: true, onClick: () => setConfirm({ kind: 'delete', emp }) }]} /> : null}
+        footer={dirty ? <>
+          <span className="acc-foot-note">Unsaved changes</span>
+          <button onClick={() => { setEdit(null); setPickedTpl(null); }} disabled={busy === 'save'} className="mac-btn mac-btn-secondary">Discard</button>
+          <button onClick={savePerms} disabled={!!busy} className="mac-btn mac-btn-primary">{busy === 'save' ? 'Saving…' : 'Save access'}</button>
+        </> : null}>
+        {sel && !emp && <>
+          <section className="acc-section">
+            <div className="acc-section-head"><h3 className="section-title">Login</h3><StateBadge state={sel.state} /></div>
+            <p className="acc-note">Partners always have full access to everything, so there is nothing to tick here.</p>
+            <div className="acc-actions">
+              <button onClick={() => setConfirm({ kind: 'requirepw', login: sel.login, name: sel.name })} disabled={!!busy || sel.login.mustChangePassword} className="mac-btn mac-btn-secondary">
+                <RefreshCw size={14} /> {busy === 'requirepw' ? 'Saving…' : 'Require new password at next sign-in'}
+              </button>
+            </div>
+          </section>
+          <section className="acc-section">
+            <div className="acc-section-head">
+              <h3 className="section-title" id="acc-admin-label">Manages user access</h3>
+              <Switch checked={!!sel.login.isAccessAdmin} disabled={busy === 'admin'} aria-labelledby="acc-admin-label" aria-describedby="acc-admin-note"
+                onCheckedChange={next => toggleAccessAdmin(sel.login, next)} />
+            </div>
+            <p className="acc-note" id="acc-admin-note">Can create logins, reset passwords and change what each person can open.</p>
+          </section>
+        </>}
+
+        {emp && <>
+          {shownError && (
+            <div className="acc-strip bad" role="alert">
+              <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{shownError}</span>
+              <button onClick={() => setServiceError(null)}>Dismiss</button>
+            </div>
+          )}
+
+          {shownSecret && (
+            <div className="acc-secret" role="status">
+              <strong>{shownSecret.action === 'reset' ? 'New temporary password' : 'Login created — temporary password'}</strong>
+              <div className="acc-secret-row">
+                <code>{shownSecret.password}</code>
+                <button onClick={copyPw} className="mac-btn mac-btn-secondary">{copied ? <><CheckCheck size={14} /> Copied</> : <><Copy size={14} /> Copy</>}</button>
+              </div>
+              <div className="acc-secret-warn"><AlertTriangle size={14} /> Shown only once — share it privately</div>
+              <div className="acc-note">{first} signs in with {emp.email} and must choose a new password the first time.{shownSecret.action === 'created' ? ' The login has no access until you tick modules below.' : ''}</div>
+            </div>
+          )}
+
+          <section className="acc-section">
+            <div className="acc-section-head"><h3 className="section-title">Login</h3><StateBadge state={sel.state} /></div>
+            <p className="acc-note">
+              {sel.state === 'off' ? `${first} is deactivated and cannot use the app, whatever is ticked below.`
+                : !selLogin ? (emp.email ? `${first} cannot sign in yet.` : 'Add an email on the Employees page before creating a login.')
+                : selLogin.mustChangePassword ? `${first} has a temporary password and must set their own at the next sign-in.`
+                : `${first} can sign in with ${emp.email || selLogin.email}.`}
+            </p>
+            <div className="acc-actions">
+              {!selLogin && <button onClick={() => setConfirm({ kind: 'create', emp })} disabled={!!busy || !emp.email} className="mac-btn mac-btn-primary"><KeyRound size={14} /> {busy === 'login' ? 'Creating…' : 'Create login'}</button>}
+              {selLogin && emp.email && <button onClick={() => setConfirm({ kind: 'reset', emp })} disabled={!!busy} className="mac-btn mac-btn-secondary"><KeyRound size={14} /> {busy === 'login' ? 'Resetting…' : 'Reset password'}</button>}
+              {selLogin && <button onClick={() => setConfirm({ kind: 'revoke', emp })} disabled={!!busy} className="mac-btn mac-btn-secondary"><ShieldOff size={14} /> {busy === 'revoke' ? 'Revoking…' : 'Revoke login'}</button>}
+              {selLogin && <button onClick={() => setConfirm({ kind: 'requirepw', login: selLogin, name: emp.name })} disabled={!!busy || selLogin.mustChangePassword} className="mac-btn mac-btn-secondary"><RefreshCw size={14} /> {busy === 'requirepw' ? 'Saving…' : 'Require new password at next sign-in'}</button>}
+              <button onClick={() => (emp.status === 'Active' ? setConfirm({ kind: 'deactivate', emp }) : setStatus(emp, 'Active'))} disabled={!!busy} className="mac-btn mac-btn-secondary">
+                <Power size={14} /> {busy === 'status' ? 'Saving…' : emp.status === 'Active' ? 'Deactivate' : 'Activate'}
+              </button>
+            </div>
+          </section>
+
+          <section className="acc-section">
+            <div className="acc-section-head">
+              <h3 className="section-title">What {first} can open</h3>
+              {selLogin && (
+                <select className="mac-select" value={tpl} aria-label="Start from a template"
+                  onChange={e => { const t = TEMPLATES.find(x => x.id === e.target.value); if (t) { setPickedTpl(t.id); setEdit(normalizePerms(t.perms)); } }}>
+                  {tpl === 'custom' && <option value="custom">Custom</option>}
+                  {TEMPLATES.map(t => <option key={t.id} value={t.id}>Template: {t.label}</option>)}
+                </select>
+              )}
+            </div>
+            {!selLogin ? <p className="acc-note">Create a login first. New logins start with no access, then you tick exactly what {first} may open.</p> : <>
+              <p className="acc-note">Ticking any action also gives View. Money, clients and credentials are partner-only and never appear here.</p>
+              <div>
+                {MODULES.map(m => (
+                  <div key={m.key} className="acc-module" role="group" aria-label={m.label}>
+                    <div><div className="cell-main">{m.label}</div><div className="cell-sub">{m.desc}</div></div>
+                    <div className="acc-perms">
+                      {m.actions.map(([a, label]) => {
+                        const on = (draft[m.key] || []).includes(a);
+                        return (
+                          <label key={a} className={`acc-perm ${on ? 'on' : ''}`}>
+                            <input type="checkbox" checked={on} onChange={() => setEdit(togglePerm(draft, m.key, a))} />{label}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>}
+          </section>
+
+          <section className="acc-section">
+            <h3 className="section-title">History</h3>
+            {selHistory.length === 0 ? <p className="acc-note">No changes recorded yet.</p>
+              : <div className="acc-history">{selHistory.slice(0, 12).map(h => <HistoryRow key={h.id} h={h} />)}</div>}
+          </section>
+        </>}
+      </Drawer>
+
+      <Modal isOpen={showAudit} onClose={() => setShowAudit(false)} title="Access history" size="md">
+        {audit.length === 0 ? <p className="acc-note" style={{ textAlign: 'center', padding: 24 }}>No entries yet</p>
+          : <div className="acc-history">{audit.slice(0, 100).map(h => <HistoryRow key={h.id} h={h} />)}</div>}
+      </Modal>
+
+      <ConfirmDialog isOpen={!!confirm} onClose={() => setConfirm(null)} onConfirm={runConfirm}
+        title={cSpec.title} message={cSpec.message} confirmLabel={cSpec.label} danger={cSpec.danger !== false} />
     </div>
   );
 }

@@ -1,134 +1,122 @@
-import { NavLink } from 'react-router-dom';
+// Main navigation.
+//  • Desktop: expanded (248px) ↔ icon rail (68px). In the rail, labels become
+//    tooltips, section titles become dividers and the chat count becomes a dot.
+//    Toggle with the round handle on the edge or Ctrl/Cmd+B; remembered per browser.
+//  • Phone: a slide-in drawer (always the full menu) with focus kept inside and
+//    Esc to close.
+import { useEffect, useRef } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { RiArrowLeftSLine, RiExpandUpDownLine } from '@remixicon/react';
 import { useLayout } from '../../contexts/LayoutContext';
-import { useAuth } from '../../contexts/AuthContext';
 import { useChat } from '../../contexts/ChatContext';
 import codelixLogo from '../../assets/codelix.svg';
-import {
-  LayoutDashboard, Users, IndianRupee, UserCheck,
-  FolderKanban, KeyRound, SquareKanban, Archive, MessageSquare, ShieldCheck, LineChart,
-} from 'lucide-react';
+import { Avatar } from '../ui/Avatar';
+import { Tooltip } from '../ui/Tooltip';
+import { modKey } from '../ui/Kbd';
+import UserMenu from './UserMenu';
+import { useMeSummary, useMediaQuery, useNavSections, useShell } from './shell';
 
-const partnerNavItems = [
-  { icon: LayoutDashboard, label: 'Dashboard',       to: '/' },
-  { icon: LineChart,       label: 'P&L Reports',      to: '/reports' },
-  { icon: Users,           label: 'CRM',              to: '/crm' },
-  { icon: IndianRupee,     label: 'Transactions',     to: '/transactions' },
-  { icon: UserCheck,       label: 'Employees',        to: '/employees' },
-  { icon: FolderKanban,    label: 'Projects',         to: '/projects' },
-  { icon: SquareKanban,    label: 'Work',             to: '/tasks' },
-  { icon: MessageSquare,   label: 'Chat',             to: '/chat' },
-  { icon: KeyRound,        label: 'Credentials',      to: '/credentials' },
-  { icon: Archive,         label: 'Past Projects',    to: '/existing-projects' },
-  { icon: ShieldCheck,     label: 'Users & Access',   to: '/access' },
-];
-
-const employeeNavItems = [
-  { icon: SquareKanban,  label: 'My Work', to: '/tasks', modules: ['tasks', 'projects', 'timesheet'] },
-  { icon: MessageSquare, label: 'Chat',    to: '/chat',  modules: ['chat'] },
-];
-
-// Derive a display name from a partner email, e.g. "bhargav.codelix@gmail.com" → "Bhargav"
-function nameFromEmail(email = '') {
-  const part = email.split('@')[0].split('.')[0];
-  return part.charAt(0).toUpperCase() + part.slice(1);
-}
+const FOCUSABLE = 'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export default function Sidebar() {
   const { sidebarOpen, closeSidebar } = useLayout();
-  const { user, isEmployee, isAccessAdmin, employeeData, can, displayName: fullName } = useAuth();
+  const { collapsed, toggleCollapsed } = useShell();
+  const { totalUnread } = useChat() || {};
+  const sections = useNavSections();
+  const meInfo = useMeSummary();
+  const isPhone = useMediaQuery('(max-width: 768px)');
+  const rail = collapsed && !isPhone;
+  const drawerOpen = isPhone && sidebarOpen;
+  const asideRef = useRef(null);
+  const { pathname } = useLocation();
+  const isActive = to => (to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(`${to}/`));
 
-  const { totalUnread } = useChat();
-  const navItems = isEmployee
-    ? employeeNavItems.filter(i => i.modules.some(m => can(m)))
-    : partnerNavItems.filter(i => i.to !== '/access' || isAccessAdmin);
-
-  // User footer info
-  const displayName = isEmployee
-    ? (employeeData?.name ?? user?.email ?? '—')
-    : (fullName || nameFromEmail(user?.email));
-  const displayRole = isEmployee
-    ? (employeeData?.role ?? 'Employee')
-    : 'Partner';
-  const initials = displayName
-    .split(' ')
-    .slice(0, 2)
-    .map(w => w[0])
-    .join('')
-    .toUpperCase();
+  // Phone drawer: move focus in, keep Tab inside, Esc closes, give focus back.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const aside = asideRef.current;
+    const opener = document.activeElement;
+    const items = () => [...(aside?.querySelectorAll(FOCUSABLE) || [])].filter(el => el.offsetParent !== null);
+    (aside?.querySelector('.sidebar-item.active') || items()[0])?.focus();
+    const onKey = e => {
+      if (e.key === 'Escape') { e.preventDefault(); closeSidebar(); return; }
+      if (e.key !== 'Tab') return;
+      const list = items();
+      if (!list.length) return;
+      const first = list[0], last = list[list.length - 1];
+      if (!aside.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('keydown', onKey); opener?.focus?.(); };
+  }, [drawerOpen, closeSidebar]);
 
   return (
-    <aside
-      className={`sidebar-aside ${sidebarOpen ? 'mobile-open' : ''}`}
-      style={{
-        width: 216, minWidth: 216, height: '100vh',
-        background: '#ECECF0',
-        borderRight: '1px solid rgba(0,0,0,0.07)',
-        display: 'flex', flexDirection: 'column',
-        position: 'sticky', top: 0, overflow: 'hidden',
-        flexShrink: 0,
-      }}
-    >
-      {/* Brand */}
-      <div style={{ padding: '20px 16px 14px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.1)', flexShrink: 0,
-            padding: 5,
-          }}>
-            <img src={codelixLogo} alt="Codelix" style={{ width: 20, height: 'auto', display: 'block' }} />
-          </div>
-          <div>
-            <div style={{ fontSize: 13.5, fontWeight: 650, color: '#1D1D1F', letterSpacing: '-0.3px', lineHeight: 1.2 }}>Codelix</div>
-            <div style={{ fontSize: 10.5, color: '#8E8E93', lineHeight: 1.2 }}>IT Solutions</div>
-          </div>
-        </div>
-      </div>
+    <>
+      <aside
+        ref={asideRef} id="app-sidebar"
+        className={`sidebar-aside ${sidebarOpen ? 'mobile-open' : ''}`}
+        aria-label="Main navigation"
+        {...(drawerOpen ? { role: 'dialog', 'aria-modal': true } : {})}
+      >
+        {/* Brand — collapses to the mark */}
+        <Link to="/" className="sidebar-brand" onClick={closeSidebar} aria-label="Codelix — go to the home page">
+          <span className="sidebar-logo"><img src={codelixLogo} alt="" /></span>
+          <span className="sidebar-fade">
+            <span style={{ display: 'block', fontSize: 15, fontWeight: 600, color: 'var(--ink)', lineHeight: '20px', letterSpacing: '-0.011em' }}>Codelix</span>
+            <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-3)', lineHeight: '16px' }}>Office management</span>
+          </span>
+        </Link>
 
-      <div style={{ height: 1, background: 'rgba(0,0,0,0.07)', margin: '0 12px 8px' }} />
-
-      {/* Nav */}
-      <nav style={{ flex: 1, padding: '4px 8px', display: 'flex', flexDirection: 'column', gap: 1 }}>
-        {navItems.map(({ icon: Icon, label, to }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            onClick={closeSidebar}
-            className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
-          >
-            <Icon size={15} strokeWidth={1.9} style={{ flexShrink: 0 }} />
-            <span>{label}</span>
-            {to === '/chat' && totalUnread > 0 && (
-              <span style={{ marginLeft: 'auto', minWidth: 18, height: 18, padding: '0 5px', borderRadius: 9, background: '#0071E3', color: '#fff', fontSize: 10.5, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                {totalUnread > 99 ? '99+' : totalUnread}
-              </span>
-            )}
-          </NavLink>
-        ))}
-      </nav>
-
-      {/* User */}
-      <div style={{ padding: '12px 14px', borderTop: '1px solid rgba(0,0,0,0.07)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: '50%',
-            background: isEmployee
-              ? 'linear-gradient(135deg,#34C759,#30D158)'
-              : 'linear-gradient(135deg,#0071E3,#0A84FF)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontSize: 10, fontWeight: 600, flexShrink: 0,
-          }}>{initials}</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 550, color: '#1D1D1F', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {displayName}
+        <nav className="sidebar-nav" aria-label="Pages">
+          {sections.map(section => (
+            <div key={section.title} className="sidebar-group" role="group" aria-label={section.title}>
+              <div className="sidebar-section" aria-hidden="true"><span>{section.title}</span></div>
+              {section.items.map(({ icon: Icon, label, to }) => {
+                const unread = to === '/chat' && totalUnread > 0 ? totalUnread : 0;
+                return (
+                  <Tooltip key={to} content={unread ? `${label} · ${unread} unread` : label} side="right" sideOffset={14} disabled={!rail} delay={120}>
+                    {/* a plain string className: the tooltip wrapper merges props and cannot take NavLink's function form */}
+                    <Link
+                      to={to} onClick={closeSidebar}
+                      className={`sidebar-item ${isActive(to) ? 'active' : ''}`}
+                      aria-current={isActive(to) ? 'page' : undefined}
+                      aria-label={unread ? `${label}, ${unread} unread` : rail ? label : undefined}
+                    >
+                      <Icon size={20} aria-hidden="true" />
+                      <span className="sidebar-fade">{label}</span>
+                      {unread > 0 && <span className="nav-count" aria-hidden="true">{unread > 99 ? '99+' : unread}</span>}
+                    </Link>
+                  </Tooltip>
+                );
+              })}
             </div>
-            <div style={{ fontSize: 10.5, color: '#8E8E93' }}>{displayRole}</div>
-          </div>
+          ))}
+        </nav>
+
+        {/* Account */}
+        <div className="sidebar-foot">
+          <UserMenu side={rail ? 'right' : 'top'} align={rail ? 'end' : 'start'} sideOffset={rail ? 14 : 8}>
+            <button type="button" className="sidebar-user" aria-label={`Account menu for ${meInfo.name}`} title={rail ? meInfo.name : undefined}>
+              <Avatar name={meInfo.name} src={meInfo.avatarUrl} size={32} title="" />
+              <span className="sidebar-fade" style={{ flex: 1 }}>
+                <span className="sidebar-user-name" style={{ display: 'block' }}>{meInfo.name}</span>
+                <span className="sidebar-user-role" style={{ display: 'block' }}>{meInfo.role}</span>
+              </span>
+              <RiExpandUpDownLine size={16} className="sidebar-fade" style={{ color: 'var(--ink-3)', flexShrink: 0 }} aria-hidden="true" />
+            </button>
+          </UserMenu>
         </div>
-      </div>
-    </aside>
+      </aside>
+
+      {/* Collapse / expand handle on the sidebar's edge (desktop) */}
+      <Tooltip content={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} shortcut={`${modKey()} B`} side="right">
+        <button type="button" className="sidebar-toggle" onClick={toggleCollapsed}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-expanded={!collapsed} aria-controls="app-sidebar">
+          <RiArrowLeftSLine size={16} aria-hidden="true" />
+        </button>
+      </Tooltip>
+    </>
   );
 }

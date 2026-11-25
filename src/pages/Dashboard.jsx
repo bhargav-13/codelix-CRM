@@ -1,89 +1,153 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  RiAlarmWarningLine, RiArrowRightDownLine, RiArrowRightSLine, RiArrowRightUpLine, RiCalendarEventLine,
+  RiFolder3Line, RiGroupLine, RiTeamLine, RiTimeLine, RiWalletLine,
+} from '@remixicon/react';
 import Header from '../components/layout/Header';
 import Badge, { getStatusColor } from '../components/ui/Badge';
-import { PageLoader } from '../components/ui/CodelixLoader';
+import { Avatar } from '../components/ui/Avatar';
+import { PersonChip } from '../components/ui/Person';
+import { Skeleton } from '../components/ui/Skeleton';
+import { ErrorPanel, fmtDate, todayLocal } from '../components/ui/kit';
+import { useAuth } from '../contexts/AuthContext';
 import { clientsDB, transactionsDB, employeesDB, projectsDB, settingsDB } from '../lib/db';
 import { computeBalances } from '../lib/finance';
 import FinanceOverview from '../components/dashboard/FinanceOverview';
-import {
-  Users, FolderKanban, UserCheck,
-  ArrowUpRight, ArrowDownRight, AlertCircle, CalendarClock, Clock,
-  IndianRupee,
-} from 'lucide-react';
+import TodayAttendance from '../components/dashboard/TodayAttendance';
 
-const today = new Date().toISOString().split('T')[0];
-const fmt = n => '₹' + Number(n).toLocaleString('en-IN');
+const fmt = n => '₹' + Number(n || 0).toLocaleString('en-IN');
+const longDate = () => new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
 
-function StatCard({ label, value, sub, gradient, icon: Icon, iconColor }) {
+const PIPELINE = [
+  ['Hot', 'var(--color-red-500)'], ['Warm', 'var(--color-orange-500)'], ['Cold', 'var(--color-blue-500)'],
+  ['Closed Won', 'var(--color-green-500)'], ['Closed Lost', 'var(--color-neutral-400)'],
+];
+
+// A headline number. The whole tile is a button that opens the page behind it.
+function Tile({ label, value, sub, icon: Icon, dark, onClick }) {
   return (
-    <div style={{
-      background: '#fff', border: '1px solid rgba(0,0,0,0.07)',
-      borderRadius: 16, padding: '18px 20px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.04)',
-      display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0,
-    }}>
-      <div style={{ width:38, height:38, borderRadius:11, background:gradient, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-        <Icon size={17} color={iconColor} />
+    <button type="button" className={`tile card-link ${dark ? 'dark' : ''}`} onClick={onClick} aria-label={`${label}: ${value}. ${sub || ''}`}>
+      <span className="tile-icon"><Icon size={20} aria-hidden="true" /></span>
+      <span className="tile-go" aria-hidden="true"><RiArrowRightUpLine size={18} /></span>
+      <span style={{ minWidth: 0, maxWidth: '100%' }}>
+        <span className="tile-label" style={{ display: 'block' }}>{label}</span>
+        <span className="tile-value" style={{ display: 'block' }}>{value}</span>
+        {sub && <span className="tile-sub" style={{ display: 'block', marginTop: 2 }}>{sub}</span>}
+      </span>
+    </button>
+  );
+}
+
+function CardHead({ title, hint, action, onAction }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 28, marginBottom: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+        <h2 className="section-title" style={{ whiteSpace: 'nowrap' }}>{title}</h2>
+        {hint && <span className="faint" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{hint}</span>}
       </div>
-      <div>
-        <div style={{ fontSize:24, fontWeight:680, color:'#1D1D1F', letterSpacing:'-0.8px', lineHeight:1.1 }}>{value}</div>
-        <div style={{ fontSize:12.5, color:'#6E6E73', marginTop:2, fontWeight:450 }}>{label}</div>
-        {sub && <div style={{ fontSize:11, color:'#AEAEB2', marginTop:3 }}>{sub}</div>}
-      </div>
+      {action && (
+        <button type="button" className="mac-btn mac-btn-ghost" style={{ minHeight: 28, padding: '2px 4px 2px 8px', fontSize: 13, gap: 2, marginRight: -4 }} onClick={onAction}>
+          {action}<RiArrowRightSLine size={16} aria-hidden="true" />
+        </button>
+      )}
     </div>
   );
 }
 
-function SectionLabel({ title, right }) {
+const Empty = ({ children }) => <p className="faint" style={{ fontSize: 13, textAlign: 'center', padding: '24px 0' }}>{children}</p>;
+
+function AlertPill({ tone, icon: Icon, onClick, children }) {
+  const c = { bad: ['var(--bad)', 'var(--bad-soft)'], brand: ['var(--brand)', 'var(--brand-soft)'], warn: ['var(--warn)', 'var(--warn-soft)'] }[tone];
   return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-      <span style={{ fontSize:13, fontWeight:600, color:'#1D1D1F', letterSpacing:'-0.2px' }}>{title}</span>
-      {right && <span style={{ fontSize:11, color:'#8E8E93' }}>{right}</span>}
-    </div>
+    <button type="button" onClick={onClick} className="chip alert-pill" style={{ '--pill-fg': c[0], '--pill-bg': c[1] }}>
+      <Icon size={15} aria-hidden="true" style={{ flexShrink: 0 }} />
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{children}</span>
+      <RiArrowRightSLine size={15} aria-hidden="true" style={{ flexShrink: 0, marginRight: -4 }} />
+    </button>
   );
 }
 
+// Same boxes as the loaded page, so nothing moves when the numbers arrive.
+function DashboardSkeleton() {
+  const card = (h, key) => <div key={key} className="mac-card" style={{ padding: 20, minHeight: h, display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <Skeleton width={140} height={16} />
+    {Array.from({ length: 4 }, (_, i) => <Skeleton key={i} width={`${90 - i * 12}%`} height={12} />)}
+  </div>;
+  return (
+    <div className="page-body" aria-busy="true" aria-label="Loading the dashboard">
+      <div className="dash-top">
+        <div className="tile-grid">
+          {Array.from({ length: 4 }, (_, i) => (
+            <div key={i} className="tile">
+              <Skeleton width={40} height={40} radius={12} />
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
+                <Skeleton width={80} height={12} /><Skeleton width={120} height={24} /><Skeleton width={96} height={10} />
+              </span>
+            </div>
+          ))}
+        </div>
+        {card(520, 'pl')}
+      </div>
+      <div className="rg-3">{[0, 1, 2].map(i => card(260, i))}</div>
+      <div className="rg-3">{[0, 1, 2].map(i => card(300, i))}</div>
+    </div>
+  );
+}
 
 export default function Dashboard() {
-  const navigate = useNavigate();
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const { me, displayName } = useAuth();
+  const firstName = (me?.fullName || displayName || '').trim().split(/\s+/)[0];
+  const subtitle = `${firstName ? `${greeting()}, ${firstName}` : greeting()} · ${longDate()}`;
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [clients, txs, employees, projects, obData] = await Promise.all([
-          clientsDB.getAll(),
-          transactionsDB.getAll(),
-          employeesDB.getAll(),
-          projectsDB.getAll(),
-          settingsDB.get('opening_balances'),
-        ]);
-        const bal = computeBalances(txs, obData || { cash: 0, bank: 0 });
-        setData({ clients, txs, employees, projects, bal });
-      } catch(e) { console.error(e); }
-      setLoading(false);
-    }
-    load();
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const [clients, txs, employees, projects, obData] = await Promise.all([
+        clientsDB.getAll(),
+        transactionsDB.getAll(),
+        employeesDB.getAll(),
+        projectsDB.getAll(),
+        settingsDB.get('opening_balances'),
+      ]);
+      const bal = computeBalances(txs, obData || { cash: 0, bank: 0 });
+      setData({ clients, txs, employees, projects, bal });
+    } catch (e) { console.error(e); setError(e); }
   }, []);
 
-  if (loading || !data) return (
+  useEffect(() => { load(); }, [load]);
+
+  if (!data) return (
     <div>
-      <Header title="Dashboard" subtitle={new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})} />
-      <PageLoader />
+      <Header title="Dashboard" subtitle={subtitle} />
+      {error
+        ? <div className="page-body"><ErrorPanel title="Could not load the dashboard" error={error} onRetry={load} /></div>
+        : <DashboardSkeleton />}
     </div>
   );
 
+  return <DashboardView data={data} subtitle={subtitle} />;
+}
+
+/** Pure view — also rendered with sample data by the dev-only UI preview. */
+export function DashboardView({ data, subtitle }) {
+  const navigate = useNavigate();
   const { clients, txs, employees, projects, bal } = data;
+  const today = todayLocal();
+  const go = to => () => navigate(to);
 
   const isActive = c => c.status !== 'Closed Won' && c.status !== 'Closed Lost';
   const overdueFollowups = clients.filter(c => isActive(c) && c.nextFollowup && c.nextFollowup < today);
   const todayFollowups   = clients.filter(c => isActive(c) && c.nextFollowup === today);
   const hotClients       = clients.filter(c => c.status === 'Hot');
+  const leads            = clients.filter(c => ['Hot', 'Warm'].includes(c.status))
+    .sort((a, b) => ({ Hot: 0, Warm: 1 }[a.status] ?? 9) - ({ Hot: 0, Warm: 1 }[b.status] ?? 9));
   const activeProjects   = projects.filter(p => p.status === 'In Progress');
   const activeEmployees  = employees.filter(e => e.status === 'Active');
-  const curMonthLabel    = new Date().toLocaleString('en-IN',{month:'long',year:'numeric'});
+  const curMonthLabel    = new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' });
   const pendingSalaries  = employees.filter(e => {
     if (e.status !== 'Active' || e.salaryType !== 'Monthly') return false;
     if (!e.salaryAmount || +e.salaryAmount === 0) return false;
@@ -92,218 +156,204 @@ export default function Dashboard() {
       .reduce((s, h) => s + (+h.paid || 0), 0);
     return paidThisMonth < +e.salaryAmount;
   });
-  const recentTx = [...txs].sort((a,b) => new Date(b.date)-new Date(a.date)).slice(0,5);
-  const pipelineStatuses = ['Hot','Warm','Cold','Closed Won','Closed Lost'];
-  const pipelineColors   = { Hot:'#FF3B30', Warm:'#FF9500', Cold:'#0071E3', 'Closed Won':'#34C759', 'Closed Lost':'#AEAEB2' };
+  const salaryDue = new Set(pendingSalaries.map(e => e.id));
+  const recentTx = [...txs].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
 
   return (
     <div>
-      <Header
-        title="Dashboard"
-        subtitle={new Date().toLocaleDateString('en-IN',{weekday:'long',day:'numeric',month:'long',year:'numeric'})}
-      />
-      <div style={{ padding:'24px 32px', display:'flex', flexDirection:'column', gap:20 }}>
+      <Header title="Dashboard" subtitle={subtitle || longDate()} />
+      <div className="page-body">
 
-        {/* Stat Cards */}
-        <div className="rg-4">
-          <StatCard label="Total Balance" value={fmt(bal.total)} sub={`Cash ${fmt(bal.cash)}`}
-            gradient="linear-gradient(135deg,#E3F0FF,#CCE4FF)" icon={IndianRupee} iconColor="#0071E3" />
-          <StatCard label="Total Clients" value={clients.length} sub={`${hotClients.length} hot leads`}
-            gradient="linear-gradient(135deg,#FFF0E0,#FFE0C0)" icon={Users} iconColor="#FF9500" />
-          <StatCard label="Active Projects" value={activeProjects.length} sub={`${projects.filter(p=>p.status==='Completed').length} completed`}
-            gradient="linear-gradient(135deg,#F0E8FF,#E0D0FF)" icon={FolderKanban} iconColor="#9B51E0" />
-          <StatCard label="Team Members" value={activeEmployees.length} sub={pendingSalaries.length>0?`${pendingSalaries.length} salary pending`:'All paid'}
-            gradient="linear-gradient(135deg,#E0FFF0,#C0FFE0)" icon={UserCheck} iconColor="#34C759" />
+        {/* Headline tiles + profit & loss */}
+        <div className="dash-top">
+          <div className="tile-grid">
+            <Tile dark label="Total balance" value={fmt(bal.total)} sub={`Cash ${fmt(bal.cash)} · Bank ${fmt(bal.bank)}`} icon={RiWalletLine} onClick={go('/transactions')} />
+            <Tile label="Clients" value={clients.length} sub={`${hotClients.length} hot lead${hotClients.length === 1 ? '' : 's'}`} icon={RiGroupLine} onClick={go('/crm')} />
+            <Tile label="Active projects" value={activeProjects.length} sub={`${projects.filter(p => p.status === 'Completed').length} completed`} icon={RiFolder3Line} onClick={go('/projects')} />
+            <Tile label="Team" value={activeEmployees.length} sub={pendingSalaries.length > 0 ? `${pendingSalaries.length} salary pending` : 'All paid this month'} icon={RiTeamLine} onClick={go('/employees')} />
+          </div>
+          <FinanceOverview txs={txs} projects={projects} />
         </div>
 
-        {/* Profit & loss overview */}
-        <FinanceOverview txs={txs} projects={projects} />
-
-        {/* Alert Pills */}
-        {(overdueFollowups.length>0 || todayFollowups.length>0 || pendingSalaries.length>0) && (
-          <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-            {overdueFollowups.length>0 && (
-              <button onClick={()=>navigate('/crm')} style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 14px', borderRadius:100, background:'rgba(255,59,48,0.08)', border:'1px solid rgba(255,59,48,0.15)', cursor:'pointer', transition:'background 0.15s' }}
-                onMouseEnter={e=>e.currentTarget.style.background='rgba(255,59,48,0.14)'}
-                onMouseLeave={e=>e.currentTarget.style.background='rgba(255,59,48,0.08)'}
-              >
-                <AlertCircle size={13} color="#FF3B30" />
-                <span style={{ fontSize:12.5, color:'#FF3B30', fontWeight:500 }}>{overdueFollowups.length} overdue follow-up{overdueFollowups.length>1?'s':''}</span>
-              </button>
+        {/* Things that need attention today */}
+        {(overdueFollowups.length > 0 || todayFollowups.length > 0 || pendingSalaries.length > 0) && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {overdueFollowups.length > 0 && (
+              <AlertPill tone="bad" icon={RiAlarmWarningLine} onClick={go('/crm')}>
+                {overdueFollowups.length} overdue follow-up{overdueFollowups.length > 1 ? 's' : ''}
+              </AlertPill>
             )}
-            {todayFollowups.length>0 && (
-              <button onClick={()=>navigate('/crm')} style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 14px', borderRadius:100, background:'rgba(0,113,227,0.08)', border:'1px solid rgba(0,113,227,0.15)', cursor:'pointer', transition:'background 0.15s' }}
-                onMouseEnter={e=>e.currentTarget.style.background='rgba(0,113,227,0.14)'}
-                onMouseLeave={e=>e.currentTarget.style.background='rgba(0,113,227,0.08)'}
-              >
-                <CalendarClock size={13} color="#0071E3" />
-                <span style={{ fontSize:12.5, color:'#0071E3', fontWeight:500 }}>{todayFollowups.length} follow-up{todayFollowups.length>1?'s':''} today</span>
-              </button>
+            {todayFollowups.length > 0 && (
+              <AlertPill tone="brand" icon={RiCalendarEventLine} onClick={go('/crm')}>
+                {todayFollowups.length} follow-up{todayFollowups.length > 1 ? 's' : ''} today
+              </AlertPill>
             )}
-            {pendingSalaries.length>0 && (
-              <button onClick={()=>navigate('/employees')} style={{ display:'flex', alignItems:'center', gap:7, padding:'8px 14px', borderRadius:100, background:'rgba(255,149,0,0.08)', border:'1px solid rgba(255,149,0,0.18)', cursor:'pointer', transition:'background 0.15s' }}
-                onMouseEnter={e=>e.currentTarget.style.background='rgba(255,149,0,0.14)'}
-                onMouseLeave={e=>e.currentTarget.style.background='rgba(255,149,0,0.08)'}
-              >
-                <Clock size={13} color="#FF9500" />
-                <span style={{ fontSize:12.5, color:'#FF9500', fontWeight:500 }}>{pendingSalaries.map(e=>e.name).join(', ')} — salary due</span>
-              </button>
+            {pendingSalaries.length > 0 && (
+              <AlertPill tone="warn" icon={RiTimeLine} onClick={go('/employees')}>
+                Salary due: {pendingSalaries.map(e => e.name).join(', ')}
+              </AlertPill>
             )}
           </div>
         )}
 
-        {/* Middle Row */}
+        {/* Who is in today (hidden when attendance cannot be read) */}
+        <TodayAttendance />
+
         <div className="rg-3">
-
-          {/* Finance Summary */}
-          <div className="mac-card" style={{ padding:20 }}>
-            <SectionLabel title="Finance Summary" right="All time" />
-            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderRadius:10, background:'rgba(52,199,89,0.08)' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:7 }}>
-                  <ArrowUpRight size={14} color="#34C759" />
-                  <span style={{ fontSize:12.5, color:'#1D1D1F', fontWeight:500 }}>Total Credit</span>
-                </div>
-                <span style={{ fontSize:13, fontWeight:650, color:'#34C759' }}>{fmt(bal.totalCredit)}</span>
-              </div>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 12px', borderRadius:10, background:'rgba(255,59,48,0.07)' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:7 }}>
-                  <ArrowDownRight size={14} color="#FF3B30" />
-                  <span style={{ fontSize:12.5, color:'#1D1D1F', fontWeight:500 }}>Total Debit</span>
-                </div>
-                <span style={{ fontSize:13, fontWeight:650, color:'#FF3B30' }}>{fmt(bal.totalDebit)}</span>
-              </div>
-              <div style={{ height:1, background:'rgba(0,0,0,0.05)', margin:'4px 0' }} />
-              {[['Cash Balance', fmt(bal.cash)],['Bank Balance', fmt(bal.bank)]].map(([l,v])=>(
-                <div key={l} style={{ display:'flex', justifyContent:'space-between', padding:'2px 0' }}>
-                  <span style={{ fontSize:12, color:'#6E6E73' }}>{l}</span>
-                  <span style={{ fontSize:12.5, fontWeight:550, color:'#1D1D1F' }}>{v}</span>
-                </div>
+          {/* Finance summary */}
+          <section className="mac-card" style={{ padding: 20 }}>
+            <CardHead title="Finance summary" hint="All time" action="Transactions" onAction={go('/transactions')} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[
+                ['Total credit', bal.totalCredit, RiArrowRightUpLine, 'var(--good)', 'var(--good-soft)'],
+                ['Total debit', bal.totalDebit, RiArrowRightDownLine, 'var(--bad)', 'var(--bad-soft)'],
+              ].map(([label, value, Icon, fg, bg]) => (
+                <button key={label} type="button" onClick={go('/transactions')} className="row-link" style={{ margin: 0, width: '100%', padding: '10px 12px', background: bg, justifyContent: 'space-between' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 500, color: 'var(--ink)' }}>
+                    <Icon size={16} style={{ color: fg }} aria-hidden="true" />{label}
+                  </span>
+                  <span className="tabular" style={{ fontSize: 14, fontWeight: 600, color: fg }}>{fmt(value)}</span>
+                </button>
               ))}
-              {bal.pendingReimburse > 0 && (
-                <div style={{ display:'flex', justifyContent:'space-between', padding:'2px 0' }}>
-                  <span style={{ fontSize:12, color:'#FF2D55' }}>Pending Reimburse</span>
-                  <span style={{ fontSize:12.5, fontWeight:550, color:'#FF2D55' }}>{fmt(bal.pendingReimburse)}</span>
-                </div>
-              )}
-              <div style={{ display:'flex', justifyContent:'space-between', padding:'8px 0 0', borderTop:'1px solid rgba(0,0,0,0.05)', marginTop:2 }}>
-                <span style={{ fontSize:12.5, fontWeight:550, color:'#1D1D1F' }}>Total Balance</span>
-                <span style={{ fontSize:14, fontWeight:700, color:'#1D1D1F', letterSpacing:'-0.3px' }}>{fmt(bal.total)}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Client Pipeline */}
-          <div className="mac-card" style={{ padding:20 }}>
-            <SectionLabel title="Client Pipeline" right={`${clients.length} total`} />
-            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-              {pipelineStatuses.map(status => {
-                const count = clients.filter(c=>c.status===status).length;
-                const pct = clients.length ? Math.round((count/clients.length)*100) : 0;
-                return (
-                  <div key={status}>
-                    <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
-                      <span style={{ fontSize:12, color:'#3C3C43' }}>{status}</span>
-                      <span style={{ fontSize:12, fontWeight:600, color:'#1D1D1F' }}>{count}</span>
-                    </div>
-                    <div style={{ height:5, borderRadius:100, background:'rgba(0,0,0,0.07)', overflow:'hidden' }}>
-                      <div style={{ height:'100%', borderRadius:100, background:pipelineColors[status], width:`${pct}%`, transition:'width 0.4s ease' }} />
-                    </div>
+              <dl style={{ display: 'flex', flexDirection: 'column', gap: 8, margin: '6px 0 0', fontSize: 13.5 }}>
+                {[['Cash balance', bal.cash], ['Bank balance', bal.bank]].map(([l, v]) => (
+                  <div key={l} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <dt className="muted">{l}</dt><dd className="tabular" style={{ fontWeight: 500 }}>{fmt(v)}</dd>
                   </div>
+                ))}
+                {bal.pendingReimburse > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: 'var(--warn)' }}>
+                    <dt>Pending reimbursement</dt><dd className="tabular" style={{ fontWeight: 500 }}>{fmt(bal.pendingReimburse)}</dd>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+                  <dt style={{ fontWeight: 600 }}>Total balance</dt>
+                  <dd className="tabular" style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.011em' }}>{fmt(bal.total)}</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+
+          {/* Client pipeline */}
+          <section className="mac-card" style={{ padding: 20 }}>
+            <CardHead title="Client pipeline" hint={`${clients.length} total`} action="CRM" onAction={go('/crm')} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {PIPELINE.map(([status, color]) => {
+                const count = clients.filter(c => c.status === status).length;
+                const pct = clients.length ? Math.round((count / clients.length) * 100) : 0;
+                return (
+                  <button key={status} type="button" className="row-link" onClick={go('/crm')} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}
+                    aria-label={`${status}: ${count} client${count === 1 ? '' : 's'}, ${pct}%`}>
+                    <span style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--ink-2)' }}>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />{status}
+                      </span>
+                      <span className="tabular" style={{ fontWeight: 600 }}>{count}</span>
+                    </span>
+                    <span style={{ display: 'block', height: 6, borderRadius: 100, background: 'var(--surface-3)', overflow: 'hidden' }}>
+                      <span style={{ display: 'block', height: '100%', borderRadius: 100, background: color, width: `${pct}%`, transition: 'width 500ms var(--ease)' }} />
+                    </span>
+                  </button>
                 );
               })}
             </div>
-          </div>
+          </section>
 
-          {/* Active Projects */}
-          <div className="mac-card" style={{ padding:20 }}>
-            <SectionLabel title="Active Projects" right={`${activeProjects.length} running`} />
-            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-              {activeProjects.length===0
-                ? <p style={{ fontSize:12, color:'#AEAEB2', textAlign:'center', padding:'16px 0' }}>No active projects</p>
-                : activeProjects.map(p => {
-                  const paid = (p.payments||[]).reduce((s,x)=>s+(+x.amount||0),0);
-                  const pct  = p.valuation ? Math.round((paid/+p.valuation)*100) : 0;
+          {/* Active projects */}
+          <section className="mac-card" style={{ padding: 20 }}>
+            <CardHead title="Active projects" hint={`${activeProjects.length} running`} action="Projects" onAction={go('/projects')} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {activeProjects.length === 0
+                ? <Empty>No active projects</Empty>
+                : activeProjects.slice(0, 5).map(p => {
+                  const paid = (p.payments || []).reduce((s, x) => s + (+x.amount || 0), 0);
+                  const pct  = p.valuation ? Math.min(100, Math.round((paid / +p.valuation) * 100)) : 0;
                   return (
-                    <div key={p.id} style={{ padding:'10px 12px', borderRadius:10, background:'rgba(0,0,0,0.025)', border:'1px solid rgba(0,0,0,0.05)' }}>
-                      <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
-                        <span style={{ fontSize:12, fontWeight:550, color:'#1D1D1F', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', paddingRight:8 }}>{p.projectName}</span>
-                        <span style={{ fontSize:11, color:'#6E6E73', flexShrink:0, fontWeight:600 }}>{pct}%</span>
-                      </div>
-                      <div style={{ height:4, borderRadius:100, background:'rgba(0,0,0,0.07)', overflow:'hidden', marginBottom:6 }}>
-                        <div style={{ height:'100%', borderRadius:100, background:'#0071E3', width:`${pct}%` }} />
-                      </div>
-                      <div style={{ display:'flex', justifyContent:'space-between' }}>
-                        <span style={{ fontSize:10.5, color:'#AEAEB2' }}>{p.clientName}</span>
-                        <span style={{ fontSize:10.5, color:'#8E8E93' }}>Due {p.dueDate}</span>
-                      </div>
-                    </div>
+                    <button key={p.id} type="button" className="mac-card card-link" onClick={go('/projects')} style={{ padding: '10px 12px', borderRadius: 'var(--r-md)', boxShadow: 'none' }}>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.projectName}</span>
+                        <span className="tabular muted" style={{ fontSize: 12, fontWeight: 600, flexShrink: 0 }}>{pct}% paid</span>
+                      </span>
+                      <span style={{ display: 'block', height: 4, borderRadius: 100, background: 'var(--surface-3)', overflow: 'hidden', marginBottom: 8 }}>
+                        <span style={{ display: 'block', height: '100%', borderRadius: 100, background: 'var(--accent)', width: `${pct}%`, transition: 'width 500ms var(--ease)' }} />
+                      </span>
+                      <span className="faint" style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 12 }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.clientName || '—'}</span>
+                        {p.dueDate && <span style={{ flexShrink: 0 }}>Due {fmtDate(p.dueDate)}</span>}
+                      </span>
+                    </button>
                   );
-                })
-              }
+                })}
+              {activeProjects.length > 5 && <button type="button" className="link" style={{ alignSelf: 'flex-start', background: 'none', border: 'none', padding: 0, fontSize: 13 }} onClick={go('/projects')}>+{activeProjects.length - 5} more</button>}
             </div>
-          </div>
+          </section>
         </div>
 
-        {/* Bottom Row */}
-        <div className="rg-2">
+        <div className="rg-3">
+          {/* Recent transactions */}
+          <section className="mac-card" style={{ padding: 20 }}>
+            <CardHead title="Recent transactions" hint="Last 5" action="All" onAction={go('/transactions')} />
+            {recentTx.length === 0
+              ? <Empty>No transactions yet</Empty>
+              : recentTx.map(t => {
+                const credit = t.type === 'Credit';
+                return (
+                  <button key={t.id} type="button" className="row-link" onClick={go('/transactions')}>
+                    <span style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0, background: credit ? 'var(--good-soft)' : 'var(--bad-soft)', color: credit ? 'var(--good)' : 'var(--bad)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {credit ? <RiArrowRightUpLine size={16} aria-hidden="true" /> : <RiArrowRightDownLine size={16} aria-hidden="true" />}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', fontSize: 13.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.remark || t.category || t.source || 'Transaction'}</span>
+                      <span className="faint" style={{ display: 'block', fontSize: 12 }}>{fmtDate((t.date || '').split(' ')[0])}{t.accountType ? ` · ${t.accountType}` : ''}</span>
+                    </span>
+                    <span className={credit ? 'amount-in' : 'amount-out'} style={{ fontSize: 14, flexShrink: 0 }}>{credit ? '+' : '−'}{fmt(t.amount)}</span>
+                  </button>
+                );
+              })}
+          </section>
 
-          {/* Recent Transactions */}
-          <div className="mac-card" style={{ padding:20 }}>
-            <SectionLabel title="Recent Transactions" right="Last 5" />
-            {recentTx.length===0
-              ? <p style={{ fontSize:12, color:'#AEAEB2', textAlign:'center', padding:'16px 0' }}>No transactions yet</p>
-              : recentTx.map((t,i) => (
-                <div key={t.id} style={{
-                  display:'flex', alignItems:'center', justifyContent:'space-between', padding:'9px 0',
-                  borderBottom: i<recentTx.length-1 ? '1px solid rgba(0,0,0,0.05)' : 'none',
-                }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                    <div style={{ width:30, height:30, borderRadius:'50%', flexShrink:0, background:t.type==='Credit'?'rgba(52,199,89,0.1)':'rgba(255,59,48,0.1)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-                      {t.type==='Credit' ? <ArrowUpRight size={13} color="#34C759"/> : <ArrowDownRight size={13} color="#FF3B30"/>}
-                    </div>
-                    <div>
-                      <div style={{ fontSize:12.5, fontWeight:500, color:'#1D1D1F' }}>{t.remark||t.category||t.source}</div>
-                      <div style={{ fontSize:11, color:'#AEAEB2', marginTop:1 }}>{(t.date||'').split(' ')[0]} · {t.accountType}</div>
-                    </div>
-                  </div>
-                  <span style={{ fontSize:13, fontWeight:650, color:t.type==='Credit'?'#34C759':'#FF3B30', letterSpacing:'-0.2px' }}>
-                    {t.type==='Credit'?'+':'-'}{fmt(t.amount)}
-                  </span>
-                </div>
-              ))
-            }
-          </div>
+          {/* Hot leads */}
+          <section className="mac-card" style={{ padding: 20 }}>
+            <CardHead title="Leads to follow up" hint={`${hotClients.length} hot`} action="CRM" onAction={go('/crm')} />
+            {leads.length === 0
+              ? <Empty>No hot or warm leads</Empty>
+              : leads.slice(0, 6).map(c => {
+                const isOverdue = c.nextFollowup && c.nextFollowup < today;
+                return (
+                  <button key={c.id} type="button" className="row-link" onClick={go('/crm')}>
+                    <Avatar name={c.clientName} size={32} title="" />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.clientName}</span>
+                        <Badge color={getStatusColor(c.status)}>{c.status}</Badge>
+                      </span>
+                      <span style={{ display: 'block', fontSize: 12, color: isOverdue ? 'var(--bad)' : 'var(--ink-3)', fontWeight: isOverdue ? 500 : 400 }}>
+                        {c.nextFollowup ? `${isOverdue ? 'Overdue · ' : 'Follow up '}${fmtDate(c.nextFollowup)}` : 'No follow-up set'}
+                      </span>
+                    </span>
+                    {c.projectType && <span className="faint hide-mobile" style={{ fontSize: 12, flexShrink: 0, maxWidth: 96, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.projectType}</span>}
+                  </button>
+                );
+              })}
+          </section>
 
-          {/* Hot Leads */}
-          <div className="mac-card" style={{ padding:20 }}>
-            <SectionLabel title="Hot Leads & Follow-ups" right={`${hotClients.length} hot`} />
-            {clients.filter(c=>['Hot','Warm'].includes(c.status)).length===0
-              ? <p style={{ fontSize:12, color:'#AEAEB2', textAlign:'center', padding:'16px 0' }}>No hot or warm leads</p>
-              : clients.filter(c=>['Hot','Warm'].includes(c.status))
-                .sort((a,b)=>({Hot:0,Warm:1}[a.status]||9)-({Hot:0,Warm:1}[b.status]||9))
-                .map((c,i,arr) => {
-                  const isOverdue = c.nextFollowup && c.nextFollowup < today;
-                  return (
-                    <div key={c.id} style={{ display:'flex', alignItems:'center', gap:10, padding:'9px 0', borderBottom:i<arr.length-1?'1px solid rgba(0,0,0,0.05)':'none' }}>
-                      <div style={{ width:32, height:32, borderRadius:'50%', flexShrink:0, background:'rgba(0,113,227,0.1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, fontWeight:700, color:'#0071E3' }}>
-                        {c.clientName.split(' ').map(n=>n[0]).join('').slice(0,2)}
-                      </div>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                          <span style={{ fontSize:12.5, fontWeight:550, color:'#1D1D1F', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.clientName}</span>
-                          <Badge color={getStatusColor(c.status)}>{c.status}</Badge>
-                        </div>
-                        <div style={{ fontSize:11, color:isOverdue?'#FF3B30':'#AEAEB2', marginTop:1 }}>
-                          {c.nextFollowup ? (isOverdue?'⚠ Overdue · ':'')+c.nextFollowup : 'No follow-up set'}
-                        </div>
-                      </div>
-                      <span style={{ fontSize:11, color:'#8E8E93', flexShrink:0 }}>{c.projectType}</span>
-                    </div>
-                  );
-                })
-            }
-          </div>
+          {/* Team */}
+          <section className="mac-card" style={{ padding: 20 }}>
+            <CardHead title="Team" hint={`${activeEmployees.length} active`} action="Employees" onAction={go('/employees')} />
+            {activeEmployees.length === 0
+              ? <Empty>No active employees</Empty>
+              : (
+                <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {activeEmployees.slice(0, 6).map(e => (
+                    <li key={e.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 44, minWidth: 0 }}>
+                      <PersonChip person={{ kind: 'employee', id: e.id, name: e.name }} size={32} sub={e.role || true} />
+                      {salaryDue.has(e.id) && <Badge color="orange">Salary due</Badge>}
+                    </li>
+                  ))}
+                  {activeEmployees.length > 6 && <li><button type="button" className="link" style={{ background: 'none', border: 'none', padding: '6px 0 0', fontSize: 13 }} onClick={go('/employees')}>+{activeEmployees.length - 6} more</button></li>}
+                </ul>
+              )}
+          </section>
         </div>
       </div>
     </div>

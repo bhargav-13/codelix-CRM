@@ -102,23 +102,49 @@ export function samePeriodLastYear(p, now) {
 // Each transaction becomes one P&L line. `toggle` = the option key that
 // decides whether the line counts in profit (null = always counts).
 export const PL_TOGGLES = [
-  { key: 'otherIncome',     label: 'Other income',               hint: 'Non-client income (interest, refunds, misc.)', def: true },
+  { key: 'otherIncome',     label: 'Other income',               hint: 'Other-income entries ticked “Count this as revenue” (interest, misc.). Unticked ones never count', def: true },
   { key: 'partnerSalary',   label: 'Partner salaries',           hint: 'Monthly salary paid to partners', def: true },
   { key: 'partnerPaid',     label: 'Expenses paid by partners',  hint: 'Company bills a partner paid from personal money', def: true },
   { key: 'reimbursements',  label: 'Reimbursements to partners', hint: 'Paying partners back — counting both this and the above double-counts', def: false },
   { key: 'drawings',        label: 'Partner drawings',           hint: 'Money partners took out of the company', def: false },
   { key: 'drawingReturns',  label: 'Drawing returns',            hint: 'Money partners put back', def: false },
   { key: 'partnerSplits',   label: 'Profit splits / dividends',  hint: 'Entries whose remark says partner split / dividend / profit share', def: false },
-  { key: 'excludeGst',      label: 'Show revenue without GST',   hint: 'Removes 18% GST from receipts of clients billed "With GST"', def: false, isGst: true },
+  { key: 'excludeGst',      label: 'Show revenue without GST',   hint: 'Removes 18% GST from receipts of clients billed "With GST" — that GST belongs to the government. While on, “GST paid” entries are not an expense; while off, they are', def: true, isGst: true },
 ];
 export const DEFAULT_PL_OPTIONS = Object.fromEntries(PL_TOGGLES.map(t => [t.key, t.def]));
 
 const SPLIT_RE = /(partner'?s?\s*(split|divid|share|profit))|(profit\s*(split|share|distribut))|dividend/i;
 export const isPartnerSplit = t => SPLIT_RE.test(t.remark || '');
 
+// Balances carried over from the old system (category "Opening balance") are a
+// starting position, not this period's income or spending: they stay in the
+// ledger and in the bank/partner balances but never enter profit and loss.
+export const OPENING_CATEGORY = 'Opening balance';
+export const isOpeningEntry = t => t.category === OPENING_CATEGORY;
+
+// Money that moves but is never income or a cost (loans, capital, assets, deposits, transfers,
+// salary advances = loans to staff). Always listed under "Not counted in profit"; no switch.
+const NEVER_PL = {
+  transfer:         'Moves between own accounts',
+  loan_received:    'Loans received',
+  loan_repaid:      'Loan repayments',
+  capital_added:    'Capital put in by partners',
+  asset_purchase:   'Equipment / assets bought',
+  deposit_paid:     'Deposits paid',
+  deposit_returned: 'Deposits returned',
+  employee_advance: 'Salary advances (loans to staff)',
+  loan_given:       'Money given out, to be returned',
+  loan_returned:    'Given money returned',
+};
+// Follows the "Show revenue without GST" switch instead of having one of its own (see classify)
+export const GST_KEPT = 'gstKept';
+
 export function classify(t) {
   const credit = t.type === 'Credit';
   const sub = t.subType;
+  if (NEVER_PL[sub]) return { section: credit ? 'income' : 'expense', line: `never:${sub}:${credit ? 'in' : 'out'}`, label: NEVER_PL[sub], toggle: 'never' };
+  // Salary settled from an advance: a real salary cost, though no money moved that month.
+  if (sub === 'advance_recovery') return { section: 'expense', line: 'employee_salary', label: 'Employee salaries', toggle: null, group: 'Team' };
   if (sub === 'drawing_return') return { section: 'income', line: 'drawing_returns', label: 'Drawing returns', toggle: 'drawingReturns' };
   if (sub === 'drawing')        return { section: 'expense', line: 'drawings', label: 'Partner drawings', toggle: 'drawings' };
   if (sub === 'partner_salary') return { section: 'expense', line: 'partner_salary', label: 'Partner salaries', toggle: 'partnerSalary' };
@@ -126,6 +152,11 @@ export function classify(t) {
   if (sub === 'personal_exp')   return { section: 'expense', line: 'partner_paid', label: 'Expenses paid by partners', toggle: 'partnerPaid' };
   if (sub === 'reimbursement')  return { section: 'expense', line: 'reimbursements', label: 'Reimbursements to partners', toggle: 'reimbursements' };
   if (!credit && isPartnerSplit(t)) return { section: 'expense', line: 'partner_splits', label: 'Profit splits / dividends', toggle: 'partnerSplits' };
+  // GST handed to the government. When revenue is shown without GST the tax was never counted as
+  // income, so paying it is not a cost either; when GST is left in revenue, paying it is a cost.
+  if (sub === 'gst_paid') return { section: 'expense', line: 'gst_paid', label: 'GST paid to the government', toggle: GST_KEPT };
+  // Money received that the entry itself says is not revenue (handed back, refunded…)
+  if (credit && t.countInProfit === false) return { section: 'income', line: 'never:not_revenue:in', label: 'Money received, not revenue', toggle: 'never' };
   if (credit) {
     const src = t.source || 'Client Payment';
     if (src === 'Other Income') return { section: 'income', line: 'other_income', label: 'Other income', toggle: 'otherIncome' };
@@ -136,7 +167,11 @@ export function classify(t) {
 }
 
 // Is this line counted in profit under the given options?
-export const lineIncluded = (cls, opts) => !cls.toggle || !!opts[cls.toggle];
+export const lineIncluded = (cls, opts) => {
+  if (cls.toggle === 'never') return false;
+  if (cls.toggle === GST_KEPT) return !opts.excludeGst;
+  return !cls.toggle || !!opts[cls.toggle];
+};
 
 // Set of lower-cased client names billed "With GST" (from projects)
 export function gstClientSet(projects = []) {
@@ -165,7 +200,7 @@ export function buildStatement(txs, columns, opts = DEFAULT_PL_OPTIONS, { gstCli
   const gst = zero();
   for (const t of txs) {
     const ci = colOf.get(txMonth(t));
-    if (ci === undefined) continue;
+    if (ci === undefined || isOpeningEntry(t)) continue;
     const cls = classify(t);
     if (!lines.has(cls.line)) lines.set(cls.line, { ...cls, values: zero(), txs: columns.map(() => []) });
     const L = lines.get(cls.line);
@@ -193,9 +228,15 @@ export function buildStatement(txs, columns, opts = DEFAULT_PL_OPTIONS, { gstCli
   totals.margin = totals.revenue > 0 ? totals.profit / totals.revenue * 100 : null;
 
   // Money that left/entered without counting in profit (signed: out = negative)
+  // A bill a partner paid from their pocket and its reimbursement are one outflow, not two:
+  // the pocket payment moved no company money, and when it is already in profit the
+  // reimbursement must not be taken off again.
+  const partnerPaidCounted = expenses.some(l => l.line === 'partner_paid');
+  const skipInRetained = l => l.line === 'partner_paid' || (l.line === 'reimbursements' && partnerPaidCounted);
   const excludedNet = zero();
-  excluded.forEach(l => l.values.forEach((x, i) => { excludedNet[i] += l.section === 'income' ? x : -x; }));
-  const retained = profit.map((p, i) => p + excludedNet[i]);
+  excluded.filter(l => !skipInRetained(l)).forEach(l => l.values.forEach((x, i) => { excludedNet[i] += l.section === 'income' ? x : -x; }));
+  // GST taken out of revenue is still money held until it is paid over (a "GST paid" entry)
+  const retained = profit.map((p, i) => p + gst[i] + excludedNet[i]);
 
   return { columns, income, expenses, excluded, revenue, expense, profit, margin, gst, retained, totals: { ...totals, retained: tot(retained) } };
 }
@@ -230,6 +271,7 @@ export function computeBalances(txs, openBal = { cash: 0, bank: 0 }) {
   let pC = 0, pD = 0, bC = 0, bD = 0;
   txs.forEach(t => {
     if (t.accountType === 'Partner Personal') return; // personal_exp / reimbursement settlements
+    if (t.accountType === 'Non-cash') return;         // salary settled from an advance: no money moved
     const isCash = t.accountType === 'Cash + Savings Account' || t.accountType === "Founder's Personal";
     const a = +t.amount || 0;
     if (isCash) { if (t.type === 'Credit') pC += a; else pD += a; }
@@ -243,6 +285,30 @@ export function computeBalances(txs, openBal = { cash: 0, bank: 0 }) {
     cash, personal: cash, bank, total: cash + bank,
     totalCredit: pC + bC, totalDebit: pD + bD,
     pendingReimburse: Math.max(0, spent - paid),
+  };
+}
+
+// Standing positions today (all time, not a period): money that is in the bank but not ours to
+// spend, and money that is out but coming back.
+export function computePositions(txs, gstClients) {
+  let gstCollected = 0, gstPaid = 0, lent = 0, lentBack = 0, drawn = 0, drawnBack = 0;
+  for (const t of txs) {
+    if (isOpeningEntry(t)) continue;
+    const a = +t.amount || 0;
+    switch (t.subType) {
+      case 'gst_paid':       gstPaid += a; continue;
+      case 'loan_given':     lent += a; continue;
+      case 'loan_returned':  lentBack += a; continue;
+      case 'drawing':        drawn += a; continue;
+      case 'drawing_return': drawnBack += a; continue;
+      default:
+    }
+    if (classify(t).revenue && gstClients?.has((t.clientName || '').trim().toLowerCase())) gstCollected += a - a / (1 + GST_RATE);
+  }
+  return {
+    gstCollected, gstPaid, gstHeld: Math.max(0, gstCollected - gstPaid),
+    lentOut: Math.max(0, lent - lentBack),
+    drawingsOut: Math.max(0, drawn - drawnBack),
   };
 }
 
@@ -275,7 +341,8 @@ export const pctChange = (cur, prev) => {
 export const fmtPct = (p, digits = 1) => p == null ? '—' : `${p.toFixed(digits)}%`;
 
 // ── Options persistence (per browser; safe if storage is blocked) ─
-const OPT_KEY = 'codelix.plOptions.v1';
+// v2: the choices now live on the server (lib/plOptions.js); this is only its last-seen copy.
+const OPT_KEY = 'codelix.plOptions.v2';
 export function loadPlOptions() {
   try { return { ...DEFAULT_PL_OPTIONS, ...(JSON.parse(localStorage.getItem(OPT_KEY)) || {}) }; }
   catch { return { ...DEFAULT_PL_OPTIONS }; }
@@ -300,7 +367,7 @@ export function statementToCSV(s, title) {
   if (s.excluded.length) {
     rows.push([], ['NOT COUNTED IN PROFIT']);
     s.excluded.forEach(l => add(`  ${l.label} (${l.section === 'income' ? 'in' : 'out'})`, l.values, l.total));
-    add('Retained after all items', s.retained, s.totals.retained);
+    add('Money kept after all items', s.retained, s.totals.retained);
   }
   return rows.map(r => r.map(esc).join(',')).join('\n');
 }

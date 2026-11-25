@@ -1,9 +1,8 @@
-// Shared constants (partners, dropdown options)
+// Shared constants (dropdown options). People come from the directory: src/lib/people.js
 
 export const PROJECT_TYPES = ['Website Development', 'Mobile App', 'ERP / CRM', 'UI/UX Design', 'Branding & Design', 'Digital Marketing'];
 export const SOURCES = ['Referral', 'LinkedIn', 'Google', 'Instagram', 'Facebook', 'Cold Call', 'Walk-in', 'Other'];
 export const CLIENT_STATUSES = ['Cold', 'Warm', 'Hot', 'Closed Won', 'Closed Lost', 'Not Received'];
-export const PARTNERS = ['Bhargav Thesiya', 'Manas Vadodaria', 'Kushal Mungalpara', 'Prince Padariya'];
 export const PRIORITIES = ['High', 'Medium', 'Low'];
 export const DEPARTMENTS = ['Tech', 'Design', 'Sales', 'Ops'];
 export const EMPLOYMENT_TYPES = ['Full-time', 'Part-time', 'Freelancer', 'Intern'];

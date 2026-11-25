@@ -1,0 +1,21 @@
+/* Employees page — layout-only additions on top of the shared UX kit */
+.emp-person { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.emp-person > div { min-width: 0; }
+.emp-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.emp-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.emp-card-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.emp-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 13.5px; }
+.emp-due { color: var(--warn); font-weight: 600; }
+.emp-part { color: var(--ink); font-weight: 600; }
+
+.emp-figures { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.emp-figures > div { padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); min-width: 0; }
+.emp-fig { display: block; font-size: var(--fs-md); font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; margin: 2px 0; }
+@media (max-width: 420px) { .emp-figures { grid-template-columns: minmax(0, 1fr); } }
+
+.emp-notice { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--warn-soft); color: var(--warn); font-size: var(--fs-sm); font-weight: 600; }
+.emp-note { font-size: var(--fs-sm); color: var(--ink-2); }
+.emp-secret { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.emp-audit { display: flex; flex-direction: column; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.emp-audit:last-child { border-bottom: none; }
+.emp-audit-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }

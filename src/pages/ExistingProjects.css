@@ -1,0 +1,12 @@
+/* Past Projects page — layout only; colours come from the tokens in index.css */
+.pp-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.pp-card-top .cell-main { min-width: 0; overflow-wrap: anywhere; }
+.pp-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+
+.pp-quick { display: flex; gap: 8px; flex-wrap: wrap; }
+.pp-quick .mac-btn { text-decoration: none; flex: 1 1 120px; }
+.pp-section { display: flex; flex-direction: column; gap: 12px; }
+.pp-text { font-size: var(--fs-md); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pp-link { color: var(--brand); font-weight: 600; text-decoration: none; }
+.pp-link:hover { text-decoration: underline; }
+.pp-form textarea { resize: vertical; min-height: 72px; }

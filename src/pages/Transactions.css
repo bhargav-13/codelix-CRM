@@ -1,0 +1,108 @@
+/* Transactions (company ledger) — page-specific layout only; colours come from index.css tokens */
+
+/* Header "More" menu: on phones the actions row scrolls sideways, which would clip the menu */
+@media (max-width: 640px) {
+  .tx-page .hdr-actions { overflow: visible; }
+  .tx-page .hdr-actions .menu { right: auto; left: 0; }
+}
+
+.tx-tabs { align-self: flex-start; max-width: 100%; }
+.tx-tabs .tab-item { flex-shrink: 0; }
+
+.tx-note { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink-2); font-size: var(--fs-sm); line-height: 1.5; }
+.tx-note svg { flex-shrink: 0; margin-top: 2px; }
+.tx-note.good { background: var(--good-soft); color: var(--good); }
+.tx-note.warn { background: var(--warn-soft); color: var(--warn); }
+.tx-note.bad { background: var(--bad-soft); color: var(--bad); }
+.tx-note.brand { background: var(--brand-soft); color: var(--brand); }
+.tx-link { border: none; background: none; padding: 0; font: inherit; font-weight: 700; color: inherit; text-decoration: underline; cursor: pointer; }
+
+.tx-good, .kv dd.tx-good, .tx-pick-meta.tx-good { color: var(--good); }
+.tx-warn, .kv dd.tx-warn, .tx-pick-meta.tx-warn { color: var(--warn); }
+.tx-bad, .kv dd.tx-bad, .tx-pick-meta.tx-bad { color: var(--bad); }
+.kv dd.faint { color: var(--ink-3); }
+.tx-badge.good { background: var(--good-soft); color: var(--good); }
+.tx-badge.bad { background: var(--bad-soft); color: var(--bad); }
+.tx-badge.brand { background: var(--brand-soft); color: var(--brand); }
+.tx-badge.plain { background: var(--surface-2); color: var(--ink-2); }
+
+/* Toolbar extras */
+.tx-page .toolbar input[type="month"].mac-input { width: auto; height: 38px; padding-top: 0; padding-bottom: 0; }
+.tx-count { font-variant-numeric: tabular-nums; }
+@media (max-width: 768px) {
+  .tx-page .toolbar-search { max-width: none; flex-basis: 100%; }
+  .tx-page .toolbar .mac-select, .tx-page .toolbar input[type="month"].mac-input { flex: 1 1 130px; min-width: 0; }
+  .tx-page .toolbar-right { margin-left: 0; flex-basis: 100%; flex-wrap: wrap; justify-content: space-between; }
+}
+
+/* Ledger table */
+.tx-table td.tx-date { white-space: nowrap; color: var(--ink-2); width: 1%; }
+.tx-table td.muted { color: var(--ink-2); white-space: nowrap; }
+.tx-table .cell-main, .tx-table .cell-sub { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-table tbody tr.clickable:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.tx-table tbody tr.tx-month, .tx-table tbody tr.tx-month:hover { background: var(--surface-2); }
+.tx-table tr.tx-month td { padding: 8px 16px; font-size: var(--fs-sm); font-weight: 700; color: var(--ink-2); }
+.tx-month-in { display: flex; justify-content: space-between; gap: 12px; }
+.tx-month-in span:last-child { font-weight: 500; font-variant-numeric: tabular-nums; }
+
+/* Phone card list */
+.tx-month-head { display: flex; justify-content: space-between; gap: 12px; padding: 6px 4px 0; font-size: var(--fs-sm); font-weight: 700; color: var(--ink-2); }
+.tx-month-head span:last-child { font-weight: 500; font-variant-numeric: tabular-nums; }
+.tx-card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.tx-card-top .cell-main { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-card-top .tx-amt { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tx-card-meta { font-size: var(--fs-sm); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Detail drawer */
+.tx-detail-amount { font-size: var(--fs-2xl); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.tx-hist { display: flex; flex-direction: column; gap: 10px; }
+.tx-hist-item { padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); color: var(--ink-2); }
+.tx-hist-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tx-hist-top .cell-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+/* Add / edit form */
+.tx-kinds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tx-kind { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px; text-align: left; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.tx-kind:hover { background: var(--surface-2); }
+.tx-kind[aria-checked="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.tx-kind-label { display: block; font-size: 13.5px; font-weight: 600; line-height: 1.25; }
+.tx-kind-hint { display: block; font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.3; }
+.tx-kind[aria-checked="true"] .tx-kind-hint { color: rgba(255, 255, 255, 0.65); }
+.tx-kind svg { flex-shrink: 0; }
+
+.tx-seg { flex-wrap: nowrap; }
+.tx-seg .tab-item { flex: 1 1 0; min-height: 34px; }
+
+.tx-picks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tx-pick { min-height: 48px; padding: 8px 10px; text-align: left; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; min-width: 0; }
+.tx-pick:hover { background: var(--surface-2); }
+.tx-pick[aria-checked="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--surface-2); }
+.tx-pick-name { display: block; font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-pick-meta { display: block; font-size: var(--fs-xs); color: var(--ink-3); }
+
+.tx-progress { height: 6px; border-radius: var(--r-pill); background: var(--line-strong); overflow: hidden; }
+.tx-progress > span { display: block; height: 100%; border-radius: var(--r-pill); background: var(--warn); }
+.tx-progress.done > span { background: var(--good); }
+
+/* Partners view */
+.tx-partners { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.tx-partner { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+.tx-partner-head { display: flex; align-items: center; gap: 10px; }
+.tx-partner-head .cell-main { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-partner .kv { grid-template-columns: max-content minmax(0, 1fr); }
+.tx-partner .kv dt { white-space: nowrap; }
+.tx-partner .kv dd { text-align: right; font-variant-numeric: tabular-nums; }
+.tx-partners-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--ink-2); }
+
+.tx-config-row { display: flex; align-items: flex-end; gap: 12px; }
+.tx-config-row .field { flex: 1; }
+
+/* "Count this as revenue" tick on money received */
+.tx-check { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--surface-2); cursor: pointer; font-size: var(--fs-sm); color: var(--ink); line-height: 1.5; }
+.tx-check > button { margin-top: 2px; }
+.tx-check-hint { display: block; color: var(--ink-2); }
+
+/* Category picker with its "+" (add a new category) */
+.tx-cat { display: flex; gap: 8px; align-items: center; }
+.tx-cat > select, .tx-cat > input { flex: 1 1 auto; min-width: 0; }
+.tx-cat-add { flex: 0 0 auto; padding-inline: 10px; }

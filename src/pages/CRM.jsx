@@ -2,478 +2,612 @@ import { useState, useMemo, useEffect, useCallback } from 'react';
 import Header from '../components/layout/Header';
 import Badge, { getStatusColor } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
-import SearchBar from '../components/ui/SearchBar';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { PageLoader } from '../components/ui/CodelixLoader';
+import {
+  Drawer, Field, FormGrid, FormSection, Toolbar, Chips, StatTiles, SkeletonRows,
+  EmptyPanel, ErrorPanel, RowMenu, Avatar, useToast, fmtMoney, fmtDate, todayLocal,
+} from '../components/ui/kit';
 import { clientsDB, auditDB } from '../lib/db';
 import { useAuth } from '../contexts/AuthContext';
 import { NumInput } from '../lib/numInput';
+import { PROJECT_TYPES, SOURCES, CLIENT_STATUSES, PRIORITIES } from '../data/mockData';
+import { usePeople } from '../lib/people';
 import {
-  PROJECT_TYPES, SOURCES, CLIENT_STATUSES, PRIORITIES, PARTNERS,
-} from '../data/mockData';
-import {
-  Plus, Filter, Phone, Mail, MapPin, Calendar, Building2, User, Clock,
-  Edit2, Trash2, MessageSquarePlus, History, AlertCircle,
-  ArrowRight, X,
+  Plus, Phone, Mail, Edit2, Trash2, History, AlertCircle, CalendarClock, Flame, IndianRupee, Users, SearchX,
 } from 'lucide-react';
+import './CRM.css';
 
-const today = new Date().toISOString().split('T')[0];
-const cutoff20 = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-const fmt = n => n ? '₹' + Number(n).toLocaleString('en-IN') : '—';
+const STATUS_CHIPS = [
+  { value: 'all', label: 'All' },
+  { value: 'Hot', label: 'Hot' },
+  { value: 'Warm', label: 'Warm' },
+  { value: 'Cold', label: 'Cold' },
+  { value: 'Closed Won', label: 'Won' },
+  { value: 'Closed Lost', label: 'Lost' },
+  { value: 'Not Received', label: 'Not received' },
+];
+const NEXT_PRESETS = [['Tomorrow', 1], ['In 3 days', 3], ['In a week', 7]];
+const HIDE_CLOSED_AFTER_DAYS = 20;
 
 const emptyClient = {
-  clientName:'', companyName:'', contact:'', email:'', address:'',
-  projectType:'Website Development', source:'Referral', status:'Cold', proposalValue:'',
-  finalPrice:'', priority:'Medium', createdBy:'Bhargav Thesiya', nextFollowup:'', followupHistory:[],
+  clientName: '', companyName: '', contact: '', email: '', address: '',
+  projectType: 'Website Development', source: 'Referral', status: 'Cold', proposalValue: '',
+  finalPrice: '', priority: 'Medium', createdBy: '', nextFollowup: '', followupHistory: [],
 };
 
-function FF({ label, children, required }) {
+// Local-calendar date maths (YYYY-MM-DD in, YYYY-MM-DD out)
+function addDays(ymd, n) {
+  const d = new Date(`${ymd}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+const isClosed = c => c.status === 'Closed Won' || c.status === 'Closed Lost';
+const isOverdue = (c, today) => !isClosed(c) && !!c.nextFollowup && c.nextFollowup < today;
+const isDueToday = (c, today) => !isClosed(c) && c.nextFollowup === today;
+const dueState = (c, today) => (isOverdue(c, today) ? 'is-overdue' : isDueToday(c, today) ? 'is-today' : '');
+function dueLabel(c, today) {
+  if (isClosed(c)) return '—';
+  if (!c.nextFollowup) return 'Not set';
+  if (c.nextFollowup === today) return 'Today';
+  if (c.nextFollowup < today) return `Overdue · ${fmtDate(c.nextFollowup)}`;
+  return fmtDate(c.nextFollowup);
+}
+// Keep a saved value selectable even if it is no longer in the standard list
+const withCurrent = (list, v) => (v && !list.includes(v) ? [v, ...list] : list);
+const telHref = n => `tel:${String(n).replace(/[^\d+]/g, '')}`;
+
+function validateClient(v) {
+  const errors = {};
+  if (!v.clientName.trim()) errors.clientName = 'Enter the client’s name';
+  if (v.email && !/^\S+@\S+\.\S+$/.test(v.email.trim())) errors.email = 'This email does not look right';
+  return errors;
+}
+
+function ClientForm({ v, set, errors, isEdit, partners }) {
   return (
-    <div>
-      <label style={{ display:'block', fontSize:11.5, fontWeight:550, color:'#6E6E73', marginBottom:5, textTransform:'uppercase', letterSpacing:'0.4px' }}>
-        {label}{required && <span style={{ color:'#FF3B30', marginLeft:2 }}>*</span>}
-      </label>
-      {children}
-    </div>
+    <>
+      <FormSection title="Who">
+        <FormGrid>
+          <Field label="Client name" required error={errors.clientName}>
+            <input className="mac-input" value={v.clientName} onChange={e => set('clientName', e.target.value)} placeholder="Full name" />
+          </Field>
+          <Field label="Company">
+            <input className="mac-input" value={v.companyName} onChange={e => set('companyName', e.target.value)} placeholder="Company or business" />
+          </Field>
+          <Field label="Phone">
+            <input className="mac-input" type="tel" inputMode="tel" value={v.contact} onChange={e => set('contact', e.target.value)} placeholder="10-digit number" />
+          </Field>
+          <Field label="Email" error={errors.email}>
+            <input className="mac-input" type="email" value={v.email} onChange={e => set('email', e.target.value)} placeholder="name@example.com" />
+          </Field>
+        </FormGrid>
+      </FormSection>
+      <FormSection title="Deal">
+        <FormGrid>
+          <Field label="Status">
+            <select className="mac-select" value={v.status} onChange={e => set('status', e.target.value)}>
+              {withCurrent(CLIENT_STATUSES, v.status).map(s => <option key={s}>{s}</option>)}
+            </select>
+          </Field>
+          <Field label="Priority">
+            <select className="mac-select" value={v.priority} onChange={e => set('priority', e.target.value)}>
+              {withCurrent(PRIORITIES, v.priority).map(p => <option key={p}>{p}</option>)}
+            </select>
+          </Field>
+          <Field label="Project type">
+            <select className="mac-select" value={v.projectType} onChange={e => set('projectType', e.target.value)}>
+              {withCurrent(PROJECT_TYPES, v.projectType).map(t => <option key={t}>{t}</option>)}
+            </select>
+          </Field>
+          <Field label="Source">
+            <select className="mac-select" value={v.source} onChange={e => set('source', e.target.value)}>
+              {withCurrent(SOURCES, v.source).map(s => <option key={s}>{s}</option>)}
+            </select>
+          </Field>
+          <Field label="Proposal value (₹)">
+            <NumInput className="mac-input" value={v.proposalValue} onChange={val => set('proposalValue', val)} placeholder="0" />
+          </Field>
+          <Field label="Next follow-up">
+            <input className="mac-input" type="date" value={v.nextFollowup} onChange={e => set('nextFollowup', e.target.value)} />
+          </Field>
+        </FormGrid>
+      </FormSection>
+      <FormSection title="Optional">
+        <FormGrid>
+          <Field label="Final price (₹)" hint="Fill in once the deal is agreed">
+            <NumInput className="mac-input" value={v.finalPrice} onChange={val => set('finalPrice', val)} placeholder="0" />
+          </Field>
+          <Field label="Address">
+            <input className="mac-input" value={v.address} onChange={e => set('address', e.target.value)} placeholder="City, State" />
+          </Field>
+          {isEdit && (
+            <Field label="Created by">
+              <select className="mac-select" value={v.createdBy} onChange={e => set('createdBy', e.target.value)}>
+                {!v.createdBy && <option value="">—</option>}
+                {withCurrent(partners, v.createdBy).map(p => <option key={p}>{p}</option>)}
+              </select>
+            </Field>
+          )}
+        </FormGrid>
+      </FormSection>
+    </>
   );
 }
 
-function ClientForm({ v, set }) {
+// Inline "what happened + when next" form at the top of the drawer
+function FollowupBox({ client, today, onSave }) {
+  const toast = useToast();
+  const [note, setNote] = useState('');
+  const [date, setDate] = useState(today);
+  const [next, setNext] = useState(isClosed(client) ? '' : addDays(today, 3));
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (saving) return;
+    if (!note.trim()) { setError('Write what was discussed'); return; }
+    setError('');
+    setSaving(true);
+    try {
+      await onSave({ date: date || today, remark: note.trim(), nextFollowup: next });
+      toast.success(next ? `Follow-up logged — next on ${fmtDate(next)}` : 'Follow-up logged');
+      setNote('');
+    } catch (err) {
+      toast.error('Could not log the follow-up', err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'14px 16px' }}>
-      <FF label="Client Name" required><input className="mac-input" value={v.clientName} onChange={e=>set('clientName',e.target.value)} placeholder="Full name" /></FF>
-      <FF label="Company Name"><input className="mac-input" value={v.companyName} onChange={e=>set('companyName',e.target.value)} placeholder="Company" /></FF>
-      <FF label="Contact Number"><input className="mac-input" value={v.contact} onChange={e=>set('contact',e.target.value)} placeholder="10-digit number" /></FF>
-      <FF label="Email"><input className="mac-input" type="email" value={v.email} onChange={e=>set('email',e.target.value)} placeholder="email@example.com" /></FF>
-      <FF label="Address"><input className="mac-input" value={v.address} onChange={e=>set('address',e.target.value)} placeholder="City, State" /></FF>
-      <FF label="Project Type"><select className="mac-select" value={v.projectType} onChange={e=>set('projectType',e.target.value)}>{PROJECT_TYPES.map(t=><option key={t}>{t}</option>)}</select></FF>
-      <FF label="Source"><select className="mac-select" value={v.source} onChange={e=>set('source',e.target.value)}>{SOURCES.map(s=><option key={s}>{s}</option>)}</select></FF>
-      <FF label="Status"><select className="mac-select" value={v.status} onChange={e=>set('status',e.target.value)}>{CLIENT_STATUSES.map(s=><option key={s}>{s}</option>)}</select></FF>
-      <FF label="Priority"><select className="mac-select" value={v.priority} onChange={e=>set('priority',e.target.value)}>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select></FF>
-      <FF label="Proposal Value (₹)"><NumInput className="mac-input" value={v.proposalValue} onChange={v=>set('proposalValue',v)} placeholder="0"/></FF>
-      <FF label="Final Price (₹)"><NumInput className="mac-input" value={v.finalPrice} onChange={v=>set('finalPrice',v)} placeholder="0"/></FF>
-      <FF label="Next Follow-up"><input className="mac-input" type="date" value={v.nextFollowup} onChange={e=>set('nextFollowup',e.target.value)} /></FF>
-      <FF label="Created By"><select className="mac-select" value={v.createdBy} onChange={e=>set('createdBy',e.target.value)}>{PARTNERS.map(p=><option key={p}>{p}</option>)}</select></FF>
-    </div>
+    <form className="crm-log" onSubmit={submit} noValidate>
+      <h3 className="section-title">Log follow-up</h3>
+      <Field label="What was discussed?" required error={error}>
+        <textarea className="mac-input" value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Shared the proposal, wants a call on Friday" />
+      </Field>
+      <FormGrid>
+        <Field label="Contacted on">
+          <input className="mac-input" type="date" value={date} max={today} onChange={e => setDate(e.target.value)} />
+        </Field>
+        <Field label="Next follow-up" hint="Leave empty if none is needed">
+          <input className="mac-input" type="date" value={next} onChange={e => setNext(e.target.value)} />
+        </Field>
+      </FormGrid>
+      <div className="crm-log-foot">
+        <div className="crm-presets" role="group" aria-label="Next follow-up shortcuts">
+          {NEXT_PRESETS.map(([label, days]) => {
+            const value = addDays(today, days);
+            return <button key={label} type="button" className={next === value ? 'active' : ''} onClick={() => setNext(value)}>{label}</button>;
+          })}
+          <button type="button" className={!next ? 'active' : ''} onClick={() => setNext('')}>None</button>
+        </div>
+        <button type="submit" className="mac-btn mac-btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Save follow-up'}</button>
+      </div>
+    </form>
   );
 }
 
-function FollowupForm({ v, onChange }) {
-  const set = (k,val) => onChange({...v,[k]:val});
+function ClientDetail({ client, today, onStatus, onLogFollowup }) {
+  const history = [...(client.followupHistory || [])].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   return (
-    <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
-      <FF label="Date" required><input className="mac-input" type="date" value={v.date} onChange={e=>set('date',e.target.value)} /></FF>
-      <FF label="Remark" required><textarea className="mac-input" style={{ resize:'none', height:88 }} value={v.remark} onChange={e=>set('remark',e.target.value)} placeholder="What was discussed?" /></FF>
-      <FF label="Next Follow-up Date"><input className="mac-input" type="date" value={v.nextFollowup} onChange={e=>set('nextFollowup',e.target.value)} /></FF>
-    </div>
-  );
-}
-
-function ClientDetail({ client, onClose, onEdit, onAddFollowup }) {
-  const isOverdue = client.nextFollowup && client.nextFollowup < today && client.status !== 'Closed Won' && client.status !== 'Closed Lost';
-  const initials = client.clientName.split(' ').map(n=>n[0]).join('').slice(0,2);
-  return (
-    <div style={{ display:'flex', flexDirection:'column', gap:18 }}>
-      <div style={{ display:'flex', alignItems:'flex-start', gap:14 }}>
-        <div style={{ width:52, height:52, borderRadius:14, background:'linear-gradient(135deg,#0071E3,#0A84FF)', display:'flex', alignItems:'center', justifyContent:'center', color:'#fff', fontSize:17, fontWeight:700, flexShrink:0 }}>{initials}</div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-            <span style={{ fontSize:16, fontWeight:660, color:'#1D1D1F', letterSpacing:'-0.3px' }}>{client.clientName}</span>
-            <Badge color={getStatusColor(client.status)}>{client.status}</Badge>
-            <Badge color={getStatusColor(client.priority)}>{client.priority}</Badge>
-          </div>
-          <div style={{ fontSize:13, color:'#6E6E73', marginTop:3 }}>{client.companyName||'—'}</div>
-        </div>
-      </div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-        {[
-          [Phone,'Contact',client.contact],[Mail,'Email',client.email],
-          [MapPin,'Address',client.address],[Building2,'Project Type',client.projectType],
-          [User,'Source',client.source],[Calendar,'Created',client.createdDate],
-          [Clock,'Last Contacted',client.lastContacted||'—'],[User,'Created By',client.createdBy],
-        ].map(([Icon,label,value])=>(
-          <div key={label} style={{ display:'flex', gap:8, alignItems:'flex-start' }}>
-            <Icon size={12} color="#AEAEB2" style={{ marginTop:2, flexShrink:0 }} />
-            <div>
-              <div style={{ fontSize:10, color:'#AEAEB2', textTransform:'uppercase', letterSpacing:'0.4px', fontWeight:500 }}>{label}</div>
-              <div style={{ fontSize:12.5, color:'#1D1D1F', marginTop:1 }}>{value||'—'}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-        <div style={{ padding:'12px 14px', borderRadius:12, background:'rgba(0,0,0,0.025)', border:'1px solid rgba(0,0,0,0.06)' }}>
-          <div style={{ fontSize:10, color:'#AEAEB2', textTransform:'uppercase', letterSpacing:'0.4px', fontWeight:500, marginBottom:4 }}>Proposal Value</div>
-          <div style={{ fontSize:16, fontWeight:680, color:'#1D1D1F', letterSpacing:'-0.3px' }}>{fmt(client.proposalValue)}</div>
-        </div>
-        <div style={{ padding:'12px 14px', borderRadius:12, background:'rgba(52,199,89,0.07)', border:'1px solid rgba(52,199,89,0.15)' }}>
-          <div style={{ fontSize:10, color:'#AEAEB2', textTransform:'uppercase', letterSpacing:'0.4px', fontWeight:500, marginBottom:4 }}>Final Price</div>
-          <div style={{ fontSize:16, fontWeight:680, color:'#34C759', letterSpacing:'-0.3px' }}>{fmt(client.finalPrice)}</div>
-        </div>
-      </div>
-      <div style={{ display:'flex', alignItems:'center', gap:10, padding:'12px 14px', borderRadius:12, background: isOverdue?'rgba(255,59,48,0.07)':'rgba(0,113,227,0.07)', border:`1px solid ${isOverdue?'rgba(255,59,48,0.15)':'rgba(0,113,227,0.15)'}` }}>
-        <AlertCircle size={14} color={isOverdue?'#FF3B30':'#0071E3'} />
-        <div style={{ flex:1 }}>
-          <div style={{ fontSize:11, fontWeight:550, color: isOverdue?'#FF3B30':'#0071E3' }}>{isOverdue?'Overdue Follow-up':'Next Follow-up'}</div>
-          <div style={{ fontSize:13, fontWeight:650, color: isOverdue?'#FF3B30':'#0071E3', marginTop:1 }}>{client.nextFollowup||'Not set'}</div>
-        </div>
-        <button onClick={onAddFollowup} className="mac-btn mac-btn-ghost" style={{ fontSize:12, padding:'6px 12px' }}>
-          <MessageSquarePlus size={13} /> Add Entry
-        </button>
-      </div>
-      {client.followupHistory?.length>0 && (
-        <div>
-          <div style={{ fontSize:12, fontWeight:600, color:'#3C3C43', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}>
-            <History size={13} color="#6E6E73" /> Follow-up History
-          </div>
-          <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
-            {client.followupHistory.map((h,i)=>(
-              <div key={i} style={{ display:'flex', gap:12, paddingBottom:12 }}>
-                <div style={{ display:'flex', flexDirection:'column', alignItems:'center', flexShrink:0 }}>
-                  <div style={{ width:8, height:8, borderRadius:'50%', background:'#0071E3', border:'2px solid rgba(0,113,227,0.2)', flexShrink:0 }} />
-                  {i<client.followupHistory.length-1 && <div style={{ width:1, flex:1, background:'rgba(0,0,0,0.08)', marginTop:2 }} />}
-                </div>
-                <div style={{ flex:1, minWidth:0, paddingBottom:4 }}>
-                  <div style={{ fontSize:10.5, color:'#AEAEB2', marginBottom:2 }}>{h.date}</div>
-                  <div style={{ fontSize:12.5, color:'#1D1D1F' }}>{h.remark}</div>
-                  {h.nextFollowup && <div style={{ fontSize:11, color:'#6E6E73', marginTop:3, display:'flex', alignItems:'center', gap:4 }}><ArrowRight size={10} /> Next: {h.nextFollowup}</div>}
-                </div>
-              </div>
-            ))}
-          </div>
+    <>
+      {(client.contact || client.email) && (
+        <div className="crm-quick">
+          {client.contact && <a className="mac-btn mac-btn-secondary" href={telHref(client.contact)}><Phone size={15} /> Call {client.contact}</a>}
+          {client.email && <a className="mac-btn mac-btn-secondary" href={`mailto:${client.email}`}><Mail size={15} /> Email</a>}
         </div>
       )}
-      <div style={{ display:'flex', gap:8, paddingTop:4, borderTop:'1px solid rgba(0,0,0,0.06)' }}>
-        <button onClick={onEdit} className="mac-btn mac-btn-secondary" style={{ flex:1 }}><Edit2 size={13} /> Edit Client</button>
-        <button onClick={onClose} className="mac-btn mac-btn-primary" style={{ flex:1 }}>Done</button>
+
+      <div className="crm-status-row">
+        <Field label="Status">
+          <select className="mac-select" value={client.status || ''} onChange={e => onStatus(client, e.target.value)}>
+            {withCurrent(CLIENT_STATUSES, client.status).map(s => <option key={s}>{s}</option>)}
+          </select>
+        </Field>
+        <div className={`crm-next ${dueState(client, today)}`}>
+          Next follow-up
+          <strong>{dueLabel(client, today)}</strong>
+        </div>
       </div>
-    </div>
+
+      <FollowupBox client={client} today={today} onSave={entry => onLogFollowup(client, entry)} />
+
+      <section className="crm-section">
+        <h3 className="section-title">Follow-up history</h3>
+        {history.length === 0
+          ? <p className="muted" style={{ fontSize: 'var(--fs-sm)' }}>Nothing logged yet. The first follow-up you save will show here.</p>
+          : (
+            <ol className="crm-timeline">
+              {history.map((h, i) => (
+                <li key={`${h.date}-${i}`}>
+                  <div className="crm-timeline-when">{fmtDate(h.date)}{h.by ? ` · ${h.by}` : ''}</div>
+                  <div className="crm-timeline-text">{h.remark || h.note || '—'}</div>
+                  {h.nextFollowup && <div className="crm-timeline-next">Next follow-up set for {fmtDate(h.nextFollowup)}</div>}
+                </li>
+              ))}
+            </ol>
+          )}
+      </section>
+
+      <section className="crm-section">
+        <h3 className="section-title">Details</h3>
+        <dl className="kv">
+          <dt>Phone</dt><dd>{client.contact ? <a className="crm-link" href={telHref(client.contact)}>{client.contact}</a> : '—'}</dd>
+          <dt>Email</dt><dd>{client.email ? <a className="crm-link" href={`mailto:${client.email}`}>{client.email}</a> : '—'}</dd>
+          <dt>Company</dt><dd>{client.companyName || '—'}</dd>
+          <dt>Address</dt><dd>{client.address || '—'}</dd>
+          <dt>Project type</dt><dd>{client.projectType || '—'}</dd>
+          <dt>Source</dt><dd>{client.source || '—'}</dd>
+          <dt>Priority</dt><dd>{client.priority ? <Badge color={getStatusColor(client.priority)}>{client.priority}</Badge> : '—'}</dd>
+          <dt>Proposal value</dt><dd>{client.proposalValue ? fmtMoney(client.proposalValue) : '—'}</dd>
+          <dt>Final price</dt><dd>{client.finalPrice ? fmtMoney(client.finalPrice) : '—'}</dd>
+          <dt>Last contacted</dt><dd>{fmtDate(client.lastContacted)}</dd>
+          <dt>Added</dt><dd>{fmtDate(client.createdDate)}{client.createdBy ? ` by ${client.createdBy}` : ''}</dd>
+        </dl>
+      </section>
+    </>
   );
 }
 
-function StatusCell({ c, onUpdate }) {
-  const [editing, setEditing] = useState(false);
-  if (editing) return (
-    <select className="mac-select" style={{ fontSize:12, padding:'4px 28px 4px 8px', borderRadius:7 }}
-      value={c.status} onClick={e=>e.stopPropagation()}
-      onChange={e=>{ onUpdate(e.target.value); setEditing(false); }}
-      onBlur={()=>setEditing(false)} autoFocus>
-      {CLIENT_STATUSES.map(s=><option key={s}>{s}</option>)}
-    </select>
-  );
+function AuditList({ entries, failed }) {
+  if (entries.length === 0) {
+    return <p className="muted" style={{ textAlign: 'center', padding: '24px 0' }}>{failed ? 'The change history could not be loaded.' : 'No changes recorded yet.'}</p>;
+  }
   return (
-    <div onClick={e=>{e.stopPropagation();setEditing(true);}} style={{ cursor:'pointer' }} title="Click to change status">
-      <Badge color={getStatusColor(c.status)}>{c.status}</Badge>
-    </div>
+    <>
+      {failed && <p className="muted" style={{ fontSize: 'var(--fs-sm)' }}>Earlier history could not be loaded; showing changes from this session only.</p>}
+      <ul className="crm-audit">
+        {entries.map(e => (
+          <li key={e.id}>
+            <Badge color={e.action === 'Deleted' ? 'red' : e.action === 'Created' ? 'green' : 'blue'}>{e.action}</Badge>
+            <div className="crm-audit-main">
+              <div className="cell-main">{e.description || '—'}</div>
+              <div className="cell-sub">by {e.by || '—'}</div>
+            </div>
+            <span className="crm-audit-when">
+              {fmtDate(e.createdAt)}{e.createdAt ? `, ${new Date(e.createdAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : ''}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
 export default function CRM() {
-  const { user, employeeData } = useAuth();
-  const currentUser = employeeData?.name || user?.email || 'Unknown';
-  const [clients, setClients]     = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [saving, setSaving]       = useState(false);
-  const [search, setSearch]       = useState('');
-  const [statusTab, setStatusTab]   = useState('all');
-  const [priorityTab, setPriorityTab] = useState('all');
-  const [filters, setFilters]     = useState({ status:'', priority:'', source:'' });
-  const [showFilters, setShowFilters] = useState(false);
-  const [detailClient, setDetailClient] = useState(null);
-  const [editClient, setEditClient]     = useState(null);
-  const [showAdd, setShowAdd]           = useState(false);
-  const [formData, setFormData]         = useState(emptyClient);
-  const [deleteId, setDeleteId]         = useState(null);
-  const [showFollowup, setShowFollowup] = useState(false);
-  const [followupData, setFollowupData] = useState({ date:today, remark:'', nextFollowup:'' });
-  const [followupCId, setFollowupCId]   = useState(null);
-  const [auditLog, setAuditLog]         = useState([]);
-  const [showAudit, setShowAudit]       = useState(false);
+  const { user, displayName } = useAuth();
+  const currentUser = displayName || user?.email || 'Unknown';
+  // `createdBy` is a display name; the choices are the partners in the people directory
+  const { people: directory } = usePeople();
+  const partners = useMemo(() => directory.filter(p => p.kind === 'partner' && p.active !== false).map(p => p.name), [directory]);
+  const toast = useToast();
+  const today = todayLocal();
 
-  const set = (k,v) => setFormData(f=>({...f,[k]:v}));
+  const [clients, setClients] = useState([]);
+  const [auditLog, setAuditLog] = useState([]);
+  const [auditFailed, setAuditFailed] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
-  const fetchClients = useCallback(async () => {
+  const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('all');
+  const [due, setDue] = useState('');            // '' | 'overdue' | 'today' (set from the stat tiles)
+  const [priority, setPriority] = useState('');
+  const [source, setSource] = useState('');
+
+  const [detailId, setDetailId] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState(emptyClient);
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [auditFor, setAuditFor] = useState(null); // null | 'all' | client id
+
+  const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const [clientData, auditData] = await Promise.all([clientsDB.getAll(), auditDB.getAll('client')]);
+      const [clientData, auditData] = await Promise.all([
+        clientsDB.getAll(),
+        auditDB.getAll('client').catch(err => { console.error(err); return null; }),
+      ]);
       setClients(clientData);
-      setAuditLog(auditData);
-    } catch(e) { console.error(e); }
-    setLoading(false);
+      setAuditLog(auditData || []);
+      setAuditFailed(!auditData);
+    } catch (err) {
+      console.error(err);
+      setLoadError(err);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { fetchClients(); }, [fetchClients]);
+  useEffect(() => { load(); }, [load]);
 
-  const filtered = useMemo(()=> clients.filter(c=>{
-    const q = search.toLowerCase();
-    const isClosed = c.status === 'Closed Won' || c.status === 'Closed Lost';
-    const refDate = c.lastContacted || c.createdDate || today;
-    if (isClosed && refDate < cutoff20) return false;
-    return (!q||c.clientName.toLowerCase().includes(q)||c.companyName?.toLowerCase().includes(q)||c.email?.toLowerCase().includes(q))
-      && (statusTab==='all'||c.status===statusTab)
-      && (priorityTab==='all'||c.priority===priorityTab)
-      && (!filters.status||c.status===filters.status)
-      && (!filters.priority||c.priority===filters.priority)
-      && (!filters.source||c.source===filters.source);
-  }), [clients,search,statusTab,priorityTab,filters]);
+  const isOldClosed = useCallback(c => {
+    const ref = c.lastContacted || c.createdDate;
+    return isClosed(c) && !!ref && ref < addDays(today, -HIDE_CLOSED_AFTER_DAYS);
+  }, [today]);
 
-  async function saveClient() {
-    if (!formData.clientName || saving) return;
-    setSaving(true);
-    try {
-      if (editClient) {
-        const updated = await clientsDB.update(editClient.id, formData);
-        await auditDB.log({ entity:'client', entityId:editClient.id, action:'Edited', description:formData.clientName, by:currentUser });
-        setAuditLog(l=>[{ id:Date.now(), entity:'client', entityId:editClient.id, action:'Edited', description:formData.clientName, by:currentUser, createdAt:new Date().toISOString() },...l]);
-      } else {
-        const created = await clientsDB.create({ ...formData, createdBy: currentUser, createdDate: today, lastContacted: today });
-        await auditDB.log({ entity:'client', entityId:created.id, action:'Created', description:created.clientName, by:currentUser });
-        setAuditLog(l=>[{ id:Date.now(), entity:'client', entityId:created.id, action:'Created', description:created.clientName, by:currentUser, createdAt:new Date().toISOString() },...l]);
-      }
-      await fetchClients();
-    } catch(e) { console.error(e); }
-    setSaving(false);
-    setShowAdd(false); setEditClient(null); setFormData(emptyClient);
+  const stats = useMemo(() => {
+    const open = clients.filter(c => !isClosed(c));
+    const counts = { all: clients.filter(c => !isOldClosed(c)).length };
+    clients.forEach(c => { counts[c.status] = (counts[c.status] || 0) + 1; });
+    return {
+      counts,
+      open: open.length,
+      overdue: open.filter(c => isOverdue(c, today)).length,
+      dueToday: open.filter(c => isDueToday(c, today)).length,
+      hot: counts.Hot || 0,
+      pipeline: open.reduce((sum, c) => sum + (Number(c.proposalValue) || 0), 0),
+      oldClosed: clients.filter(isOldClosed).length,
+    };
+  }, [clients, today, isOldClosed]);
+
+  const q = search.trim().toLowerCase();
+  // Old closed deals stay out of the plain "All" view only; Won/Lost, a search or any tile shows them.
+  const hidesOldClosed = status === 'all' && !q && !due;
+
+  const visible = useMemo(() => {
+    const rank = c => (isOverdue(c, today) ? 0 : !isClosed(c) && c.nextFollowup ? 1 : 2);
+    return clients
+      .filter(c => {
+        if (hidesOldClosed && isOldClosed(c)) return false;
+        if (q && ![c.clientName, c.companyName, c.email, c.contact].some(v => v && String(v).toLowerCase().includes(q))) return false;
+        if (status !== 'all' && c.status !== status) return false;
+        if (due === 'overdue' && !isOverdue(c, today)) return false;
+        if (due === 'today' && !isDueToday(c, today)) return false;
+        if (priority && c.priority !== priority) return false;
+        if (source && c.source !== source) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const ra = rank(a), rb = rank(b);
+        if (ra !== rb) return ra - rb;
+        if (ra < 2) return a.nextFollowup.localeCompare(b.nextFollowup);
+        return String(b.createdDate || '').localeCompare(String(a.createdDate || ''));
+      });
+  }, [clients, q, status, due, priority, source, today, hidesOldClosed, isOldClosed]);
+
+  const isFiltered = !!q || status !== 'all' || !!due || !!priority || !!source;
+  const clearFilters = () => { setSearch(''); setStatus('all'); setDue(''); setPriority(''); setSource(''); };
+  const detail = detailId ? clients.find(c => c.id === detailId) : null;
+
+  const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => (e[k] ? { ...e, [k]: undefined } : e)); };
+  function openAdd() { setForm(emptyClient); setEditId(null); setErrors({}); setFormOpen(true); }
+  function openEdit(c) {
+    const filled = { ...emptyClient, ...c };
+    Object.keys(emptyClient).forEach(k => { if (filled[k] == null) filled[k] = emptyClient[k]; });
+    setForm(filled); setEditId(c.id); setErrors({}); setFormOpen(true);
+  }
+  function closeForm() { setFormOpen(false); setEditId(null); }
+
+  async function recordAudit(entityId, action, description) {
+    const entry = { entity: 'client', entityId, action, description };   // the server stamps who did it
+    setAuditLog(l => [{ ...entry, by: currentUser, id: `local-${Date.now()}`, createdAt: new Date().toISOString() }, ...l]);
+    try { await auditDB.log(entry); } catch (err) { console.error(err); }
   }
 
-  async function deleteClient(id) {
-    const c = clients.find(x=>x.id===id);
-    try { await clientsDB.delete(id); } catch(e) { console.error(e); }
-    setClients(cs=>cs.filter(c=>c.id!==id));
-    if (detailClient?.id===id) setDetailClient(null);
-    if (c) {
-      await auditDB.log({ entity:'client', entityId:id, action:'Deleted', description:c.clientName, by:currentUser });
-      setAuditLog(l=>[{ id:Date.now(), entity:'client', entityId:id, action:'Deleted', description:c.clientName, by:currentUser, createdAt:new Date().toISOString() },...l]);
+  async function saveClient(e) {
+    e.preventDefault();
+    if (saving) return;
+    const found = validateClient(form);
+    setErrors(found);
+    if (Object.keys(found).length) return;
+    setSaving(true);
+    try {
+      if (editId) {
+        const updated = await clientsDB.update(editId, form);
+        setClients(cs => cs.map(c => (c.id === editId ? updated : c)));
+        recordAudit(editId, 'Edited', form.clientName);
+        toast.success('Client updated');
+      } else {
+        const created = await clientsDB.create({ ...form, createdBy: currentUser, createdDate: today, lastContacted: today });
+        setClients(cs => [created, ...cs]);
+        recordAudit(created.id, 'Created', created.clientName);
+        toast.success('Client added');
+      }
+      closeForm();
+    } catch (err) {
+      toast.error('Could not save the client', err);
+    } finally {
+      setSaving(false);
     }
   }
 
-  async function updateStatus(clientId, status) {
-    setClients(cs=>cs.map(c=>c.id===clientId?{...c,status}:c));
-    try { await clientsDB.updateStatus(clientId, status); } catch(e) { console.error(e); await fetchClients(); }
-  }
-
-  async function addFollowup() {
-    if (!followupData.remark || saving) return;
-    setSaving(true);
-    const client = clients.find(c=>c.id===followupCId);
-    if (!client) { setSaving(false); return; }
-    const newHistory = [{ ...followupData }, ...(client.followupHistory||[])];
-    const nextFU = followupData.nextFollowup || client.nextFollowup;
+  // The row is only removed (and the audit entry written) once the delete really succeeded.
+  async function deleteClient(c) {
+    const wasOpen = detailId === c.id;
+    if (wasOpen) setDetailId(null);
     try {
-      const updated = await clientsDB.updateFollowup(followupCId, newHistory, followupData.date, nextFU);
-      setClients(cs=>cs.map(c=>c.id===followupCId ? updated : c));
-      if (detailClient?.id===followupCId) setDetailClient(updated);
-    } catch(e) { console.error(e); }
-    setSaving(false);
-    setShowFollowup(false); setFollowupData({date:today,remark:'',nextFollowup:''});
+      await clientsDB.delete(c.id);
+    } catch (err) {
+      if (wasOpen) setDetailId(c.id);
+      toast.error(`Could not delete ${c.clientName}`, err);
+      return;
+    }
+    setClients(cs => cs.filter(x => x.id !== c.id));
+    recordAudit(c.id, 'Deleted', c.clientName);
+    toast.success(`${c.clientName} deleted`);
   }
 
-  const overdueCount = clients.filter(c=>c.nextFollowup&&c.nextFollowup<today&&c.status!=='Closed Won'&&c.status!=='Closed Lost').length;
+  async function updateStatus(c, next) {
+    if (next === c.status) return;
+    const prev = c.status;
+    setClients(cs => cs.map(x => (x.id === c.id ? { ...x, status: next } : x)));
+    try {
+      const updated = await clientsDB.updateStatus(c.id, next);
+      if (updated?.id) setClients(cs => cs.map(x => (x.id === c.id ? updated : x)));
+      toast.success(`${c.clientName} marked ${next}`);
+    } catch (err) {
+      setClients(cs => cs.map(x => (x.id === c.id ? { ...x, status: prev } : x)));
+      toast.error('Could not change the status', err);
+    }
+  }
 
-  const TH = ({children}) => (
-    <th style={{ textAlign:'left', padding:'10px 16px', fontSize:11, fontWeight:600, color:'#8E8E93', textTransform:'uppercase', letterSpacing:'0.5px', whiteSpace:'nowrap', borderBottom:'1px solid rgba(0,0,0,0.07)' }}>
-      {children}
-    </th>
-  );
-  const TD = ({children, style={}}) => (
-    <td style={{ padding:'11px 16px', verticalAlign:'middle', ...style }}>{children}</td>
-  );
+  // Throws on failure so the inline form keeps the note and shows the toast.
+  async function logFollowup(c, entry) {
+    // one call: the server adds the entry (stamping who and when) and moves the follow-up dates
+    const updated = await clientsDB.addFollowup(c.id, entry);
+    setClients(cs => cs.map(x => (x.id === c.id ? updated : x)));
+  }
+
+  const toggleDue = v => { setDue(d => (d === v ? '' : v)); setStatus('all'); };
+  const tiles = [
+    { label: 'Overdue follow-ups', value: stats.overdue, icon: AlertCircle, tone: due === 'overdue' ? 'dark' : 'bad', sub: due === 'overdue' ? 'Showing these' : 'Tap to see who', onClick: () => toggleDue('overdue') },
+    { label: 'Due today', value: stats.dueToday, icon: CalendarClock, tone: due === 'today' ? 'dark' : 'warn', sub: due === 'today' ? 'Showing these' : 'Tap to see who', onClick: () => toggleDue('today') },
+    { label: 'Hot leads', value: stats.hot, icon: Flame, tone: status === 'Hot' && !due ? 'dark' : 'brand', sub: status === 'Hot' && !due ? 'Showing these' : 'Tap to see who', onClick: () => { setDue(''); setStatus(s => (s === 'Hot' ? 'all' : 'Hot')); } },
+    { label: 'Open pipeline', value: fmtMoney(stats.pipeline), icon: IndianRupee, sub: `${stats.open} open client${stats.open === 1 ? '' : 's'}` },
+  ];
+
+  const rowMenu = c => [
+    { label: 'Edit', icon: Edit2, onClick: () => openEdit(c) },
+    { label: 'Change history', icon: History, onClick: () => setAuditFor(c.id) },
+    { label: 'Delete', icon: Trash2, danger: true, onClick: () => setDeleteTarget(c) },
+  ];
+  const auditEntries = auditFor === 'all' ? auditLog : auditLog.filter(e => String(e.entityId) === String(auditFor));
+  const auditClient = auditFor && auditFor !== 'all' ? clients.find(c => c.id === auditFor) : null;
 
   return (
     <div>
       <Header
         title="CRM"
-        subtitle={`${clients.length} clients${overdueCount>0?` · ${overdueCount} overdue`:''}`}
+        subtitle={loading || loadError ? 'Sales pipeline' : `${stats.open} open · ${stats.overdue} overdue · ${stats.dueToday} due today`}
         actions={
-          <div style={{ display:'flex', gap:8 }}>
-            <button onClick={()=>setShowAudit(true)} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}><History size={13}/> Audit</button>
-            <button onClick={()=>{setFormData(emptyClient);setEditClient(null);setShowAdd(true);}} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>
-              <Plus size={14}/> Add Client
-            </button>
-          </div>
+          <>
+            <button className="mac-btn mac-btn-secondary" onClick={() => setAuditFor('all')}><History size={15} /> History</button>
+            <button className="mac-btn mac-btn-primary" onClick={openAdd}><Plus size={15} /> Add client</button>
+          </>
         }
       />
 
-      {loading ? <PageLoader /> : (
-        <div className="page-body">
-          {overdueCount>0 && (
-            <div style={{ display:'flex', alignItems:'center', gap:8, padding:'9px 14px', borderRadius:10, background:'rgba(255,59,48,0.07)', border:'1px solid rgba(255,59,48,0.13)' }}>
-              <AlertCircle size={13} color="#FF3B30" />
-              <span style={{ fontSize:12.5, color:'#FF3B30', fontWeight:500 }}>{overdueCount} overdue follow-up{overdueCount>1?'s':''} — click a row to add entry</span>
-            </div>
-          )}
-          <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-            <div className="tab-bar">
-              {[['all','All'],...CLIENT_STATUSES.map(s=>[s,s])].map(([k,l])=>(
-                <button key={k} onClick={()=>setStatusTab(k)} className={`tab-item ${statusTab===k?'active':''}`}>{l}</button>
-              ))}
-            </div>
-            <div className="tab-bar">
-              {[['all','All'],...PRIORITIES.map(p=>[p,p])].map(([k,l])=>(
-                <button key={k} onClick={()=>setPriorityTab(k)} className={`tab-item ${priorityTab===k?'active':''}`}>{l}</button>
-              ))}
-            </div>
-          </div>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <div style={{ flex:1, maxWidth:280 }}><SearchBar value={search} onChange={setSearch} placeholder="Search clients…" /></div>
-            <button onClick={()=>setShowFilters(f=>!f)} className={`mac-btn ${showFilters||Object.values(filters).some(Boolean)?'mac-btn-primary':'mac-btn-secondary'}`} style={{ fontSize:13 }}>
-              <Filter size={13}/> Filter {Object.values(filters).filter(Boolean).length>0?`(${Object.values(filters).filter(Boolean).length})`:''}
-            </button>
-            {Object.values(filters).some(Boolean) && (
-              <button onClick={()=>setFilters({status:'',priority:'',source:''})} className="mac-btn mac-btn-ghost" style={{ fontSize:12, padding:'6px 10px' }}><X size={12}/> Clear</button>
-            )}
-            <span style={{ fontSize:12, color:'#8E8E93', marginLeft:'auto' }}>{filtered.length} result{filtered.length!==1?'s':''}</span>
-          </div>
-          {showFilters && (
-            <div className="mac-card" style={{ padding:'14px 16px', display:'flex', gap:14 }}>
-              {[['Status','status',CLIENT_STATUSES],['Priority','priority',PRIORITIES],['Source','source',SOURCES]].map(([label,key,opts])=>(
-                <div key={key} style={{ flex:1 }}>
-                  <label style={{ display:'block', fontSize:10.5, fontWeight:600, color:'#8E8E93', textTransform:'uppercase', letterSpacing:'0.5px', marginBottom:5 }}>{label}</label>
-                  <select className="mac-select" style={{ fontSize:13 }} value={filters[key]} onChange={e=>setFilters(f=>({...f,[key]:e.target.value}))}>
-                    <option value="">All</option>
-                    {opts.map(o=><option key={o}>{o}</option>)}
-                  </select>
-                </div>
-              ))}
-            </div>
-          )}
-          {/* Phones: card list (follow-up / status / call at a glance) */}
-          <div className="mac-card only-mobile" style={{ overflow:'hidden' }}>
-            {filtered.length===0
-              ? <div style={{ textAlign:'center', padding:'40px 16px', color:'#AEAEB2', fontSize:13 }}>No clients found</div>
-              : filtered.map(c=>{
-                const isOverdue = c.nextFollowup && c.nextFollowup<today && c.status!=='Closed Won' && c.status!=='Closed Lost';
-                return (
-                  <div key={c.id} onClick={()=>setDetailClient(c)} style={{ display:'flex', gap:10, padding:'12px 14px', borderBottom:'1px solid rgba(0,0,0,0.05)', cursor:'pointer' }}>
-                    <div style={{ width:36,height:36,borderRadius:10,background:'linear-gradient(135deg,rgba(0,113,227,0.12),rgba(10,132,255,0.08))',display:'flex',alignItems:'center',justifyContent:'center',color:'#0071E3',fontSize:11.5,fontWeight:700,flexShrink:0 }}>
-                      {c.clientName.split(' ').map(n=>n[0]).join('').slice(0,2)}
-                    </div>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ display:'flex', justifyContent:'space-between', gap:8 }}>
-                        <span style={{ fontSize:13.5, fontWeight:600, color:'#1D1D1F', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{c.clientName}</span>
-                        <span style={{ fontSize:13, fontWeight:600, color:'#1D1D1F', whiteSpace:'nowrap' }}>{c.proposalValue ? fmt(c.proposalValue) : ''}</span>
-                      </div>
-                      <div style={{ fontSize:11.5, color:'#8E8E93', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{[c.companyName, c.projectType, c.source].filter(Boolean).join(' · ')}</div>
-                      <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:6, flexWrap:'wrap' }} onClick={e=>e.stopPropagation()}>
-                        <StatusCell c={c} onUpdate={v=>updateStatus(c.id,v)} />
-                        <Badge color={getStatusColor(c.priority)}>{c.priority}</Badge>
-                        {c.nextFollowup && <span style={{ fontSize:11.5, fontWeight:550, color:isOverdue?'#FF3B30':'#6E6E73' }}>{isOverdue?'⚠ ':''}Follow-up {c.nextFollowup}</span>}
-                      </div>
-                    </div>
-                    <div style={{ display:'flex', flexDirection:'column', gap:6 }} onClick={e=>e.stopPropagation()}>
-                      {c.contact && <a href={`tel:${c.contact}`} aria-label={`Call ${c.clientName}`} style={{ width:34,height:34,borderRadius:9,background:'rgba(52,199,89,0.1)',display:'flex',alignItems:'center',justifyContent:'center' }}><Phone size={14} color="#248A3D" /></a>}
-                      <button aria-label="Add follow-up" onClick={()=>{setFollowupCId(c.id);setShowFollowup(true);}} style={{ width:34,height:34,borderRadius:9,background:'rgba(0,113,227,0.09)',border:'none',display:'flex',alignItems:'center',justifyContent:'center' }}><MessageSquarePlus size={14} color="#0071E3" /></button>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
+      <div className="page-body">
+        {loading ? <SkeletonRows rows={8} /> : loadError ? <ErrorPanel title="Could not load your clients" error={loadError} onRetry={load} /> : clients.length === 0 ? (
+          <EmptyPanel icon={Users} title="No clients yet" text="Add your first lead to start tracking follow-ups and proposals."
+            action={<button className="mac-btn mac-btn-primary" onClick={openAdd}><Plus size={15} /> Add client</button>} />
+        ) : (
+          <>
+            <StatTiles items={tiles} />
 
-          <div className="mac-card only-desktop" style={{ overflow:'hidden' }}>
-            <div style={{ overflowX:'auto' }}>
-              <table style={{ width:'100%', borderCollapse:'collapse' }}>
-                <thead style={{ background:'rgba(0,0,0,0.018)' }}>
-                  <tr>
-                    <TH>Client</TH><TH>Company</TH><TH>Type</TH><TH>Source</TH>
-                    <TH>Status</TH><TH>Priority</TH><TH>Proposal</TH><TH>Follow-up</TH><TH>Actions</TH>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.length===0
-                    ? <tr><td colSpan={9} style={{ textAlign:'center', padding:'48px 16px', color:'#AEAEB2', fontSize:13 }}>No clients found</td></tr>
-                    : filtered.map(c=>{
-                      const isOverdue = c.nextFollowup && c.nextFollowup<today && c.status!=='Closed Won' && c.status!=='Closed Lost';
-                      return (
-                        <tr key={c.id} className="table-row" style={{ cursor:'pointer' }} onClick={()=>setDetailClient(c)}>
-                          <TD>
-                            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                              <div style={{ width:32,height:32,borderRadius:10,background:'linear-gradient(135deg,rgba(0,113,227,0.12),rgba(10,132,255,0.08))',display:'flex',alignItems:'center',justifyContent:'center',color:'#0071E3',fontSize:10.5,fontWeight:700,flexShrink:0 }}>
-                                {c.clientName.split(' ').map(n=>n[0]).join('').slice(0,2)}
-                              </div>
-                              <div>
-                                <div style={{ fontSize:13, fontWeight:550, color:'#1D1D1F' }}>{c.clientName}</div>
-                                <div style={{ fontSize:11, color:'#AEAEB2', marginTop:1 }}>{c.contact}</div>
-                              </div>
-                            </div>
-                          </TD>
-                          <TD><span style={{ fontSize:12.5, color:'#3C3C43' }}>{c.companyName||'—'}</span></TD>
-                          <TD><Badge color="blue">{c.projectType}</Badge></TD>
-                          <TD><span style={{ fontSize:12, color:'#6E6E73' }}>{c.source}</span></TD>
-                          <TD onClick={e=>e.stopPropagation()}>
-                            <StatusCell c={c} onUpdate={v=>updateStatus(c.id,v)} />
-                          </TD>
-                          <TD><Badge color={getStatusColor(c.priority)}>{c.priority}</Badge></TD>
-                          <TD><span style={{ fontSize:13, fontWeight:550, color:'#1D1D1F' }}>{fmt(c.proposalValue)}</span></TD>
-                          <TD>
-                            <span style={{ fontSize:12, fontWeight:500, color:isOverdue?'#FF3B30':'#6E6E73' }}>
-                              {c.nextFollowup ? (isOverdue?'⚠ ':'')+c.nextFollowup : '—'}
-                            </span>
-                          </TD>
-                          <TD style={{ whiteSpace:'nowrap' }} onClick={e=>e.stopPropagation()}>
-                            <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-                              {[
-                                { icon: MessageSquarePlus, color:'#0071E3', bg:'rgba(0,113,227,0.09)', title:'Add follow-up', onClick:()=>{setFollowupCId(c.id);setShowFollowup(true);} },
-                                { icon: Edit2, color:'#6E6E73', bg:'rgba(0,0,0,0.06)', title:'Edit', onClick:()=>{setEditClient(c);setFormData(c);setShowAdd(true);} },
-                                { icon: Trash2, color:'#FF3B30', bg:'rgba(255,59,48,0.08)', title:'Delete', onClick:()=>setDeleteId(c.id) },
-                              ].map(({icon:Icon,color,bg,title,onClick})=>(
-                                <button key={title} title={title} onClick={onClick} style={{ width:28,height:28,borderRadius:8,background:bg,border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center' }}
-                                  onMouseEnter={e=>e.currentTarget.style.opacity='0.75'} onMouseLeave={e=>e.currentTarget.style.opacity='1'}>
-                                  <Icon size={13} color={color} />
-                                </button>
-                              ))}
-                            </div>
-                          </TD>
+            <Chips label="Filter by status" value={status} onChange={v => { setStatus(v); setDue(''); }}
+              options={STATUS_CHIPS.map(o => ({ ...o, count: stats.counts[o.value] || 0 }))} />
+
+            <Toolbar search={search} onSearch={setSearch} placeholder="Search name, company, phone or email"
+              right={<>
+                <span>{isFiltered || hidesOldClosed ? `${visible.length} of ${clients.length}` : `${clients.length} clients`}</span>
+                {isFiltered && <button className="mac-btn mac-btn-ghost" onClick={clearFilters}>Clear</button>}
+              </>}>
+              <select className="mac-select" aria-label="Priority" value={priority} onChange={e => setPriority(e.target.value)}>
+                <option value="">Any priority</option>
+                {PRIORITIES.map(p => <option key={p}>{p}</option>)}
+              </select>
+              <select className="mac-select" aria-label="Source" value={source} onChange={e => setSource(e.target.value)}>
+                <option value="">Any source</option>
+                {SOURCES.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </Toolbar>
+
+            {visible.length === 0 ? (
+              <EmptyPanel icon={SearchX} title="No clients match" text="Nothing fits the current search and filters."
+                action={<button className="mac-btn mac-btn-secondary" onClick={clearFilters}>Clear filters</button>} />
+            ) : (
+              <>
+                <div className="mac-card only-desktop">
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Client</th><th>Project</th><th>Status</th><th>Priority</th>
+                          <th className="num">Proposal</th><th>Next follow-up</th>
                         </tr>
-                      );
-                    })
-                  }
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <Modal isOpen={showAdd} onClose={()=>{setShowAdd(false);setEditClient(null);setFormData(emptyClient);}} title={editClient?'Edit Client':'Add New Client'} size="xl">
-        <ClientForm v={formData} set={set} />
-        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20, paddingTop:16, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
-          <button onClick={()=>{setShowAdd(false);setEditClient(null);}} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>Cancel</button>
-          <button onClick={saveClient} disabled={saving} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>{saving?'Saving…':editClient?'Save Changes':'Add Client'}</button>
-        </div>
-      </Modal>
-
-      <Modal isOpen={!!detailClient} onClose={()=>setDetailClient(null)} title="Client Details" size="lg">
-        {detailClient&&<ClientDetail client={detailClient} onClose={()=>setDetailClient(null)} onEdit={()=>{setEditClient(detailClient);setFormData(detailClient);setDetailClient(null);setShowAdd(true);}} onAddFollowup={()=>{setFollowupCId(detailClient.id);setDetailClient(null);setShowFollowup(true);}} />}
-      </Modal>
-
-      <Modal isOpen={showFollowup} onClose={()=>setShowFollowup(false)} title="Add Follow-up Entry" size="sm">
-        <FollowupForm v={followupData} onChange={setFollowupData} />
-        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20, paddingTop:16, borderTop:'1px solid rgba(0,0,0,0.07)' }}>
-          <button onClick={()=>setShowFollowup(false)} className="mac-btn mac-btn-secondary" style={{ fontSize:13 }}>Cancel</button>
-          <button onClick={addFollowup} disabled={saving} className="mac-btn mac-btn-primary" style={{ fontSize:13 }}>{saving?'Saving…':'Save Entry'}</button>
-        </div>
-      </Modal>
-
-      <ConfirmDialog isOpen={!!deleteId} onClose={()=>setDeleteId(null)} onConfirm={()=>deleteClient(deleteId)} title="Delete Client" message="This will permanently delete the client and all their follow-up history." />
-
-      <Modal isOpen={showAudit} onClose={()=>setShowAudit(false)} title="Client Audit Log" size="md">
-        {auditLog.length===0?<p style={{textAlign:'center',color:'#AEAEB2',padding:'32px 0',fontSize:13}}>No audit entries yet</p>
-          :<div style={{display:'flex',flexDirection:'column',gap:6}}>
-            {auditLog.map(e=>{
-              const badgeColor=e.action==='Deleted'?'red':e.action==='Created'?'green':'blue';
-              const ts=e.createdAt?new Date(e.createdAt).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
-              return(
-                <div key={e.id} style={{padding:'10px 12px',borderRadius:10,background:'rgba(0,0,0,0.025)',border:'1px solid rgba(0,0,0,0.06)'}}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
-                    <div style={{display:'flex',gap:8,alignItems:'center'}}><Badge color={badgeColor}>{e.action}</Badge><span style={{fontSize:12.5,color:'#1D1D1F',fontWeight:500}}>{e.description}</span></div>
-                    <span style={{fontSize:11,color:'#AEAEB2',whiteSpace:'nowrap',marginLeft:8}}>{ts}</span>
+                      </thead>
+                      <tbody>
+                        {visible.map(c => (
+                          <tr key={c.id} className="clickable" tabIndex={0} onClick={() => setDetailId(c.id)}
+                            onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setDetailId(c.id); } }}>
+                            <td>
+                              <div className="crm-client">
+                                <Avatar name={c.clientName} />
+                                <div>
+                                  <div className="cell-main">{c.clientName}</div>
+                                  <div className="cell-sub">{c.companyName || c.contact || '—'}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td>
+                              <div>{c.projectType || '—'}</div>
+                              <div className="cell-sub">{c.source || ''}</div>
+                            </td>
+                            <td><Badge color={getStatusColor(c.status)}>{c.status}</Badge></td>
+                            <td><Badge color={getStatusColor(c.priority)}>{c.priority}</Badge></td>
+                            <td className="num">{c.proposalValue ? fmtMoney(c.proposalValue) : '—'}</td>
+                            <td><span className={`crm-due ${dueState(c, today)}`}>{dueLabel(c, today)}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                  <span style={{fontSize:11,color:'#6E6E73'}}>Updated by: <strong>{e.by||'—'}</strong></span>
                 </div>
-              );
-            })}
-          </div>
-        }
+
+                <div className="list-cards only-mobile">
+                  {visible.map(c => (
+                    <div key={c.id} className="crm-card-row">
+                      <button className="list-card" onClick={() => setDetailId(c.id)}>
+                        <span className="crm-card-top">
+                          <span className="cell-main">{c.clientName}</span>
+                          <span className={`crm-due ${dueState(c, today)}`}>{dueLabel(c, today)}</span>
+                        </span>
+                        <span className="cell-sub">{[c.companyName, c.projectType].filter(Boolean).join(' · ') || '—'}</span>
+                        <span className="crm-card-meta">
+                          <Badge color={getStatusColor(c.status)}>{c.status}</Badge>
+                          <Badge color={getStatusColor(c.priority)}>{c.priority}</Badge>
+                          {!!c.proposalValue && <span className="cell-main">{fmtMoney(c.proposalValue)}</span>}
+                        </span>
+                      </button>
+                      {c.contact && <a className="icon-btn crm-call" href={telHref(c.contact)} aria-label={`Call ${c.clientName}`}><Phone size={17} /></a>}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {hidesOldClosed && stats.oldClosed > 0 && (
+              <p className="crm-note">
+                {stats.oldClosed} deal{stats.oldClosed === 1 ? '' : 's'} closed more than {HIDE_CLOSED_AFTER_DAYS} days ago {stats.oldClosed === 1 ? 'is' : 'are'} not listed here. See{' '}
+                <button onClick={() => setStatus('Closed Won')}>Won</button> or <button onClick={() => setStatus('Closed Lost')}>Lost</button>, or search by name.
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      <Drawer
+        isOpen={!!detail && !formOpen && !deleteTarget && !auditFor}
+        onClose={() => setDetailId(null)}
+        title={detail?.clientName}
+        subtitle={detail && ([detail.companyName, detail.projectType].filter(Boolean).join(' · ') || 'Client')}
+        actions={detail && <RowMenu items={rowMenu(detail)} label="Client actions" />}
+      >
+        {detail && <ClientDetail key={detail.id} client={detail} today={today} onStatus={updateStatus} onLogFollowup={logFollowup} />}
+      </Drawer>
+
+      <Modal isOpen={formOpen} onClose={closeForm} title={editId ? 'Edit client' : 'Add client'} size="lg"
+        footer={<>
+          <button type="button" className="mac-btn mac-btn-secondary" onClick={closeForm}>Cancel</button>
+          <button type="submit" form="crm-client-form" className="mac-btn mac-btn-primary" disabled={saving}>{saving ? 'Saving…' : editId ? 'Save changes' : 'Add client'}</button>
+        </>}>
+        <form id="crm-client-form" onSubmit={saveClient} noValidate>
+          <ClientForm v={form} set={set} errors={errors} isEdit={!!editId} partners={partners} />
+        </form>
+      </Modal>
+
+      <ConfirmDialog isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={() => deleteClient(deleteTarget)}
+        title="Delete client" message={`This permanently deletes ${deleteTarget?.clientName || 'this client'} and all their follow-up history.`} />
+
+      <Modal isOpen={!!auditFor} onClose={() => setAuditFor(null)} title={auditClient ? `Change history — ${auditClient.clientName}` : 'Change history'} size="md">
+        <AuditList entries={auditEntries} failed={auditFailed} />
       </Modal>
     </div>
   );
