@@ -318,6 +318,8 @@ const Options = ({ list }) => list.map(x => <option key={x}>{x}</option>);
 
 const ACCOUNT_OPTIONS = ACCOUNT_TYPES.map(a => ({ value: a, label: a }));
 const REIMBURSE_OPTIONS = [...ACCOUNT_OPTIONS, { value: 'none', label: 'None' }];
+// A drawing settled outside the books: stored on the partner's-pocket account, which no balance counts
+const RETURN_OPTIONS = [...ACCOUNT_OPTIONS, { value: POCKET, label: 'None' }];
 
 // ─── Add / edit form ─────────────────────────────────────────────────────────
 
@@ -482,7 +484,12 @@ function TxForm({ form, setForm, errors, editing, stats, onSubmit, onEmployees }
         {due > 0
           ? <div className="tx-note warn"><Info size={14} /><span>{form.person} has <strong>{fmtMoney(due)}</strong> outstanding to return.</span></div>
           : <div className="tx-note good"><Info size={14} /><span>{form.person} has no outstanding drawings.</span></div>}
-        {account}
+        <Group label="Received in" required
+          hint={form.accountType === POCKET
+            ? 'No account balance changes — this only lowers what the partner owes.'
+            : `This raises the ${accountLabel(form.accountType)} balance by the amount returned.`}>
+          <Segmented options={RETURN_OPTIONS} value={form.accountType} onChange={v => set('accountType', v)} />
+        </Group>
         {text('Notes', 'remark', 'Optional')}
       </>
     );

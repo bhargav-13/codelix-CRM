@@ -139,12 +139,16 @@ const NEVER_PL = {
 // Follows the "Show revenue without GST" switch instead of having one of its own (see classify)
 export const GST_KEPT = 'gstKept';
 
+const NON_CASH_RETURN = 'never:drawing_settled:in';
 export function classify(t) {
   const credit = t.type === 'Credit';
   const sub = t.subType;
   if (NEVER_PL[sub]) return { section: credit ? 'income' : 'expense', line: `never:${sub}:${credit ? 'in' : 'out'}`, label: NEVER_PL[sub], toggle: 'never' };
   // Salary settled from an advance: a real salary cost, though no money moved that month.
   if (sub === 'advance_recovery') return { section: 'expense', line: 'employee_salary', label: 'Employee salaries', toggle: null, group: 'Team' };
+  // A drawing settled outside the books (account "Partner Personal"): no money came in, so it is
+  // listed for the record but changes neither profit nor the money kept.
+  if (sub === 'drawing_return' && t.accountType === 'Partner Personal') return { section: 'income', line: NON_CASH_RETURN, label: 'Drawings settled outside (no money moved)', toggle: 'never' };
   if (sub === 'drawing_return') return { section: 'income', line: 'drawing_returns', label: 'Drawing returns', toggle: 'drawingReturns' };
   if (sub === 'drawing')        return { section: 'expense', line: 'drawings', label: 'Partner drawings', toggle: 'drawings' };
   if (sub === 'partner_salary') return { section: 'expense', line: 'partner_salary', label: 'Partner salaries', toggle: 'partnerSalary' };
@@ -232,7 +236,7 @@ export function buildStatement(txs, columns, opts = DEFAULT_PL_OPTIONS, { gstCli
   // the pocket payment moved no company money, and when it is already in profit the
   // reimbursement must not be taken off again.
   const partnerPaidCounted = expenses.some(l => l.line === 'partner_paid');
-  const skipInRetained = l => l.line === 'partner_paid' || (l.line === 'reimbursements' && partnerPaidCounted);
+  const skipInRetained = l => l.line === 'partner_paid' || l.line === NON_CASH_RETURN || (l.line === 'reimbursements' && partnerPaidCounted);
   const excludedNet = zero();
   excluded.filter(l => !skipInRetained(l)).forEach(l => l.values.forEach((x, i) => { excludedNet[i] += l.section === 'income' ? x : -x; }));
   // GST taken out of revenue is still money held until it is paid over (a "GST paid" entry)
