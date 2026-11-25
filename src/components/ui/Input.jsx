@@ -18,8 +18,9 @@ export const inputVariants = tv({
     input: [
       'h-full w-full min-w-0 bg-transparent text-paragraph-sm text-text-strong-950 outline-none',
       'placeholder:text-text-soft-400 disabled:text-text-disabled-300',
-      // browser autofill: keep our surface and text colours
-      'autofill:shadow-[inset_0_0_0_100px_var(--color-bg-white-0)] autofill:[-webkit-text-fill-color:var(--color-text-strong-950)]',
+      // browser autofill: never let the browser paint its own box inside the field (the delay
+      // keeps its background from ever arriving), so the field stays one colour edge to edge
+      'autofill:[transition:background-color_99999s_ease-out_99999s] autofill:[-webkit-text-fill-color:var(--color-text-strong-950)] autofill:[caret-color:var(--color-text-strong-950)]',
     ],
     icon: 'flex size-5 shrink-0 items-center justify-center text-text-soft-400 transition-colors duration-150 group-focus-within:text-primary-text',
     affix: 'shrink-0 text-paragraph-sm text-text-sub-600',
