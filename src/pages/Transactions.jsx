@@ -11,7 +11,7 @@ import { transactionsDB, settingsDB, auditDB } from '../lib/db';
 import { Checkbox } from '../components/ui/Checkbox';
 import { useAuth } from '../contexts/AuthContext';
 import { fmtInput, NumInput } from '../lib/numInput';
-import { computeBalances, currentMonth, monthLabel, txMonth, isOpeningEntry } from '../lib/finance';
+import { computeBalances, currentMonth, monthLabel, txMonth, isOpeningEntry, openingPartner } from '../lib/finance';
 import { TRANSACTION_SOURCES, EXPENSE_CATEGORIES, PAYMENT_METHODS } from '../data/mockData';
 import { usePeople } from '../lib/people';
 import {
@@ -772,18 +772,19 @@ export default function Transactions() {
   );
   const monthNet = monthFlow.totalCredit - monthFlow.totalDebit;
 
-  // ── Partner positions (computed from transactions) ─────────
+  // ── Partner positions: the fixed opening figure, then this ledger's entries ──
+  const round2 = n => Math.round(n * 100) / 100;
   const partnerOutstanding = useMemo(() => Object.fromEntries(partners.map(p => {
     const taken    = sumAmt(txs.filter(t => t.subType === 'drawing'        && t.person === p));
     const returned = sumAmt(txs.filter(t => t.subType === 'drawing_return' && t.person === p));
-    return [p, Math.max(0, taken - returned)];
-  })), [txs, partners]);
+    return [p, Math.max(0, round2(openingPartner(openBal, p).drawing + taken - returned))];
+  })), [txs, partners, openBal]);
 
   const partnerReimburseOwed = useMemo(() => Object.fromEntries(partners.map(p => {
     const spent = sumAmt(txs.filter(t => t.subType === 'personal_exp'  && t.person === p));
     const paid  = sumAmt(txs.filter(t => t.subType === 'reimbursement' && t.person === p));
-    return [p, Math.max(0, spent - paid)];
-  })), [txs, partners]);
+    return [p, Math.max(0, round2(openingPartner(openBal, p).reimburse + spent - paid))];
+  })), [txs, partners, openBal]);
 
   // Partner salary already paid for a month label; `exceptId` skips the entry being edited
   const salaryPaidFor = useCallback((person, label, exceptId) => sumAmt(txs.filter(t =>
@@ -901,6 +902,9 @@ export default function Transactions() {
     if (Object.keys(found).length) return;
     setSaving(true);
     const row = formToRow(form);
+    // An opening-balance entry stays one when it is edited (most forms carry no category),
+    // otherwise it would start counting as this period's money in profit and loss.
+    if (editTx && isOpeningEntry(editTx)) row.category = editTx.category;
     try {
       if (!editTx && form.txType === 'transfer') {
         const from = form.accountType, to = from === BANK ? CASH : BANK;
@@ -1256,7 +1260,7 @@ export default function Transactions() {
       </Modal>
 
       {/* ── Opening balance ──────────────────────────────────── */}
-      <Modal isOpen={showOB} onClose={() => !settingsSaving && setShowOB(false)} title="Opening balance" size="sm"
+      <Modal isOpen={showOB} onClose={() => !settingsSaving && setShowOB(false)} title="Opening balance"
         footer={
           <>
             <button type="button" onClick={() => setShowOB(false)} disabled={settingsSaving} className="mac-btn mac-btn-secondary">Cancel</button>
@@ -1264,7 +1268,7 @@ export default function Transactions() {
           </>
         }>
         <form id="tx-ob-form" onSubmit={saveOB} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div className="tx-note"><Info size={14} /><span>What each account held before the first entry in this ledger. Every balance on this page starts from these.</span></div>
+          <div className="tx-note"><Info size={14} /><span>Fixed starting figures from before the first entry in this ledger. Every balance starts from these. They are not transactions: they never show as this month’s money in or out and never count in profit.</span></div>
           <FormGrid>
             <Field label="Cash + Savings (₹)">
               <NumInput className="mac-input" value={obForm.cash || ''} onChange={v => setObForm(b => ({ ...b, cash: +v || 0 }))} placeholder="0" />
@@ -1273,6 +1277,22 @@ export default function Transactions() {
               <NumInput className="mac-input" value={obForm.bank || ''} onChange={v => setObForm(b => ({ ...b, bank: +v || 0 }))} placeholder="0" />
             </Field>
           </FormGrid>
+          <FormSection title="Partners — carried over">
+            <div className="tx-ob-partners">
+              <span className="tx-ob-head">Partner</span>
+              <span className="tx-ob-head">Owes the company (₹)</span>
+              <span className="tx-ob-head">Company owes them (₹)</span>
+              {partners.map(p => (
+                <Fragment key={p}>
+                  <span className="tx-ob-name">{p}</span>
+                  <NumInput className="mac-input" aria-label={`${p} owes the company`} value={obForm.partners?.[p]?.drawing || ''} placeholder="0"
+                    onChange={v => setObForm(b => ({ ...b, partners: { ...b.partners, [p]: { ...b.partners?.[p], drawing: +v || 0 } } }))} />
+                  <NumInput className="mac-input" aria-label={`Company owes ${p}`} value={obForm.partners?.[p]?.reimburse || ''} placeholder="0"
+                    onChange={v => setObForm(b => ({ ...b, partners: { ...b.partners, [p]: { ...b.partners?.[p], reimburse: +v || 0 } } }))} />
+                </Fragment>
+              ))}
+            </div>
+          </FormSection>
         </form>
       </Modal>
 

@@ -266,6 +266,19 @@ export function buildColumns(start, end, granularity) {
   return cols;
 }
 
+// ── Opening position ──────────────────────────────────────────────
+// Fixed starting figures carried over from the old system, stored in the `opening_balances`
+// setting: { bank, cash, partners: { [name]: { drawing, reimburse } } }. They are not ledger
+// entries, so they never show as this month's money in or out and never touch profit.
+export const openingPartner = (openBal, name) => ({
+  drawing: +openBal?.partners?.[name]?.drawing || 0,       // the partner owes the company
+  reimburse: +openBal?.partners?.[name]?.reimburse || 0,   // the company owes the partner
+});
+export const openingPartnerTotals = openBal => Object.keys(openBal?.partners || {}).reduce((s, name) => {
+  const o = openingPartner(openBal, name);
+  return { drawing: s.drawing + o.drawing, reimburse: s.reimburse + o.reimburse };
+}, { drawing: 0, reimburse: 0 });
+
 // ── Balances (single source of truth for Dashboard + Transactions) ─
 export function computeBalances(txs, openBal = { cash: 0, bank: 0 }) {
   let pC = 0, pD = 0, bC = 0, bD = 0;
@@ -284,13 +297,13 @@ export function computeBalances(txs, openBal = { cash: 0, bank: 0 }) {
   return {
     cash, personal: cash, bank, total: cash + bank,
     totalCredit: pC + bC, totalDebit: pD + bD,
-    pendingReimburse: Math.max(0, spent - paid),
+    pendingReimburse: Math.max(0, openingPartnerTotals(openBal).reimburse + spent - paid),
   };
 }
 
 // Standing positions today (all time, not a period): money that is in the bank but not ours to
 // spend, and money that is out but coming back.
-export function computePositions(txs, gstClients) {
+export function computePositions(txs, gstClients, openBal) {
   let gstCollected = 0, gstPaid = 0, lent = 0, lentBack = 0, drawn = 0, drawnBack = 0;
   for (const t of txs) {
     if (isOpeningEntry(t)) continue;
@@ -308,7 +321,7 @@ export function computePositions(txs, gstClients) {
   return {
     gstCollected, gstPaid, gstHeld: Math.max(0, gstCollected - gstPaid),
     lentOut: Math.max(0, lent - lentBack),
-    drawingsOut: Math.max(0, drawn - drawnBack),
+    drawingsOut: Math.max(0, openingPartnerTotals(openBal).drawing + drawn - drawnBack),
   };
 }
 

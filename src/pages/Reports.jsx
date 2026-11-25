@@ -202,7 +202,7 @@ export default function Reports() {
 
   const bal = useMemo(() => computeBalances(txs, openBal), [txs, openBal]);
   const receivables = useMemo(() => computeReceivables(projects), [projects]);
-  const pos = useMemo(() => computePositions(txs, ctx.gstClients), [txs, ctx]);
+  const pos = useMemo(() => computePositions(txs, ctx.gstClients, openBal), [txs, ctx, openBal]);
   // What is really free to spend: balance minus GST owed to the government and money owed to partners
   const freeCash = bal.total - pos.gstHeld - bal.pendingReimburse;
   const monthsInPeriod = monthsBetween(period.start, periodEnd).length;

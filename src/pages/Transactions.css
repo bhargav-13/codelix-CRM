@@ -112,3 +112,8 @@
 .tx-net-label { font-size: var(--fs-sm); color: var(--ink-2); }
 .tx-net-value { font-size: 20px; font-weight: 600; line-height: 1.3; font-variant-numeric: tabular-nums; }
 .tx-net-parts { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+/* Opening balance: one row per partner */
+.tx-ob-partners { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px 10px; align-items: center; }
+.tx-ob-head { font-size: 12px; color: var(--ink-3); }
+.tx-ob-name { font-size: var(--fs-sm); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
