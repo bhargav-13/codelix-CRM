@@ -216,6 +216,7 @@ function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDele
   const [pf, setPf] = useState(startAddPayment ? blankPayment() : null); // payment form (new or edit)
   const [pfError, setPfError] = useState('');
   const [pfSaving, setPfSaving] = useState(false);
+  const [pfOver, setPfOver] = useState(false);          // the over-the-project-value warning was shown
   const m = moneyOf(proj);
   const withGst = proj.billingType === 'With GST';
   const gst = gstBreakdown(proj.valuation);
@@ -228,11 +229,19 @@ function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDele
     [proj.payments],
   );
 
-  const setPfField = (k, val) => { setPf(f => ({ ...f, [k]: val })); if (k === 'amount') setPfError(''); };
-  const closePf = () => { setPf(null); setPfError(''); };
+  const setPfField = (k, val) => { setPf(f => ({ ...f, [k]: val })); if (k === 'amount') { setPfError(''); setPfOver(false); } };
+  const closePf = () => { setPf(null); setPfError(''); setPfOver(false); };
   async function submitPayment() {
     if (pfSaving) return;
     if (!(+pf.amount > 0)) { setPfError('Enter an amount greater than 0'); return; }
+    // More than the project is worth is allowed (extra work, a rounded-up payment), but asked about once.
+    const value = +proj.valuation || 0;
+    const total = (proj.payments || []).reduce((s, x, i) => s + (payIdOf(x, i) === pf.id ? 0 : +x.amount || 0), 0) + +pf.amount;
+    if (value > 0 && total > value + 0.005 && !pfOver) {
+      setPfOver(true);
+      setPfError(`This takes the total received to ${fmtMoney(total)}, which is ${fmtMoney(total - value)} more than the project value (${fmtMoney(value)}). Press save again to record it anyway.`);
+      return;
+    }
     setPfSaving(true);
     const ok = await onSavePayment(proj.id, pf.id, { amount: +pf.amount, date: pf.date, method: pf.method, account: pf.account || 'Company Bank', remark: pf.remark });
     setPfSaving(false);

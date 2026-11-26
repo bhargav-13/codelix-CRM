@@ -61,7 +61,8 @@ const CATEGORY_KEY = 'expense_categories';   // settings key: the categories par
 function mergeCategories(...lists) {
   const seen = new Map();
   lists.flat().forEach(c => { const n = String(c || '').trim(); if (n && !seen.has(n.toLowerCase())) seen.set(n.toLowerCase(), n); });
-  const all = [...seen.values()].filter(c => c !== 'Other');
+  // 'Opening balance' is reserved for starting figures and is refused on ordinary entries
+  const all = [...seen.values()].filter(c => c !== 'Other' && c.toLowerCase() !== 'opening balance');
   return [...all, 'Other'];
 }
 const revenueByDefault = source => source !== 'Other Income';
@@ -260,6 +261,8 @@ function validate(form) {
   const errors = {};
   if (parseAmount(form.amount) == null) errors.amount = 'Enter an amount greater than 0';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(form.date || '')) errors.date = 'Choose a date';
+  else if (form.date > todayLocal()) errors.date = 'The date cannot be in the future';
+  else if (form.date < '2000-01-01') errors.date = 'Check the year';
   return errors;
 }
 
@@ -603,7 +606,7 @@ function TxForm({ form, setForm, errors, editing, stats, onSubmit, onEmployees }
             placeholder={kind === 'p_salary' && remaining ? fmtInput(remaining) : '0'} />
         </Field>
         <Field label={kind === 'transfer' ? 'Date moved' : kind === 'income' || kind === 'return' || (kind === 'other_money' && OTHER_KIND[form.otherKind]?.type === 'Credit') ? 'Date received' : 'Date paid'} required error={errors.date}>
-          {id => <input id={id} className="mac-input" type="date" value={form.date} onChange={e => set('date', e.target.value)} />}
+          {id => <input id={id} className="mac-input" type="date" max={todayLocal()} value={form.date} onChange={e => set('date', e.target.value)} />}
         </Field>
       </FormGrid>
 
@@ -734,6 +737,7 @@ export default function Transactions() {
   const [form, setForm]         = useState(initForm);
   const [errors, setErrors]     = useState({});
   const [saving, setSaving]     = useState(false);
+  const [warn, setWarn]         = useState(null);      // things worth a second look before saving: [message]
 
   const [showOB, setShowOB]   = useState(false);
   const [obForm, setObForm]   = useState(ZERO_BAL);
@@ -901,12 +905,47 @@ export default function Transactions() {
     setAuditLog(l => [{ id: Date.now(), createdAt: new Date().toISOString(), ...entry }, ...l]);
   }
 
-  async function save(e) {
+  // Allowed, but unusual enough to ask first. Editing: the entry's own amount is already inside
+  // the totals, so it is added back before comparing.
+  function softWarnings() {
+    const out = [];
+    const amt = +form.amount || 0;
+    const kind = form.txType;
+    const was = editTx ? +editTx.amount || 0 : 0;
+    if (kind === 'return') {
+      const due = (partnerOutstanding[form.person] || 0) + was;
+      if (amt > due + 0.005) out.push(`${form.person} owes ${fmtMoney(due)}, but this records ${fmtMoney(amt)} returned. The extra ${fmtMoney(amt - due)} will not show anywhere.`);
+    }
+    if (kind === 'reimburse') {
+      const owed = (partnerReimburseOwed[form.person] || 0) + was;
+      if (amt > owed + 0.005) out.push(`The company owes ${form.person} ${fmtMoney(owed)}, but this pays ${fmtMoney(amt)}.`);
+    }
+    if (kind === 'p_salary') {
+      const monthly = salaryConfig[form.person] || 0;
+      const left = Math.max(0, monthly - salaryPaidFor(form.person, form.monthLabel, editTx?.id));
+      if (monthly > 0 && amt > left + 0.005) out.push(`${form.person}'s salary for ${form.monthLabel} has ${fmtMoney(left)} left to pay, but this pays ${fmtMoney(amt)}.`);
+    }
+    // money leaving a company account
+    const row = formToRow(form);
+    const acct = kind === 'transfer' ? form.accountType : row.accountType;
+    if ((kind === 'transfer' || row.type === 'Debit') && (acct === BANK || acct === CASH)) {
+      const have = (acct === BANK ? bal.bank : bal.cash) + (editTx && editTx.type === 'Debit' && accountMatches(editTx, acct) ? was : 0);
+      if (amt > have + 0.005) out.push(`${accountLabel(acct)} has ${fmtMoney(have)}. This takes it ${fmtMoney(amt - have)} below zero.`);
+    }
+    return out;
+  }
+
+  // `force` = the warnings were shown and the user chose to save anyway
+  async function save(e, force = false) {
     e?.preventDefault();
     if (saving) return;
     const found = validate(form);
     setErrors(found);
     if (Object.keys(found).length) return;
+    if (!force) {
+      const warnings = softWarnings();
+      if (warnings.length) { setWarn(warnings); return; }
+    }
     setSaving(true);
     const row = formToRow(form);
     // An opening-balance entry stays one when it is edited (most forms carry no category),
@@ -1330,6 +1369,10 @@ export default function Transactions() {
           ? <div className="empty-panel"><span className="empty-icon"><History size={22} /></span><div className="empty-title">No changes recorded yet</div><div className="empty-text">Every entry added, edited or deleted is listed here with who did it.</div></div>
           : <div className="tx-hist">{auditLog.map(e => <AuditItem key={e.id} e={e} />)}</div>}
       </Drawer>
+
+      <ConfirmDialog isOpen={!!warn} onClose={() => setWarn(null)} onConfirm={() => save(null, true)}
+        title="Save anyway?" confirmLabel="Save anyway" danger={false}
+        message={(warn || []).map((w, i) => <span key={i} style={{ display: 'block', marginBottom: 6 }}>{w}</span>)} />
 
       <ConfirmDialog
         isOpen={!!deleteTx}

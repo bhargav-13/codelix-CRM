@@ -1,57 +1,168 @@
+// P&L — one focused dashboard: revenue, net profit or loss, and margin.
+//
+// Laid out the IBCS way (International Business Communication Standards), so every chart
+// reads the same:
+//   • AC (actual) is always the solid dark shape; the comparison (PY = previous year,
+//     PP = previous period) is always the lighter shape behind it.
+//   • A variance is green when it is good for the business and red when it is bad — so more
+//     revenue is green, and more expenses is red.
+//   • Titles say what, in which unit, for which period; there is no decoration.
 import { usePlOptions } from '../lib/plOptions';
-import { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Header from '../components/layout/Header';
-import TrendChart, { RankedBars } from '../components/charts/TrendChart';
-import { SERIES } from '../components/charts/palette';
-import { Drawer, StatTiles, SkeletonRows, ErrorPanel, RowMenu, fmtDate, useToast } from '../components/ui/kit';
-import { transactionsDB, projectsDB, settingsDB } from '../lib/db';
+import { Drawer, SkeletonRows, ErrorPanel, RowMenu, fmtDate, useToast } from '../components/ui/kit';
+import { transactionsDB, projectsDB } from '../lib/db';
 import {
   PERIOD_PRESETS, PL_TOGGLES, resolvePeriod, previousPeriod, samePeriodLastYear, effectiveEnd,
-  buildColumns, buildStatement, summarize, computeBalances, computeReceivables, computePositions, gstClientSet,
-  currentMonth, addMonths, monthsBetween, monthLabel, fyStartYear, fyLabel, fyStartMonth, fyEndMonth,
-  txMonth, classify, fmtINR, fmtCompact, fmtPct, pctChange, 
-  statementToCSV, rangeLabel,
+  buildColumns, buildStatement, summarize, gstClientSet, currentMonth, addMonths, monthsBetween, monthLabel,
+  txMonth, fmtINR, fmtCompact, fmtPct, pctChange, statementToCSV, rangeLabel,
 } from '../lib/finance';
-import {
-  Download, Printer, SlidersHorizontal, TrendingUp, TrendingDown, Minus, ArrowUpRight,
-  ArrowDownRight, Wallet, Receipt, Percent, Info, Eye, EyeOff, Flame, Trophy,
-} from 'lucide-react';
+import { Download, Printer, SlidersHorizontal, Info } from 'lucide-react';
 import './Reports.css';
 
-const GRANULARITIES = [['month', 'Monthly'], ['quarter', 'Quarterly'], ['year', 'Yearly (FY)']];
-const SNAPSHOT_IDS = ['this_month', 'last_month', 'this_quarter', 'last_quarter', 'last_3m', 'last_6m', 'last_12m', 'this_fy', 'last_fy', 'all'];
+const PRESET_IDS = ['this_month', 'last_month', 'this_quarter', 'this_fy', 'last_fy', 'last_12m', 'custom'];
+const PRESETS = PRESET_IDS.map(id => PERIOD_PRESETS.find(p => p.id === id));
+const plain = n => fmtCompact(n).replace('₹', '');   // charts carry the unit in their title
 
-const scrollToTop = () => document.querySelector('.app-main')?.scrollTo({ top: 0, behavior: 'smooth' });
+// ── Variance helpers ──────────────────────────────────────────────
+// `inverse` = a rise is bad (expenses)
+const tone = (d, inverse) => (Math.abs(d) < 0.005 ? 'flat' : (d > 0) !== !!inverse ? 'good' : 'bad');
+const signed = (n, fmt = fmtINR) => (Math.abs(n) < 0.5 ? fmt(0) : `${n > 0 ? '+' : '−'}${fmt(Math.abs(n))}`);
+const signedPct = p => (p == null || !isFinite(p) ? '—' : `${p > 0 ? '+' : p < 0 ? '−' : ''}${Math.abs(p).toFixed(1)}%`);
+const signedPts = d => (d == null ? '—' : `${d > 0 ? '+' : d < 0 ? '−' : ''}${Math.abs(d).toFixed(1)} pts`);
 
-// ── Small UI pieces ───────────────────────────────────────────────
-function Delta({ cur, prev, inverse = false, pp = false, label }) {
-  if (prev == null) return <span className="faint">no comparison</span>;
-  const d = pp ? (cur ?? 0) - (prev ?? 0) : pctChange(cur, prev);
-  if (d == null || !isFinite(d)) return <span className="faint">— vs {label}</span>;
-  const up = d > 0.05, down = d < -0.05;
-  const good = inverse ? down : up;
-  const tone = !up && !down ? 'muted' : good ? 'pnl-pos' : 'pnl-neg';
-  const Icon = up ? TrendingUp : down ? TrendingDown : Minus;
+// Charts are drawn at the real pixel width of their box, so labels keep their size on any screen.
+function useWidth() {
+  const ref = useRef(null);
+  const [width, setWidth] = useState(640);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(([e]) => setWidth(Math.max(280, Math.round(e.contentRect.width))));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, width];
+}
+
+// ── KPI tile ──────────────────────────────────────────────────────
+function Kpi({ label, value, cmpValue, delta, deltaText, pctText, cmpTag, inverse, bad }) {
+  const t = delta == null ? 'flat' : tone(delta, inverse);
   return (
-    <span className={`pnl-delta ${tone}`}>
-      <Icon size={12} />{d > 0 ? '+' : ''}{d.toFixed(1)}{pp ? ' pts' : '%'}
-      <span className="faint">vs {label}</span>
+    <div className="mac-card ibcs-kpi">
+      <span className="ibcs-kpi-label">{label}</span>
+      <span className={`ibcs-kpi-value ${bad ? 'ibcs-bad' : ''}`}>{value}</span>
+      {cmpTag ? (
+        <span className="ibcs-kpi-cmp">
+          <span>{cmpTag} {cmpValue}</span>
+          <span className={`ibcs-${t}`}>Δ{cmpTag} {deltaText}{pctText ? ` (${pctText})` : ''}</span>
+        </span>
+      ) : <span className="ibcs-kpi-cmp"><span>No comparison</span></span>}
+    </div>
+  );
+}
+
+// ── Column chart: AC solid, comparison lighter and behind ─────────
+// points: [{ label, ac, cmp }] — cmp may be null. Negative values hang below the zero line.
+function ColumnChart({ title, points, cmpTag, onSelect }) {
+  const n = points.length;
+  const [boxRef, boxW] = useWidth();
+  const vals = points.flatMap(p => [p.ac, cmpTag ? p.cmp ?? 0 : 0]);
+  const max = Math.max(0, ...vals), min = Math.min(0, ...vals);
+  // a loss hangs below the zero line: leave room for its label above the month names
+  const W = Math.max(boxW, n * 40), H = min < 0 ? 190 : 170, top = 22, bottom = min < 0 ? 42 : 26;
+  const span = max - min || 1;
+  const y = v => top + (max - v) / span * (H - top - bottom);
+  const zero = y(0), w = W / n, bw = Math.min(w * 0.46, 34);
+  const bar = (v, x, cls, key) => {
+    const y1 = v >= 0 ? y(v) : zero, h = Math.abs(y(v) - zero);
+    return <rect key={key} className={cls} x={x} y={y1} width={bw} height={Math.max(h, v ? 1 : 0)} rx="1.5" />;
+  };
+  return (
+    <figure className="ibcs-chart">
+      <figcaption className="ibcs-chart-title">{title}</figcaption>
+      <div className="ibcs-chart-scroll" ref={boxRef}>
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title}>
+          {points.map((p, i) => {
+            const cx = i * w + w / 2;
+            return (
+              <g key={`${p.label}-${i}`} className={onSelect ? 'ibcs-col' : undefined} onClick={onSelect ? () => onSelect(i) : undefined}>
+                <title>{`${p.fullLabel || p.label}: AC ${fmtINR(p.ac)}${cmpTag && p.cmp != null ? ` · ${cmpTag} ${fmtINR(p.cmp)}` : ''}`}</title>
+                <rect x={i * w} y="0" width={w} height={H} fill="transparent" />
+                {cmpTag && p.cmp != null && bar(p.cmp, cx - bw * 0.78, 'ibcs-cmp-fill', 'c')}
+                {bar(p.ac, cx - bw * 0.32, p.ac < 0 ? 'ibcs-ac-fill ibcs-ac-neg' : 'ibcs-ac-fill', 'a')}
+                {p.ac !== 0 && <text className="ibcs-val" x={cx + bw * 0.18} y={p.ac >= 0 ? y(p.ac) - 5 : y(p.ac) + 12} textAnchor="middle">{plain(p.ac)}</text>}
+                <text className="ibcs-axis" x={cx} y={H - 8} textAnchor="middle">{p.label}</text>
+              </g>
+            );
+          })}
+          <line className="ibcs-zero" x1="0" x2={W} y1={zero} y2={zero} />
+        </svg>
+      </div>
+    </figure>
+  );
+}
+
+// ── Margin: a line of points, AC dark and comparison light ────────
+function MarginChart({ title, points, cmpTag }) {
+  const n = points.length;
+  const [boxRef, boxW] = useWidth();
+  const W = Math.max(boxW, n * 40), H = 130, top = 24, bottom = 26;
+  const vals = points.flatMap(p => [p.ac, cmpTag ? p.cmp : null]).filter(v => v != null && isFinite(v));
+  const max = Math.max(0, ...vals, 10), min = Math.min(0, ...vals);
+  const span = max - min || 1;
+  const w = W / n, x = i => i * w + w / 2, y = v => top + (max - v) / span * (H - top - bottom);
+  // a line only between months that both have a margin (a month with no revenue has none)
+  const path = key => points.map((p, i) => (p[key] == null ? null : { x: x(i), y: y(p[key]) }))
+    .reduce((d, pt, i, a) => (pt ? d + `${a[i - 1] ? 'L' : 'M'}${pt.x},${pt.y}` : d), '');
+  return (
+    <figure className="ibcs-chart">
+      <figcaption className="ibcs-chart-title">{title}</figcaption>
+      <div className="ibcs-chart-scroll" ref={boxRef}>
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title}>
+          <line className="ibcs-zero" x1="0" x2={W} y1={y(0)} y2={y(0)} />
+          {cmpTag && <path className="ibcs-cmp-line" d={path('cmp')} />}
+          <path className="ibcs-ac-line" d={path('ac')} />
+          {points.map((p, i) => (
+            <g key={`${p.label}-${i}`}>
+              {cmpTag && p.cmp != null && <circle className="ibcs-cmp-dot" cx={x(i)} cy={y(p.cmp)} r="3" />}
+              {p.ac != null && <>
+                <circle className={p.ac < 0 ? 'ibcs-ac-dot ibcs-ac-neg' : 'ibcs-ac-dot'} cx={x(i)} cy={y(p.ac)} r="3.5" />
+                <text className="ibcs-val" x={x(i)} y={y(p.ac) - 8} textAnchor="middle">{p.ac.toFixed(0)}%</text>
+              </>}
+              <text className="ibcs-axis" x={x(i)} y={H - 8} textAnchor="middle">{p.label}</text>
+            </g>
+          ))}
+        </svg>
+      </div>
+    </figure>
+  );
+}
+
+// ── Statement table: AC, comparison, and the variance drawn as a bar ──
+function VarBar({ d, scale, inverse }) {
+  if (!scale || Math.abs(d) < 0.5) return <span className="ibcs-varbar" />;
+  const pct = Math.min(50, Math.abs(d) / scale * 50);
+  return (
+    <span className="ibcs-varbar" aria-hidden="true">
+      <span className={`ibcs-varbar-fill ibcs-bg-${tone(d, inverse)}`} style={d > 0 ? { left: '50%', width: `${pct}%` } : { right: '50%', width: `${pct}%` }} />
     </span>
   );
 }
 
-// Two-line sub text for a KPI tile: a note, then the comparison
-const kpiSub = (note, delta) => <><span style={{ display: 'block' }}>{note}</span>{delta}</>;
-
-function Section({ title, hint, children }) {
+function Row({ label, ac, cmp, hasCmp, scale, inverse, kind = 'line', onDrill }) {
+  const d = ac - (cmp || 0);
   return (
-    <section className="mac-card pnl-section">
-      <div className="pnl-section-head">
-        <h2 className="section-title">{title}</h2>
-        {hint && <span className="pnl-hint">{hint}</span>}
-      </div>
-      {children}
-    </section>
+    <tr className={`ibcs-row ibcs-row-${kind}`}>
+      <td>{label}</td>
+      <td className="num">
+        {onDrill && ac !== 0 ? <button className="pnl-cell" onClick={onDrill}>{fmtINR(ac)}</button> : <span className={ac < 0 ? 'ibcs-bad' : undefined}>{ac === 0 ? '—' : fmtINR(ac)}</span>}
+      </td>
+      {hasCmp && <td className="num muted">{cmp ? fmtINR(cmp) : '—'}</td>}
+      {hasCmp && <td className={`num ibcs-${tone(d, inverse)}`}>{Math.abs(d) < 0.5 ? '—' : signed(d)}</td>}
+      {hasCmp && <td className="ibcs-var-cell"><VarBar d={d} scale={scale} inverse={inverse} /></td>}
+      {hasCmp && <td className={`num ibcs-${tone(d, inverse)}`}>{signedPct(pctChange(ac, cmp))}</td>}
+    </tr>
   );
 }
 
@@ -63,107 +174,27 @@ function Toggle({ on, onChange, label }) {
   );
 }
 
-const money = v => <span className={v < 0 ? 'pnl-neg' : undefined}>{v === 0 ? '—' : fmtINR(v)}</span>;
-
-function Insight({ icon: Icon, label, value, detail, bad }) {
-  return (
-    <div className="pnl-insight">
-      <Icon size={15} />
-      <div className="pnl-insight-body">
-        <div className="pnl-insight-label">{label}</div>
-        <div className="pnl-insight-value">{value}</div>
-      </div>
-      {detail && <span className={`pnl-insight-detail ${bad ? 'pnl-neg' : ''}`}>{detail}</span>}
-    </div>
-  );
-}
-
-function GrowthCell({ v }) {
-  if (v == null || !isFinite(v)) return <span className="faint">—</span>;
-  return <span className={v >= 0 ? 'pnl-pos' : 'pnl-neg'} style={{ fontWeight: 600 }}>{v >= 0 ? '+' : ''}{v.toFixed(1)}%</span>;
-}
-
-function ChangeCell({ d, inverse }) {
-  if (d == null || !isFinite(d)) return <span className="faint">—</span>;
-  const good = inverse ? d < 0 : d > 0;
-  return <span className={Math.abs(d) < 0.05 ? 'muted' : good ? 'pnl-pos' : 'pnl-neg'} style={{ fontWeight: 600 }}>{d > 0 ? '+' : ''}{d.toFixed(1)}%</span>;
-}
-
-// ── Statement rows ────────────────────────────────────────────────
-function GroupRow({ label, cols, cmp, muted }) {
-  const span = 2 + (cols > 1 ? cols : 0) + (cmp ? 2 : 0) - 1;
-  return (
-    <tr className={`pnl-group ${muted ? 'muted' : ''}`}>
-      <td className="pnl-sticky">{label}</td>
-      <td colSpan={span} />
-    </tr>
-  );
-}
-
-function LineRow({ l, columns, cmpVal, showCmp, inverse, excluded, onDrill, onToggle }) {
-  const d = pctChange(l.total, cmpVal);
-  const cell = (v, list, title) => (
-    <td>
-      {v === 0 ? <span className="faint">—</span> : (
-        <button className="pnl-cell" onClick={() => onDrill(title, list)}>{fmtINR(v)}</button>
-      )}
-    </td>
-  );
-  return (
-    <tr className={excluded ? 'pnl-excluded' : ''}>
-      <td className="pnl-sticky">
-        <span className="pnl-line">
-          <span>{l.label}{excluded ? <span className="faint"> ({l.section === 'income' ? 'money in' : 'money out'})</span> : null}</span>
-          {l.toggle && l.toggle !== 'never' && l.toggle !== 'gstKept' && (
-            <button className="pnl-tog no-print" title={excluded ? 'Count this in profit' : 'Exclude this from profit'} onClick={() => onToggle(l.toggle, !!excluded)}>
-              {excluded ? <><Eye size={11} /> Include</> : <><EyeOff size={11} /> Exclude</>}
-            </button>
-          )}
-        </span>
-      </td>
-      {columns.length > 1 && l.values.map((v, i) => <Fragment key={i}>{cell(v, l.txs[i], `${l.label} — ${columns[i].label}`)}</Fragment>)}
-      {cell(l.total, l.txs.flat(), `${l.label} — total`)}
-      {showCmp && <td className="muted">{cmpVal ? fmtINR(cmpVal) : '—'}</td>}
-      {showCmp && <td><ChangeCell d={d} inverse={inverse} /></td>}
-    </tr>
-  );
-}
-
-function TotalRow({ label, values, total, cmpVal, columns, strong, inverse }) {
-  return (
-    <tr className={strong ? 'pnl-net' : 'pnl-total'}>
-      <td className="pnl-sticky">{label}</td>
-      {columns.length > 1 && values.map((v, i) => <td key={i}>{money(v)}</td>)}
-      <td>{money(total)}</td>
-      {cmpVal !== undefined && <td className="muted">{cmpVal == null ? '—' : fmtINR(cmpVal)}</td>}
-      {cmpVal !== undefined && <td>{cmpVal == null ? '—' : <ChangeCell d={pctChange(total, cmpVal)} inverse={inverse} />}</td>}
-    </tr>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────
 export default function Reports() {
   const [txs, setTxs] = useState([]);
   const [projects, setProjects] = useState([]);
-  const [openBal, setOpenBal] = useState({ cash: 0, bank: 0 });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
   const toast = useToast();
   const [presetId, setPresetId] = useState('this_fy');
   const [custom, setCustom] = useState({ start: addMonths(currentMonth(), -5), end: currentMonth() });
-  const [compareMode, setCompareMode] = useState('prev');   // prev | yoy | none
-  const [granularity, setGranularity] = useState('month');  // month | quarter | year
+  const [compareMode, setCompareMode] = useState('yoy');   // yoy (PY) | prev (PP) | none
   const [opts, saveOpts] = usePlOptions();
   const [showOpts, setShowOpts] = useState(false);
-  const [drill, setDrill] = useState(null);                 // { title, txs }
+  const [drill, setDrill] = useState(null);                // { title, txs }
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [t, p, ob] = await Promise.all([transactionsDB.getAll(), projectsDB.getAll(), settingsDB.get('opening_balances')]);
-      setTxs(t); setProjects(p); if (ob) setOpenBal(ob);
+      const [t, p] = await Promise.all([transactionsDB.getAll(), projectsDB.getAll()]);
+      setTxs(t); setProjects(p);
     } catch (e) {
       console.error(e);
       setLoadError(e);
@@ -184,82 +215,37 @@ export default function Reports() {
 
   const period = useMemo(() => resolvePeriod(presetId, { now, firstMonth, custom }), [presetId, now, firstMonth, custom]);
   const periodEnd = effectiveEnd(period, now);
-  const cmpPeriod = useMemo(() => {
-    if (compareMode === 'none' || presetId === 'all') return null;
-    return compareMode === 'yoy' ? samePeriodLastYear(period, now) : previousPeriod(period, now);
-  }, [compareMode, presetId, period, now]);
-  const cmpLabel = compareMode === 'yoy' ? 'last year' : 'prev. period';
+  const cmpPeriod = useMemo(() => (compareMode === 'none' ? null
+    : compareMode === 'yoy' ? samePeriodLastYear(period, now) : previousPeriod(period, now)), [compareMode, period, now]);
+  const cmpTag = compareMode === 'none' ? null : compareMode === 'yoy' ? 'PY' : 'PP';
+  const monthsInPeriod = monthsBetween(period.start, periodEnd).length;
+  const shift = compareMode === 'yoy' ? -12 : -monthsInPeriod;   // how far back each month's comparison sits
 
-  const columns = useMemo(() => buildColumns(period.start, periodEnd, granularity), [period.start, periodEnd, granularity]);
-  const st = useMemo(() => buildStatement(txs, columns, opts, ctx), [txs, columns, opts, ctx]);
-  const cmp = useMemo(() => cmpPeriod ? summarize(txs, cmpPeriod.start, cmpPeriod.end, opts, ctx) : null, [txs, cmpPeriod, opts, ctx]);
+  // The selected period as one column, and its comparison
+  const st = useMemo(() => buildStatement(txs, [{ key: 'p', label: '', start: period.start, end: periodEnd }], opts, ctx), [txs, period.start, periodEnd, opts, ctx]);
+  const cmp = useMemo(() => (cmpPeriod ? summarize(txs, cmpPeriod.start, cmpPeriod.end, opts, ctx) : null), [txs, cmpPeriod, opts, ctx]);
   const cmpLines = useMemo(() => {
-    if (!cmp) return null;
     const m = new Map();
-    [...cmp.statement.income, ...cmp.statement.expenses, ...cmp.statement.excluded].forEach(l => m.set(l.line, l.total));
+    if (cmp) [...cmp.statement.income, ...cmp.statement.expenses, ...cmp.statement.excluded].forEach(l => m.set(l.line, l.total));
     return m;
   }, [cmp]);
 
-  const bal = useMemo(() => computeBalances(txs, openBal), [txs, openBal]);
-  const receivables = useMemo(() => computeReceivables(projects), [projects]);
-  const pos = useMemo(() => computePositions(txs, ctx.gstClients, openBal), [txs, ctx, openBal]);
-  // What is really free to spend: balance minus GST owed to the government and money owed to partners
-  const freeCash = bal.total - pos.gstHeld - bal.pendingReimburse;
-  const monthsInPeriod = monthsBetween(period.start, periodEnd).length;
-
-  // Burn = average monthly expenses over the last 3 complete months
-  const burn = useMemo(() => summarize(txs, addMonths(now, -3), addMonths(now, -1), opts, ctx).expense / 3, [txs, now, opts, ctx]);
-  const runway = burn > 0 ? bal.total / burn : null;
-
-  // Fixed snapshot windows
-  const snapshots = useMemo(() => SNAPSHOT_IDS.map(id => {
-    const p = resolvePeriod(id, { now, firstMonth });
-    const s = summarize(txs, p.start, effectiveEnd(p, now), opts, ctx);
-    return { id, name: PERIOD_PRESETS.find(x => x.id === id).label, range: p.label, ...s };
-  }), [txs, now, firstMonth, opts, ctx]);
-
-  // Trend: the selected period's columns, or the last 12 months if the period is too short to chart
-  const trendCols = useMemo(() => columns.length >= 3 ? columns : buildColumns(addMonths(now, -11), now, 'month'), [columns, now]);
-  const trend = useMemo(() => {
-    const s = trendCols === columns ? st : buildStatement(txs, trendCols, opts, ctx);
-    return trendCols.map((c, i) => ({ label: c.label, fullLabel: rangeLabel(c.start, c.end), revenue: s.revenue[i], expense: s.expense[i], profit: s.profit[i], margin: s.margin[i], col: c }));
-  }, [trendCols, columns, st, txs, opts, ctx]);
-
-  // Breakdowns for the selected period
-  const periodTxs = useMemo(() => txs.filter(t => { const k = txMonth(t); return k >= period.start && k <= periodEnd; }), [txs, period.start, periodEnd]);
-  const expenseItems = useMemo(() => st.expenses.map(l => ({ label: l.label, value: l.total, line: l })).filter(x => x.value > 0), [st]);
-  const clientItems = useMemo(() => {
-    const m = new Map();
-    periodTxs.forEach(t => { const c = classify(t); if (c.revenue) { const k = t.clientName?.trim() || 'Unnamed client'; m.set(k, (m.get(k) || 0) + (+t.amount || 0)); } });
-    return [...m.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-  }, [periodTxs]);
-
-  // Month insights (always monthly, within selected period)
-  const insights = useMemo(() => {
-    const cols = buildColumns(period.start, periodEnd, 'month');
-    const s = cols === columns ? st : buildStatement(txs, cols, opts, ctx);
-    const months = cols.map((c, i) => ({ label: monthLabel(c.start, true), profit: s.profit[i], revenue: s.revenue[i], expense: s.expense[i] }));
-    const active = months.filter(m => m.revenue || m.expense);
-    if (!active.length) return null;
-    const best = active.reduce((a, b) => b.profit > a.profit ? b : a);
-    const worst = active.reduce((a, b) => b.profit < a.profit ? b : a);
-    const topRev = active.reduce((a, b) => b.revenue > a.revenue ? b : a);
-    const profitable = active.filter(m => m.profit > 0).length;
-    return { best, worst, topRev, profitable, count: active.length, avgProfit: s.totals.profit / months.length };
-  }, [period.start, periodEnd, columns, st, txs, opts, ctx]);
-
-  // FY-by-FY summary
-  const fyRows = useMemo(() => {
-    const out = [];
-    for (let fy = fyStartYear(firstMonth); fy <= fyStartYear(now); fy++) {
-      const s = summarize(txs, fyStartMonth(fy), fyEndMonth(fy) > now ? now : fyEndMonth(fy), opts, ctx);
-      out.push({ fy, label: fyLabel(fy), partial: fyEndMonth(fy) > now, ...s });
-    }
-    return out.map((r, i) => ({ ...r, revGrowth: i ? pctChange(r.revenue, out[i - 1].revenue) : null, profitGrowth: i ? pctChange(r.profit, out[i - 1].profit) : null })).reverse();
-  }, [txs, firstMonth, now, opts, ctx]);
+  // Month by month: the selected period, or the last 12 months when the period is too short to chart
+  const chartIsPeriod = monthsInPeriod >= 3;
+  const chartCols = useMemo(() => (chartIsPeriod ? buildColumns(period.start, periodEnd, 'month') : buildColumns(addMonths(periodEnd, -11), periodEnd, 'month')), [chartIsPeriod, period.start, periodEnd]);
+  const months = useMemo(() => {
+    const ac = buildStatement(txs, chartCols, opts, ctx);
+    const back = cmpTag ? buildStatement(txs, chartCols.map(c => ({ ...c, start: addMonths(c.start, shift), end: addMonths(c.end, shift) })), opts, ctx) : null;
+    return chartCols.map((c, i) => ({
+      label: monthLabel(c.start).split(' ')[0], fullLabel: monthLabel(c.start, true), col: c,
+      revenue: ac.revenue[i], profit: ac.profit[i], margin: ac.margin[i],
+      cmpRevenue: back ? back.revenue[i] : null, cmpProfit: back ? back.profit[i] : null, cmpMargin: back ? back.margin[i] : null,
+    }));
+  }, [txs, chartCols, opts, ctx, cmpTag, shift]);
 
   function exportCSV() {
-    const csv = statementToCSV(st, `Codelix P&L — ${period.label}`);
+    const cols = buildColumns(period.start, periodEnd, 'month');
+    const csv = statementToCSV(buildStatement(txs, cols, opts, ctx), `Codelix P&L — ${period.label}`);
     const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -269,42 +255,48 @@ export default function Reports() {
   }
 
   const openDrill = (title, list) => setDrill({ title, txs: [...list].sort((a, b) => (b.date || '').localeCompare(a.date || '')) });
-  const openRange = (start, end) => { setPresetId('custom'); setCustom({ start, end }); };
+  const openMonth = i => { setPresetId('custom'); setCustom({ start: months[i].col.start, end: months[i].col.end }); };
 
   if (loading || loadError) return (
     <div className="pnl-page">
-      <Header title="P&L Reports" subtitle={loading ? 'Loading the numbers…' : 'Could not load the report'} />
+      <Header title="P&L" subtitle={loading ? 'Loading the numbers…' : 'Could not load the report'} />
       <div className="page-body">
-        {loading ? <SkeletonRows rows={8} /> : <ErrorPanel title="Could not load the P&L report" error={loadError} onRetry={load} />}
+        {loading ? <SkeletonRows rows={8} /> : <ErrorPanel title="Could not load the P&L" error={loadError} onRetry={load} />}
       </div>
     </div>
   );
 
   const T = st.totals;
+  const hasCmp = !!cmp;
+  const loss = T.profit < 0;
   const togglesOff = PL_TOGGLES.filter(t => opts[t.key] !== t.def).length;
   const isEmpty = st.income.length + st.expenses.length + st.excluded.length === 0;
+  const rowScale = hasCmp ? Math.max(1, ...[...st.income, ...st.expenses].map(l => Math.abs(l.total - (cmpLines.get(l.line) || 0))),
+    Math.abs(T.revenue - cmp.revenue), Math.abs(T.expense - cmp.expense), Math.abs(T.profit - cmp.profit)) : 0;
+  const marginDelta = hasCmp && T.margin != null && cmp.margin != null ? T.margin - cmp.margin : null;
+  const scenario = cmpTag ? `AC vs ${cmpTag}` : 'AC';
+  const chartRange = chartIsPeriod ? period.label : `${rangeLabel(chartCols[0].start, chartCols[chartCols.length - 1].end)} (last 12 months)`;
 
   return (
     <div className="pnl-page">
       <Header
-        title="P&L Reports"
-        subtitle={`${period.label} · net ${fmtINR(T.profit)} · cash basis, FY starts April`}
+        title="P&L"
+        subtitle={`${period.label} · ${loss ? 'net loss' : 'net profit'} ${fmtINR(Math.abs(T.profit))}`}
         actions={
           <RowMenu label="Export" items={[
-            { label: 'Download CSV', icon: Download, onClick: exportCSV },
+            { label: 'Download CSV (month by month)', icon: Download, onClick: exportCSV },
             { label: 'Print / save as PDF', icon: Printer, onClick: () => window.print() },
           ]} />
         }
       />
 
       <div className="page-body">
-        {/* ── Period + view controls ───────────────────────────── */}
+        {/* ── Period and comparison ────────────────────────────── */}
         <div className="tab-bar pnl-periods no-print" role="tablist" aria-label="Period">
-          {PERIOD_PRESETS.map(p => (
+          {PRESETS.map(p => (
             <button key={p.id} role="tab" aria-selected={presetId === p.id} className={`tab-item ${presetId === p.id ? 'active' : ''}`} onClick={() => setPresetId(p.id)}>{p.label}</button>
           ))}
         </div>
-
         <div className="toolbar pnl-controls no-print">
           {presetId === 'custom' && (
             <div className="pnl-custom">
@@ -314,167 +306,112 @@ export default function Reports() {
             </div>
           )}
           <select className="mac-select" value={compareMode} onChange={e => setCompareMode(e.target.value)} aria-label="Compare with">
-            <option value="prev">Compare: previous period</option>
-            <option value="yoy">Compare: same period last year</option>
+            <option value="yoy">Compare with previous year (PY)</option>
+            <option value="prev">Compare with previous period (PP)</option>
             <option value="none">No comparison</option>
           </select>
-          <div className="tab-bar" role="tablist" aria-label="Columns">
-            {GRANULARITIES.map(([k, l]) => (
-              <button key={k} role="tab" aria-selected={granularity === k} className={`tab-item ${granularity === k ? 'active' : ''}`} onClick={() => setGranularity(k)}>{l}</button>
-            ))}
-          </div>
           <div className="toolbar-right">
             <button onClick={() => setShowOpts(true)} className="mac-btn mac-btn-secondary">
-              <SlidersHorizontal size={14} /> Options{togglesOff ? ` · ${togglesOff} changed` : ''}
+              <SlidersHorizontal size={14} /> What counts{togglesOff ? ` · ${togglesOff} changed` : ''}
             </button>
           </div>
         </div>
 
-        {/* ── KPIs ─────────────────────────────────────────────── */}
-        <StatTiles items={[
-          { label: 'Revenue', value: fmtINR(T.revenue), icon: ArrowUpRight, tone: 'brand',
-            sub: kpiSub(opts.excludeGst ? `Excl. GST · ${fmtINR(T.gst)} GST removed` : 'Including GST (if any)', <Delta cur={T.revenue} prev={cmp?.revenue} label={cmpLabel} />) },
-          { label: 'Expenses', value: fmtINR(T.expense), icon: ArrowDownRight, tone: 'warn',
-            sub: kpiSub(`${st.expenses.length} expense lines`, <Delta cur={T.expense} prev={cmp?.expense} label={cmpLabel} inverse />) },
-          { label: T.profit >= 0 ? 'Net profit' : 'Net loss', value: fmtINR(T.profit), icon: T.profit >= 0 ? TrendingUp : TrendingDown, tone: T.profit >= 0 ? 'good' : 'bad',
-            sub: kpiSub(`Avg ${fmtINR(T.profit / Math.max(1, monthsInPeriod))} / month`, <Delta cur={T.profit} prev={cmp?.profit} label={cmpLabel} />) },
-          { label: 'Profit margin', value: fmtPct(T.margin), icon: Percent,
-            sub: kpiSub('Net profit ÷ revenue', <Delta cur={T.margin} prev={cmp?.margin} label={cmpLabel} pp />) },
-        ]} />
-
-        {/* ── Trend ────────────────────────────────────────────── */}
-        <Section title={trendCols === columns ? `Revenue, expenses & profit — ${period.label}` : 'Revenue, expenses & profit — last 12 months'}
-          hint={granularity === 'month' || trendCols !== columns ? 'Monthly' : granularity === 'quarter' ? 'Quarterly' : 'By financial year'}>
-          <TrendChart points={trend} onSelect={i => openRange(trend[i].col.start, trend[i].col.end)} />
-        </Section>
-
-        {/* ── Statement ────────────────────────────────────────── */}
-        <Section title="Profit & Loss statement" hint="Click any amount to see its transactions">
-          <div className="pnl-scroll">
-            <table className="data-table pnl-table">
-              <thead>
-                <tr>
-                  <th className="pnl-sticky">Line</th>
-                  {columns.length > 1 && columns.map(c => <th key={c.key}>{c.label}{c.partial ? '*' : ''}</th>)}
-                  <th>Total</th>
-                  {cmp && <th>{compareMode === 'yoy' ? 'Last year' : 'Prev. period'}</th>}
-                  {cmp && <th>Change</th>}
-                </tr>
-              </thead>
-              <tbody>
-                <GroupRow label="Income" cols={columns.length} cmp={!!cmp} />
-                {st.income.map(l => <LineRow key={l.line} l={l} columns={columns} cmpVal={cmpLines?.get(l.line) ?? 0} showCmp={!!cmp} onDrill={openDrill} onToggle={setOpt} />)}
-                <TotalRow label="Total income" values={st.revenue} total={T.revenue} cmpVal={cmp?.revenue} columns={columns} />
-                <GroupRow label="Expenses" cols={columns.length} cmp={!!cmp} />
-                {st.expenses.map(l => <LineRow key={l.line} l={l} columns={columns} cmpVal={cmpLines?.get(l.line) ?? 0} showCmp={!!cmp} inverse onDrill={openDrill} onToggle={setOpt} />)}
-                <TotalRow label="Total expenses" values={st.expense} total={T.expense} cmpVal={cmp?.expense} columns={columns} inverse />
-                <TotalRow label="Net profit" values={st.profit} total={T.profit} cmpVal={cmp?.profit} columns={columns} strong />
-                <tr className="pnl-margin">
-                  <td className="pnl-sticky">Margin</td>
-                  {columns.length > 1 && st.margin.map((m, i) => <td key={i}>{fmtPct(m)}</td>)}
-                  <td>{fmtPct(T.margin)}</td>
-                  {cmp && <td>{fmtPct(cmp.margin)}</td>}
-                  {cmp && <td>{T.margin != null && cmp.margin != null ? `${(T.margin - cmp.margin) > 0 ? '+' : ''}${(T.margin - cmp.margin).toFixed(1)} pts` : '—'}</td>}
-                </tr>
-                {(st.excluded.length > 0 || T.gst > 0) && <>
-                  <GroupRow label="Not counted in profit — money that still moved" cols={columns.length} cmp={!!cmp} muted />
-                  {opts.excludeGst && T.gst > 0 && (
-                    <tr className="pnl-excluded">
-                      <td className="pnl-sticky">GST collected in receipts <span className="faint">(money in, held for the government)</span></td>
-                      {columns.length > 1 && st.gst.map((g, i) => <td key={i}>{money(g)}</td>)}
-                      <td>{money(T.gst)}</td>
-                      {cmp && <td className="muted">{cmp.gst ? fmtINR(cmp.gst) : '—'}</td>}
-                      {cmp && <td />}
-                    </tr>
-                  )}
-                  {st.excluded.map(l => <LineRow key={l.line} l={l} columns={columns} cmpVal={cmpLines?.get(l.line) ?? 0} showCmp={!!cmp} excluded onDrill={openDrill} onToggle={setOpt} />)}
-                  <TotalRow label="Money kept after all items" values={st.retained} total={T.retained} cmpVal={cmp ? cmp.retained : undefined} columns={columns} />
-                </>}
-              </tbody>
-            </table>
-          </div>
-          {(st.excluded.length > 0 || T.gst > 0) && <div className="pnl-hint" style={{ marginTop: 8 }}>Money kept = net profit + money in − money out from the “not counted” lines. It is how much this period really added to cash and bank.</div>}
-          {columns.some(c => c.partial) && <div className="pnl-hint" style={{ marginTop: 8 }}>* partial period (only months inside the selected range)</div>}
-          {isEmpty && <div className="faint" style={{ textAlign: 'center', padding: '24px 0', fontSize: 'var(--fs-sm)' }}>No transactions in {period.label}</div>}
-        </Section>
-
-        {/* ── Breakdowns ───────────────────────────────────────── */}
-        <div className="rg-2">
-          <Section title="Where the money went">
-            <RankedBars items={expenseItems} color={SERIES.expense} onSelect={r => openDrill(r.label, r.line.txs.flat())} />
-          </Section>
-          <Section title="Revenue by client">
-            <RankedBars items={clientItems} color={SERIES.revenue}
-              onSelect={r => openDrill(`Revenue — ${r.label}`, periodTxs.filter(t => classify(t).revenue && (t.clientName?.trim() || 'Unnamed client') === r.label))} />
-          </Section>
+        {/* ── IBCS title: who, what in which unit, when and which scenario ── */}
+        <div className="ibcs-title">
+          <span>Codelix</span>
+          <strong>Profit and loss in ₹</strong>
+          <span>{period.label} · {scenario}{cmpPeriod ? ` (${cmpTag} = ${rangeLabel(cmpPeriod.start, cmpPeriod.end)})` : ''} · cash basis{opts.excludeGst ? ', revenue without GST' : ''}</span>
         </div>
 
-        <div className="rg-2">
-          <Section title="Highlights" hint={period.label}>
-            {insights ? (
-              <div className="pnl-insights">
-                <Insight icon={Trophy} label="Best month" value={insights.best.label} detail={fmtINR(insights.best.profit)} />
-                <Insight icon={TrendingDown} label="Weakest month" value={insights.worst.label} detail={fmtINR(insights.worst.profit)} bad={insights.worst.profit < 0} />
-                <Insight icon={ArrowUpRight} label="Highest revenue" value={insights.topRev.label} detail={fmtINR(insights.topRev.revenue)} />
-                <Insight icon={Percent} label="Profitable months" value={`${insights.profitable} of ${insights.count}`} detail={fmtPct(insights.profitable / insights.count * 100, 0)} />
-                <Insight icon={Wallet} label="Average profit / month" value={fmtINR(insights.avgProfit)} />
+        {/* ── The three numbers ────────────────────────────────── */}
+        <div className="ibcs-kpis">
+          <Kpi label="Revenue" value={fmtINR(T.revenue)} cmpTag={hasCmp ? cmpTag : null} cmpValue={hasCmp ? fmtINR(cmp.revenue) : ''}
+            delta={hasCmp ? T.revenue - cmp.revenue : null} deltaText={hasCmp ? signed(T.revenue - cmp.revenue) : ''} pctText={hasCmp ? signedPct(pctChange(T.revenue, cmp.revenue)) : ''} />
+          <Kpi label={loss ? 'Net loss' : 'Net profit'} value={fmtINR(T.profit)} bad={loss} cmpTag={hasCmp ? cmpTag : null} cmpValue={hasCmp ? fmtINR(cmp.profit) : ''}
+            delta={hasCmp ? T.profit - cmp.profit : null} deltaText={hasCmp ? signed(T.profit - cmp.profit) : ''} pctText={hasCmp ? signedPct(pctChange(T.profit, cmp.profit)) : ''} />
+          <Kpi label="Margin (net profit ÷ revenue)" value={fmtPct(T.margin)} bad={T.margin != null && T.margin < 0} cmpTag={hasCmp ? cmpTag : null} cmpValue={hasCmp ? fmtPct(cmp.margin) : ''}
+            delta={marginDelta} deltaText={signedPts(marginDelta)} />
+        </div>
+
+        {isEmpty ? (
+          <div className="mac-card ibcs-empty">No transactions in {period.label}. Pick another period, or record income and expenses in Transactions.</div>
+        ) : (
+          <>
+            {/* ── Month by month ───────────────────────────────── */}
+            <section className="mac-card ibcs-section">
+              <div className="ibcs-legend">
+                <span><i className="ibcs-key ibcs-key-ac" /> AC (actual)</span>
+                {cmpTag && <span><i className="ibcs-key ibcs-key-cmp" /> {cmpTag} ({cmpTag === 'PY' ? 'same month last year' : 'earlier period'})</span>}
+                <span className="faint no-print">Click a month to open it</span>
               </div>
-            ) : <div className="faint" style={{ fontSize: 'var(--fs-sm)', textAlign: 'center', padding: '18px 0' }}>No activity in this period</div>}
-          </Section>
-          <Section title="Cash position" hint="As of today">
-            <div className="pnl-insights">
-              <Insight icon={Wallet} label={`Cash + bank now · Bank ${fmtCompact(bal.bank)} · Cash ${fmtCompact(bal.cash)}`} value={fmtINR(bal.total)} />
-              <Insight icon={Receipt} label="To collect — project value not yet received" value={fmtINR(receivables)} />
-              <Insight icon={Flame} label={runway != null ? `Monthly burn · runway ≈ ${runway.toFixed(1)} months of expenses` : 'Monthly burn — avg expenses, last 3 full months'} value={fmtINR(burn)} />
-              <Insight icon={Wallet} label={`Money kept after all items · ${period.label}`} value={fmtINR(T.retained)} detail="profit ± items not counted" />
-              {pos.gstCollected > 0 && <Insight icon={Receipt} label={`GST held for the government · collected ${fmtCompact(pos.gstCollected)}, paid ${fmtCompact(pos.gstPaid)}`} value={fmtINR(pos.gstHeld)} detail={pos.gstHeld > 0 ? 'not yours to spend' : 'all paid'} bad={pos.gstHeld > 0} />}
-              {bal.pendingReimburse > 0 && <Insight icon={Receipt} label="Owed to partners (reimburse)" value={fmtINR(bal.pendingReimburse)} />}
-              {pos.lentOut > 0 && <Insight icon={ArrowUpRight} label="Given to staff / others, still to come back" value={fmtINR(pos.lentOut)} />}
-              {pos.drawingsOut > 0 && <Insight icon={ArrowUpRight} label="Partner drawings not returned" value={fmtINR(pos.drawingsOut)} />}
-              {(pos.gstHeld > 0 || bal.pendingReimburse > 0) && <Insight icon={Wallet} label="Free to spend — balance minus GST held and money owed to partners" value={fmtINR(freeCash)} bad={freeCash < 0} detail={freeCash < 0 ? 'short' : undefined} />}
-            </div>
-          </Section>
-        </div>
+              <ColumnChart title={`Revenue in ₹ · ${chartRange}`} cmpTag={cmpTag} onSelect={openMonth}
+                points={months.map(m => ({ label: m.label, fullLabel: m.fullLabel, ac: m.revenue, cmp: m.cmpRevenue }))} />
+              <ColumnChart title={`Net profit / loss in ₹ · ${chartRange}`} cmpTag={cmpTag} onSelect={openMonth}
+                points={months.map(m => ({ label: m.label, fullLabel: m.fullLabel, ac: m.profit, cmp: m.cmpProfit }))} />
+              <MarginChart title={`Margin in % · ${chartRange}`} cmpTag={cmpTag}
+                points={months.map(m => ({ label: m.label, ac: m.margin, cmp: m.cmpMargin }))} />
+            </section>
 
-        {/* ── Profit windows ───────────────────────────────────── */}
-        <Section title="Profit at a glance" hint="Click any window to open it">
-          <div className="pnl-snap">
-            {snapshots.map(s => (
-              <button key={s.id} onClick={() => { setPresetId(s.id); scrollToTop(); }} className={`pnl-snap-item ${presetId === s.id ? 'active' : ''}`}>
-                <span className="pnl-snap-name">{s.name}</span>
-                <span className={`pnl-snap-value ${s.profit < 0 ? 'pnl-neg' : ''}`}>{fmtCompact(s.profit)}</span>
-                <span className="pnl-snap-sub">Rev {fmtCompact(s.revenue)} · {fmtPct(s.margin, 0)}</span>
-                <span className="pnl-snap-sub">{s.range}</span>
-              </button>
-            ))}
-          </div>
-        </Section>
+            {/* ── Statement ────────────────────────────────────── */}
+            <section className="mac-card ibcs-section">
+              <div className="ibcs-chart-title">Statement in ₹ · {period.label} · {scenario}</div>
+              <div className="pnl-scroll">
+                <table className="data-table ibcs-table">
+                  <thead>
+                    <tr>
+                      <th />
+                      <th className="num">AC</th>
+                      {hasCmp && <th className="num">{cmpTag}</th>}
+                      {hasCmp && <th className="num">Δ{cmpTag}</th>}
+                      {hasCmp && <th />}
+                      {hasCmp && <th className="num">Δ{cmpTag} %</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {st.income.map(l => <Row key={l.line} label={l.label} ac={l.total} cmp={cmpLines.get(l.line) || 0} hasCmp={hasCmp} scale={rowScale} onDrill={() => openDrill(l.label, l.txs.flat())} />)}
+                    <Row kind="sum" label="Revenue" ac={T.revenue} cmp={cmp?.revenue} hasCmp={hasCmp} scale={rowScale} />
+                    {st.expenses.map(l => <Row key={l.line} label={l.label} ac={l.total} cmp={cmpLines.get(l.line) || 0} hasCmp={hasCmp} scale={rowScale} inverse onDrill={() => openDrill(l.label, l.txs.flat())} />)}
+                    <Row kind="sum" label="Expenses" ac={T.expense} cmp={cmp?.expense} hasCmp={hasCmp} scale={rowScale} inverse />
+                    <Row kind="net" label={loss ? 'Net loss' : 'Net profit'} ac={T.profit} cmp={cmp?.profit} hasCmp={hasCmp} scale={rowScale} />
+                    <tr className="ibcs-row ibcs-row-margin">
+                      <td>Margin</td>
+                      <td className="num">{fmtPct(T.margin)}</td>
+                      {hasCmp && <td className="num muted">{fmtPct(cmp.margin)}</td>}
+                      {hasCmp && <td className={`num ibcs-${marginDelta == null ? 'flat' : tone(marginDelta)}`}>{signedPts(marginDelta)}</td>}
+                      {hasCmp && <td />}
+                      {hasCmp && <td />}
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div className="pnl-hint no-print" style={{ marginTop: 8 }}>Click an amount to see the entries behind it.</div>
 
-        {/* ── FY summary ───────────────────────────────────────── */}
-        <Section title="Year by year (April – March)">
-          <div className="pnl-scroll">
-            <table className="data-table pnl-table">
-              <thead><tr><th className="pnl-sticky">Financial year</th><th>Revenue</th><th>Expenses</th><th>Net profit</th><th>Margin</th><th>Revenue growth</th><th>Profit growth</th><th /></tr></thead>
-              <tbody>
-                {fyRows.map(r => (
-                  <tr key={r.fy}>
-                    <td className="pnl-sticky" style={{ fontWeight: 600 }}>{r.label}{r.partial ? ' (to date)' : ''}</td>
-                    <td>{money(r.revenue)}</td><td>{money(r.expense)}</td>
-                    <td style={{ fontWeight: 700 }}>{money(r.profit)}</td>
-                    <td>{fmtPct(r.margin)}</td>
-                    <td><GrowthCell v={r.revGrowth} /></td>
-                    <td><GrowthCell v={r.profitGrowth} /></td>
-                    <td><button className="mac-btn mac-btn-ghost no-print" style={{ padding: '6px 10px' }}
-                      onClick={() => { openRange(fyStartMonth(r.fy), fyEndMonth(r.fy) > now ? now : fyEndMonth(r.fy)); scrollToTop(); }}>Open</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Section>
+              {/* Everything that moved money without being income or a cost — closed unless wanted */}
+              {(st.excluded.length > 0 || T.gst > 0) && (
+                <details className="ibcs-more">
+                  <summary>Not counted in profit ({st.excluded.length + (opts.excludeGst && T.gst > 0 ? 1 : 0)} lines)</summary>
+                  <table className="data-table ibcs-table">
+                    <tbody>
+                      {opts.excludeGst && T.gst > 0 && <tr className="ibcs-row"><td>GST collected in receipts <span className="faint">(money in, held for the government)</span></td><td className="num">{fmtINR(T.gst)}</td></tr>}
+                      {st.excluded.map(l => (
+                        <tr key={l.line} className="ibcs-row">
+                          <td>{l.label} <span className="faint">({l.section === 'income' ? 'money in' : 'money out'})</span></td>
+                          <td className="num"><button className="pnl-cell" onClick={() => openDrill(l.label, l.txs.flat())}>{fmtINR(l.total)}</button></td>
+                        </tr>
+                      ))}
+                      <tr className="ibcs-row ibcs-row-sum"><td>Money kept after all items</td><td className="num">{fmtINR(T.retained)}</td></tr>
+                    </tbody>
+                  </table>
+                  <div className="pnl-hint" style={{ marginTop: 8 }}>Loans, capital, assets, deposits, drawings, transfers and GST. They change the bank balance but are not income or a cost.</div>
+                </details>
+              )}
+            </section>
+          </>
+        )}
       </div>
 
-      {/* ── Options: what counts in profit ─────────────────────── */}
+      {/* ── What counts in profit ──────────────────────────────── */}
       <Drawer isOpen={showOpts} onClose={() => setShowOpts(false)} title="What counts in profit"
         subtitle="Shared by all partners — a change here changes everyone’s P&L and dashboard."
         footer={<>
@@ -494,11 +431,11 @@ export default function Reports() {
         </div>
         <div className="pnl-hint" style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
           <Info size={13} style={{ flexShrink: 0, marginTop: 1 }} />
-          <span>Items you switch off are still listed under “Not counted in profit”, so the full money flow stays visible. Loans, capital, assets, deposits, money given out to be returned, and money received with “Count this as revenue” unticked never count and have no switch.</span>
+          <span>Loans, capital, assets, deposits, money given out to be returned, and money received with “Count this as revenue” unticked never count and have no switch.</span>
         </div>
       </Drawer>
 
-      {/* ── Drill-down ─────────────────────────────────────────── */}
+      {/* ── Entries behind a number ────────────────────────────── */}
       <Drawer isOpen={!!drill} onClose={() => setDrill(null)} title={drill?.title || ''} width={640}
         subtitle={drill ? `${drill.txs.length} transaction${drill.txs.length === 1 ? '' : 's'} · total ${fmtINR(drill.txs.reduce((s, t) => s + (+t.amount || 0), 0))}` : ''}>
         {drill && (
@@ -509,7 +446,7 @@ export default function Reports() {
                 {drill.txs.map(t => (
                   <tr key={t.id}>
                     <td>{fmtDate(t.date)}</td>
-                    <td className="pnl-wrap">{t.remark || t.clientName || t.paidTo || t.category || t.source || '—'}{t.person ? <span className="faint"> · {t.person}</span> : null}{t.type === 'Credit' && t.countInProfit === false ? <span className="faint"> · not revenue</span> : null}</td>
+                    <td className="pnl-wrap">{t.remark || t.clientName || t.paidTo || t.category || t.source || '—'}{t.person ? <span className="faint"> · {t.person}</span> : null}</td>
                     <td>{t.accountType}</td>
                     <td className={t.type === 'Credit' ? 'pnl-pos' : undefined}>{t.type === 'Credit' ? '+' : '−'}{fmtINR(t.amount)}</td>
                   </tr>
