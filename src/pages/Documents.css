@@ -5,6 +5,10 @@
 /* Templates */
 .tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
 .tpl-card { padding: 16px; display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
+.tpl-card-ready { text-decoration: none; color: inherit; transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease); }
+.tpl-card-ready:hover { border-color: var(--accent); box-shadow: var(--shadow-pop); }
+.tpl-card-ready:focus-visible { outline: none; box-shadow: var(--ring); }
+.tpl-open { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 600; color: var(--brand); margin-top: auto; }
 .tpl-icon { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--r-sm); background: var(--brand-soft); color: var(--brand); }
 .tpl-body { display: flex; flex-direction: column; gap: 4px; }
 .tpl-name { font-size: var(--fs-md); font-weight: 600; color: var(--ink); }

@@ -27,7 +27,7 @@ const PARTNER_NAV = [
   // `soon: true` shows a "Soon" tag beside the label: the page exists but its feature is not built yet
   { title: 'Documents', items: [
     { icon: RiFileList3Line, label: 'Client documents', to: '/documents', keywords: 'letters files proposal sow nda agreement upload' },
-    { icon: RiFileCopy2Line, label: 'Templates', to: '/templates', soon: true, keywords: 'proposal letter sow scope of work welcome nda thank you milestones payment schedule acknowledgement receipt' },
+    { icon: RiFileCopy2Line, label: 'Templates', to: '/templates', keywords: 'proposal letter sow scope of work welcome nda thank you milestones payment schedule acknowledgement receipt' },
   ] },
   { title: 'Team', items: [
     { icon: RiKanbanView, label: 'Work', to: '/tasks', keywords: 'tasks board backlog sprint issues timesheet' },

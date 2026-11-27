@@ -29,6 +29,7 @@ const Payroll = lazy(() => import('./pages/Payroll'));
 const Home = lazy(() => import('./pages/Home'));
 const Documents = lazy(() => import('./pages/Documents'));
 const Templates = lazy(() => import('./pages/Templates'));
+const SowBuilder = lazy(() => import('./pages/SowBuilder'));
 
 // Modules an employee can be granted (keys match the server's module codes)
 // The work hub opens if they may see tasks, project boards or their timesheet.
@@ -100,6 +101,7 @@ function AppContent() {
           <Route path="/chat"         element={<Chat />} />
           <Route path="/documents"    element={<Documents />} />
           <Route path="/templates"    element={<Templates />} />
+          <Route path="/templates/sow" element={<SowBuilder />} />
           <Route path="/profile"      element={<Profile />} />
           <Route path="/people/:kind/:id" element={<PersonProfile />} />
           {isAccessAdmin && <Route path="/access" element={<Access />} />}
