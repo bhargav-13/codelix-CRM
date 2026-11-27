@@ -37,7 +37,7 @@ const PARTNER_NAV = [
   { title: 'People', items: [
     { icon: RiCalendarCheckLine, label: 'Attendance', to: '/attendance', keywords: 'punch present absent late holidays rules office hours' },
     { icon: RiFlightTakeoffLine, label: 'Leave', to: '/leave', keywords: 'time off holiday vacation approve balance' },
-    { icon: RiHandCoinLine, label: 'Payroll', to: '/payroll', keywords: 'salary payslip advance pay run' },
+    { icon: RiHandCoinLine, label: 'Payroll', to: '/payroll', keywords: 'salary payslip pay run' },
   ] },
   { title: 'Admin', items: [
     { icon: RiKey2Line, label: 'Credentials', to: '/credentials', keywords: 'passwords logins vault' },

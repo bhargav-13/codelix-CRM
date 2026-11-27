@@ -1,0 +1,24 @@
+/* Number cards: three fixed lines (label, value, note) so every card in a row matches */
+.crm-kpis { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); gap: 12px; }
+.crm-kpi { display: grid; grid-template-rows: 32px 32px 16px; gap: 8px; padding: 16px; min-width: 0; text-align: left; font: inherit; color: inherit; }
+.crm-kpi.is-click { cursor: pointer; transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease); }
+.crm-kpi.is-click:hover { border-color: var(--line-strong); box-shadow: var(--shadow-pop); }
+.crm-kpi.is-click:focus-visible { outline: none; box-shadow: var(--ring); }
+.crm-kpi.is-active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.crm-kpi-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.crm-kpi-label, .crm-kpi-value, .crm-kpi-sub { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-kpi-label { font-size: var(--fs-sm); font-weight: 500; color: var(--ink-2); }
+.crm-kpi-icon { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink-2); }
+.crm-kpi.is-good .crm-kpi-icon { background: var(--good-soft); color: var(--good); }
+.crm-kpi.is-bad .crm-kpi-icon { background: var(--bad-soft); color: var(--bad); }
+.crm-kpi.is-warn .crm-kpi-icon { background: var(--warn-soft); color: var(--warn); }
+.crm-kpi.is-brand .crm-kpi-icon { background: var(--brand-soft); color: var(--brand); }
+.crm-kpi-value { font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.015em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.crm-kpi-sub { font-size: var(--fs-xs); line-height: 16px; color: var(--ink-3); }
+@media (max-width: 1100px) { .crm-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .crm-kpis { grid-template-columns: 1fr; } }
+
+.crm-kpi.is-primary { background: var(--brand-gradient); border-color: transparent; box-shadow: 0 8px 20px -10px #2c67e780, inset 0 1px 0 #ffffff33; }
+.crm-kpi.is-primary .crm-kpi-label { color: #ffffffd9; } .crm-kpi.is-primary .crm-kpi-value { color: #fff; } .crm-kpi.is-primary .crm-kpi-sub { color: #ffffffc2; }
+.crm-kpi.is-primary .crm-kpi-icon { background: #ffffff29; color: #fff; }
+.crm-kpi-value.is-in { color: var(--good); } .crm-kpi-value.is-out { color: var(--bad); }

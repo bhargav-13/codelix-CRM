@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import Badge, { getStatusColor } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -9,10 +10,11 @@ import { NumInput } from '../lib/numInput';
 import { PROJECT_TYPES, PROJECT_STATUSES, PAYMENT_METHODS } from '../data/mockData';
 import { usePeople } from '../lib/people';
 import {
-  useToast, Drawer, Field, FormGrid, FormSection, Toolbar, Chips, StatTiles, SkeletonRows, EmptyPanel, ErrorPanel,
+  useToast, Drawer, Field, FormGrid, FormSection, Toolbar, Chips, SkeletonRows, EmptyPanel, ErrorPanel,
   RowMenu, Avatar, fmtMoney, fmtDate, todayLocal,
 } from '../components/ui/kit';
-import { Plus, Edit2, Trash2, History, IndianRupee, FolderKanban, Briefcase, Wallet, Clock, Archive, X } from 'lucide-react';
+import { Plus, Edit2, Trash2, History, IndianRupee, FolderKanban, Briefcase, Wallet, Clock, Archive, X, CalendarDays, User, ListChecks, Receipt, Building2 } from 'lucide-react';
+import Kpis from '../components/crm/Kpis';
 import './Projects.css';
 
 const GST_RATE = 0.18;
@@ -77,6 +79,100 @@ function Team({ people = [], max = 3 }) {
   );
 }
 
+const dayMs = 86400000;
+const daysTo = day => Math.round((new Date(`${day}T00:00:00`) - new Date(`${todayLocal()}T00:00:00`)) / dayMs);
+const days = n => `${n} day${n === 1 ? '' : 's'}`;
+// "12 days left" / "Due today" / "5 days overdue", only while the work is still open
+function dueNote(p) {
+  if (!p.dueDate || p.status === 'Completed' || p.status === 'Cancelled') return '';
+  const n = daysTo(p.dueDate);
+  return n === 0 ? 'Due today' : n > 0 ? `${days(n)} left` : `${days(-n)} overdue`;
+}
+function lastPayment(p) {
+  const list = [...(p.payments || [])].filter(x => x.date).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return list[0] || null;
+}
+
+// One project on the list page: everything worth knowing without opening it.
+function ProjectCard({ p, menu, onOpen }) {
+  const m = moneyOf(p);
+  const ms = p.milestones || [];
+  const msDone = ms.filter(x => x.done).length;
+  const last = lastPayment(p);
+  const note = dueNote(p);
+  const late = isOverdue(p);
+  const nextDue = p.nextPaymentDue && !m.fullyPaid ? p.nextPaymentDue : '';
+  const nextLate = nextDue && nextDue < todayLocal();
+  const withGst = p.billingType === 'With GST';
+  return (
+    <article className={`mac-card proj-card ${late ? 'is-late' : ''}`} role="button" tabIndex={0} onClick={onOpen} onKeyDown={onKeyActivate(onOpen)} aria-label={`Open ${p.projectName}`}>
+      <header className="proj-card-head">
+        <div className="proj-card-title">
+          <h3>{p.projectName}</h3>
+          <p><Building2 size={13} aria-hidden="true" />{[p.clientName, p.companyName].filter(Boolean).join(' · ') || 'No client set'}</p>
+        </div>
+        <div className="proj-row-actions" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}><RowMenu items={menu} label={`Actions for ${p.projectName}`} /></div>
+      </header>
+
+      <div className="proj-badges">
+        <Badge color={getStatusColor(p.status)}>{p.status}</Badge>
+        {p.projectType && <Badge color="gray">{p.projectType}</Badge>}
+        {withGst && <Badge color="purple">With GST</Badge>}
+        {m.fullyPaid && <Badge color="green">Fully paid</Badge>}
+        {late && <Badge color="red">Overdue</Badge>}
+      </div>
+
+      <div className="proj-money">
+        <div className="proj-money-top">
+          <span><strong>{fmtMoney(m.paid)}</strong> received</span>
+          <span className="proj-money-pct">{Math.min(m.pct, 100)}%</span>
+        </div>
+        <div className={`proj-bar ${m.fullyPaid ? 'full' : ''}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(m.pct, 100)} aria-label="Payment received">
+          <span style={{ width: `${Math.min(m.pct, 100)}%` }} />
+        </div>
+        <dl className="proj-money-grid">
+          <div><dt>Contract</dt><dd>{fmtMoney(m.value)}</dd></div>
+          <div><dt>Balance</dt><dd className={m.balance > 0 ? 'is-due' : 'is-clear'}>{m.balance > 0 ? fmtMoney(m.balance) : 'Nil'}</dd></div>
+          <div><dt>Payments</dt><dd>{(p.payments || []).length}</dd></div>
+        </dl>
+      </div>
+
+      <ul className="proj-facts">
+        <li>
+          <CalendarDays size={14} aria-hidden="true" />
+          <span>{p.startDate ? fmtDate(p.startDate) : 'No start date'} → {p.dueDate ? fmtDate(p.dueDate) : 'No due date'}</span>
+          {note && <em className={late ? 'proj-overdue' : undefined}>{note}</em>}
+        </li>
+        <li>
+          <ListChecks size={14} aria-hidden="true" />
+          {ms.length === 0 ? <span>No milestones</span> : (
+            <>
+              <span>Milestones {msDone} of {ms.length}</span>
+              <span className="proj-dots" aria-hidden="true">{ms.map((x, i) => <i key={i} className={x.done ? 'done' : ''} />)}</span>
+            </>
+          )}
+        </li>
+        <li>
+          <Receipt size={14} aria-hidden="true" />
+          <span>{last ? `Last payment ${fmtMoney(last.amount)} on ${fmtDate(last.date)}` : 'No payment yet'}</span>
+        </li>
+        {nextDue && (
+          <li>
+            <Clock size={14} aria-hidden="true" />
+            <span>Next payment due {fmtDate(nextDue)}</span>
+            {nextLate && <em className="proj-overdue">Late</em>}
+          </li>
+        )}
+      </ul>
+
+      <footer className="proj-card-foot">
+        <span className="proj-lead"><User size={14} aria-hidden="true" />{p.handledBy || 'Not assigned'}</span>
+        <Team people={p.assignedEmployees} max={4} />
+      </footer>
+    </article>
+  );
+}
+
 function ProjectForm({ v, set, errors, employees, partners, onSubmit }) {
   const [ms, setMs] = useState({ label: '', percent: '' });
   const team = v.assignedEmployees || [];
@@ -107,7 +203,7 @@ function ProjectForm({ v, set, errors, employees, partners, onSubmit }) {
             <input className="mac-input" value={v.companyName || ''} onChange={e => set('companyName', e.target.value)} placeholder="Company" />
           </Field>
           <Field label="Project type">
-            <select className="mac-select" value={v.projectType} onChange={e => set('projectType', e.target.value)}>{PROJECT_TYPES.map(t => <option key={t}>{t}</option>)}</select>
+            <select className="mac-select" value={v.projectType} onChange={e => set('projectType', e.target.value)}>{(v.projectType && !PROJECT_TYPES.includes(v.projectType) ? [v.projectType, ...PROJECT_TYPES] : PROJECT_TYPES).map(t => <option key={t}>{t}</option>)}</select>
           </Field>
           <Field label="Status">
             <select className="mac-select" value={v.status} onChange={e => set('status', e.target.value)}>{PROJECT_STATUSES.map(x => <option key={x}>{x}</option>)}</select>
@@ -252,6 +348,13 @@ function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDele
     <>
       <StatusBadges p={proj} m={m} />
 
+      <Kpis cols={4} items={[
+        { label: `Contract value${withGst ? ' (incl. GST)' : ''}`, value: fmtMoney(m.value), icon: Wallet, sub: withGst && m.value > 0 ? `${fmtMoney(gst.taxable)} + ${fmtMoney(gst.gst)} GST` : proj.billingType },
+        { label: 'Received', value: fmtMoney(m.paid), icon: IndianRupee, tone: 'good', sub: m.value > 0 ? `${m.pct}% of contract value` : `${payments.length} payment${payments.length === 1 ? '' : 's'}` },
+        { label: 'Balance to collect', value: m.balance > 0 ? fmtMoney(m.balance) : 'Nil', icon: Clock, tone: m.balance > 0 ? 'warn' : 'good', sub: proj.nextPaymentDue && m.balance > 0 ? `Next due ${fmtDate(proj.nextPaymentDue)}` : m.balance > 0 ? 'No next date set' : 'Fully paid' },
+        { label: 'Due date', value: proj.dueDate ? fmtDate(proj.dueDate) : 'Not set', icon: CalendarDays, tone: isOverdue(proj) ? 'bad' : 'brand', sub: dueNote(proj) || (proj.startDate ? `Started ${fmtDate(proj.startDate)}` : 'No start date') },
+      ]} />
+
       {m.fullyPaid && (
         <div className="proj-notice">
           <span>This project is fully paid. When the work is done you can move it to Past Projects.</span>
@@ -259,7 +362,9 @@ function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDele
         </div>
       )}
 
-      <section className="form-section">
+      <div className="pv-cols">
+      <aside className="pv-col pv-side">
+      <section className="pv-card">
         <h3 className="section-title">Money</h3>
         <PayProgress m={m} />
         <dl className="kv">
@@ -270,7 +375,7 @@ function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDele
         </dl>
       </section>
 
-      <section className="form-section">
+      <section className="pv-card">
         <h3 className="section-title">Overview</h3>
         <dl className="kv">
           <dt>Client</dt><dd>{proj.clientName || '—'}</dd>
@@ -289,8 +394,10 @@ function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDele
           </dd>
         </dl>
       </section>
+      </aside>
 
-      <section className="form-section">
+      <div className="pv-col">
+      <section className="pv-card">
         <div className="proj-section-head">
           <h3 className="section-title">Payments ({payments.length})</h3>
           {!pf && <button className="mac-btn mac-btn-secondary" onClick={() => setPf(blankPayment())}><Plus size={14} /> Add payment</button>}
@@ -319,7 +426,7 @@ function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDele
       </section>
 
       {milestones.length > 0 && (
-        <section className="form-section">
+        <section className="pv-card">
           <h3 className="section-title">Milestones ({milestones.filter(x => x.done).length} of {milestones.length} done)</h3>
           <div className="proj-list">
             {milestones.map((ms, i) => (
@@ -332,6 +439,8 @@ function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDele
           </div>
         </section>
       )}
+      </div>
+      </div>
     </>
   );
 }
@@ -355,7 +464,17 @@ export default function Projects() {
   const [type, setType] = useState('');
   const [dueOnly, setDueOnly] = useState(false);
 
-  const [detail, setDetail] = useState(null);     // { id, addPayment }
+  // The open project lives in the address (?project=…), so the browser's back button closes it.
+  const [params, setParams] = useSearchParams();
+  const [startPay, setStartPay] = useState(false);
+  const openId = params.get('project');
+  const detail = openId ? { id: openId, addPayment: startPay } : null;     // { id, addPayment }
+  const setDetail = v => {
+    const next = typeof v === 'function' ? v(detail) : v;
+    if (next === detail) return;
+    setStartPay(!!next?.addPayment);
+    setParams(next ? { project: String(next.id) } : {});
+  };
   const [form, setForm] = useState(null);         // { id: null | project id, values }
   const [formErrors, setFormErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -419,8 +538,8 @@ export default function Projects() {
 
   const isFiltered = !!(search || status || type || dueOnly);
   const clearFilters = () => { setSearch(''); setStatus(''); setType(''); setDueOnly(false); };
-  const detailProj = detail ? projs.find(p => p.id === detail.id) || null : null;
-  const overlayOnTop = !!(form || confirm);
+  const detailProj = detail ? projs.find(p => String(p.id) === detail.id) || null : null;
+  const overlayOnTop = !!confirm;
 
   // ── Create / edit ───────────────────────────────────────────────
   const openAdd = () => { setForm({ id: null, values: blankProject() }); setFormErrors({}); };
@@ -429,6 +548,15 @@ export default function Projects() {
     setForm(f => ({ ...f, values: { ...f.values, [k]: v } }));
     setFormErrors(er => (er[k] ? { ...er, [k]: undefined } : er));
   };
+
+  // A project marked Completed goes to Past Projects by itself once nothing is left to collect.
+  // With a balance pending it stays here, so the money is still tracked, and moves on the last payment.
+  function completed(p) {
+    if (p.status !== 'Completed') return;
+    const m = moneyOf(p);
+    if (m.fullyPaid || m.value === 0) { moveToPast(p.id, p); return; }
+    toast.success(`“${p.projectName}” is completed. It stays here until ${fmtMoney(m.balance)} is collected, then moves to Past Projects.`);
+  }
 
   async function saveProject() {
     if (saving || !form) return;
@@ -452,11 +580,13 @@ export default function Projects() {
         setProjs(ps => ps.map(p => (p.id === form.id ? updated : p)));
         await logAudit(form.id, 'Edited', updated.projectName);
         toast.success('Project updated');
+        if (current?.status !== 'Completed') completed(updated);
       } else {
         const created = await projectsDB.create({ ...base, milestones: v.milestones || [] });
         setProjs(ps => [created, ...ps]);
         await logAudit(created.id, 'Created', created.projectName);
         toast.success('Project created');
+        completed(created);
       }
       setForm(null);
     } catch (e) {
@@ -471,7 +601,7 @@ export default function Projects() {
     try {
       await projectsDB.delete(id);
       setProjs(ps => ps.filter(x => x.id !== id));
-      setDetail(d => (d?.id === id ? null : d));
+      setDetail(d => (d?.id === String(id) ? null : d));
       await logAudit(id, 'Deleted', p.projectName);
       toast.success(`“${p.projectName}” deleted`);
     } catch (e) { toast.error('Could not delete project', e); }
@@ -488,6 +618,7 @@ export default function Projects() {
       setProjs(ps => ps.map(p => (p.id === projId ? updated : p)));
       const nowFull = moneyOf(updated).fullyPaid && !moneyOf(proj).fullyPaid;
       toast.success(nowFull ? 'Payment saved — this project is now fully paid' : id == null ? 'Payment added' : 'Payment updated');
+      if (nowFull) completed(updated);
       return true;
     } catch (e) { toast.error('Could not save the payment', e); return false; }
   }
@@ -517,11 +648,12 @@ export default function Projects() {
   }
 
   // ── Move a fully-paid project to Past Projects (only when asked) ─
-  async function moveToPast(id) {
-    const proj = projs.find(p => p.id === id);
+  // `given`: the project as just saved, when the list on screen has not caught up yet.
+  async function moveToPast(id, given) {
+    const proj = given || projs.find(p => p.id === id);
     if (!proj || movingId) return;
     const m = moneyOf(proj);
-    if (!m.fullyPaid) { toast.error('Only a fully paid project can be moved to Past Projects'); return; }
+    if (!m.fullyPaid && m.value > 0) { toast.error('Only a fully paid project can be moved to Past Projects'); return; }
     const count = (proj.payments || []).length;
     setMovingId(id);
     try {
@@ -548,7 +680,7 @@ export default function Projects() {
       return;
     }
     setProjs(ps => ps.filter(p => p.id !== id));
-    setDetail(d => (d?.id === id ? null : d));
+    setDetail(d => (d?.id === String(id) ? null : d));
     await logAudit(id, 'Completed', `${proj.projectName} — fully paid, moved to Past Projects`);
     toast.success(`“${proj.projectName}” moved to Past Projects`);
     setMovingId(null);
@@ -603,15 +735,15 @@ export default function Projects() {
               action={<button className="mac-btn mac-btn-primary" onClick={openAdd}><Plus size={15} /> New project</button>} />
           ) : (
             <>
-              <StatTiles items={[
-                { label: 'Active projects', value: stats.active, sub: `${projs.length} in total`, icon: Briefcase },
+              <Kpis cols={4} items={[
+                { label: 'Active projects', value: stats.active, sub: `${projs.length} in total`, icon: Briefcase, tone: 'brand' },
                 { label: 'Total contract value', value: fmtMoney(stats.totalVal), sub: 'All projects in this list', icon: Wallet },
                 { label: 'Received', value: fmtMoney(stats.totalRec), icon: IndianRupee, tone: 'good',
-                  sub: stats.totalVal > 0 ? `${Math.round((stats.totalRec / stats.totalVal) * 100)}% of contract value` : undefined },
-                { label: 'To collect', value: fmtMoney(stats.toCollect), icon: Clock, tone: stats.toCollect > 0 ? 'warn' : undefined,
-                  sub: dueOnly ? 'Showing these — tap to show all'
-                    : stats.gstOnPending > 0 ? `Includes ${fmtMoney(stats.gstOnPending)} GST · ${fmtMoney(stats.netOfGst)} after GST`
-                    : `${stats.owing} project${stats.owing === 1 ? '' : 's'} — tap to see`,
+                  sub: stats.totalVal > 0 ? `${Math.round((stats.totalRec / stats.totalVal) * 100)}% of contract value` : 'Nothing billed yet' },
+                { label: 'To collect', value: fmtMoney(stats.toCollect), icon: Clock, tone: 'warn', active: dueOnly,
+                  sub: dueOnly ? 'Showing these. Tap to show all'
+                    : stats.gstOnPending > 0 ? `Includes ${fmtMoney(stats.gstOnPending)} GST`
+                    : `${stats.owing} project${stats.owing === 1 ? '' : 's'}. Tap to see`,
                   onClick: () => setDueOnly(d => !d) },
               ]} />
 
@@ -628,60 +760,15 @@ export default function Projects() {
                 <EmptyPanel icon={FolderKanban} title="No projects match these filters" text="Try a different search or clear the filters."
                   action={<button className="mac-btn mac-btn-secondary" onClick={clearFilters}>Clear filters</button>} />
               ) : (
-                <>
-                  <div className="mac-card table-wrap only-desktop">
-                    <table className="data-table">
-                      <thead><tr><th>Project</th><th>Status</th><th>Team</th><th>Due</th><th>Payment</th><th aria-label="Actions" /></tr></thead>
-                      <tbody>
-                        {filtered.map(p => {
-                          const m = moneyOf(p);
-                          return (
-                            <tr key={p.id} className="clickable" tabIndex={0} onClick={() => open(p)} onKeyDown={onKeyActivate(() => open(p))}>
-                              <td>
-                                <div className="cell-main">{p.projectName}</div>
-                                <div className="cell-sub">{[p.clientName, p.projectType].filter(Boolean).join(' · ') || '—'}</div>
-                              </td>
-                              <td><StatusBadges p={p} m={m} /></td>
-                              <td><Team people={p.assignedEmployees} /></td>
-                              <td className={isOverdue(p) ? 'proj-overdue' : undefined} style={{ whiteSpace: 'nowrap' }}>{fmtDate(p.dueDate)}</td>
-                              <td><PayProgress m={m} /></td>
-                              <td><div className="proj-row-actions"><RowMenu items={rowMenu(p)} label={`Actions for ${p.projectName}`} /></div></td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="list-cards only-mobile">
-                    {filtered.map(p => {
-                      const m = moneyOf(p);
-                      return (
-                        <div key={p.id} className="list-card" role="button" tabIndex={0} onClick={() => open(p)} onKeyDown={onKeyActivate(() => open(p))}>
-                          <div className="proj-card-top">
-                            <div>
-                              <div className="cell-main">{p.projectName}</div>
-                              <div className="cell-sub">{[p.clientName, p.projectType].filter(Boolean).join(' · ') || '—'}</div>
-                            </div>
-                            <RowMenu items={rowMenu(p)} label={`Actions for ${p.projectName}`} />
-                          </div>
-                          <StatusBadges p={p} m={m} />
-                          <PayProgress m={m} />
-                          <div className="proj-card-foot">
-                            <span className={isOverdue(p) ? 'proj-overdue' : undefined}>Due {fmtDate(p.dueDate)}</span>
-                            <Team people={p.assignedEmployees} />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
+                <div className="proj-grid">
+                  {filtered.map(p => <ProjectCard key={p.id} p={p} menu={rowMenu(p)} onOpen={() => open(p)} />)}
+                </div>
               )}
             </>
           )}
       </div>
 
-      <Drawer isOpen={!!detailProj} onClose={() => { if (!overlayOnTop) setDetail(null); }}
+      <Drawer isOpen={!!detailProj && !form} onClose={() => { if (!overlayOnTop) setDetail(null); }}
         title={detailProj?.projectName} subtitle={detailProj && ([detailProj.clientName, detailProj.companyName].filter(Boolean).join(' · ') || 'No client set')}
         actions={detailProj && <RowMenu items={rowMenu(detailProj).slice(1)} label="Project actions" />}>
         {detailProj && (
@@ -690,7 +777,7 @@ export default function Projects() {
         )}
       </Drawer>
 
-      <Modal isOpen={!!form} onClose={() => { if (!saving) setForm(null); }} title={form?.id ? 'Edit project' : 'New project'} size="lg"
+      <Modal page back="Projects" isOpen={!!form} onClose={() => { if (!saving) setForm(null); }} title={form?.id ? 'Edit project' : 'New project'} size="lg"
         footer={<>
           <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setForm(null)} disabled={saving}>Cancel</button>
           <button type="submit" form="proj-form" className="mac-btn mac-btn-primary" disabled={saving}>{saving ? 'Saving…' : form?.id ? 'Save changes' : 'Create project'}</button>
@@ -698,7 +785,7 @@ export default function Projects() {
         {form && <ProjectForm v={form.values} set={setField} errors={formErrors} employees={employees} partners={partners} onSubmit={saveProject} />}
       </Modal>
 
-      <Modal isOpen={showAudit} onClose={() => setShowAudit(false)} title="Project history" size="md">
+      <Modal page back="Projects" isOpen={showAudit} onClose={() => setShowAudit(false)} title="Project history" size="md">
         {auditLog.length === 0
           ? <p className="proj-note" style={{ textAlign: 'center', padding: '24px 0' }}>No changes recorded yet.</p>
           : auditLog.map(a => (

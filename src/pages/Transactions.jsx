@@ -1,10 +1,10 @@
 import { useState, useMemo, useEffect, useCallback, useSyncExternalStore, Fragment } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import Modal from '../components/ui/Modal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import {
-  useToast, Drawer, Field, FormGrid, FormSection, Toolbar, Chips, StatTiles, SkeletonRows,
+  useToast, Drawer, Field, FormGrid, FormSection, Toolbar, Chips, SkeletonRows,
   EmptyPanel, ErrorPanel, RowMenu, Avatar, fmtMoney, fmtDate, todayLocal,
 } from '../components/ui/kit';
 import { transactionsDB, settingsDB, auditDB } from '../lib/db';
@@ -17,8 +17,9 @@ import { usePeople } from '../lib/people';
 import {
   Plus, Wallet, Landmark, Banknote, TrendingUp, TrendingDown, History, Settings2, Download,
   Pencil, Trash2, ArrowDownLeft, ArrowUpRight, HandCoins, RotateCcw, CreditCard, ArrowRightLeft,
-  AlertTriangle, Info, ExternalLink, Receipt, List, Repeat, Building2, X,
+  AlertTriangle, Info, ExternalLink, Receipt, List, Repeat, Building2, X, Scale,
 } from 'lucide-react';
+import Kpis from '../components/crm/Kpis';
 import './Transactions.css';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -729,7 +730,10 @@ export default function Transactions() {
 
   const [view, setView]       = useState('ledger');   // ledger | partners
   const [filters, setFilters] = useState(NO_FILTERS);
-  const [detailId, setDetailId] = useState(null);
+  // The open entry lives in the address (?entry=…), so the browser's back button closes it.
+  const [params, setParams] = useSearchParams();
+  const detailId = params.get('entry');
+  const setDetailId = id => setParams(id != null ? { entry: String(id) } : {});
   const [deleteTx, setDeleteTx] = useState(null);
 
   const [showForm, setShowForm] = useState(false);
@@ -876,6 +880,7 @@ export default function Transactions() {
 
   const isFiltered = Object.keys(NO_FILTERS).some(k => filters[k] !== NO_FILTERS[k]);
   const setFilter = (k, v) => setFilters(f => ({ ...f, [k]: v }));
+  const monthShort = String(monthName).split(' ')[0];
   const showLedger = patch => { setFilters({ ...NO_FILTERS, ...patch }); setView('ledger'); };
 
   // ── Add / edit ─────────────────────────────────────────────
@@ -1046,7 +1051,7 @@ export default function Transactions() {
 
   // ── Render ─────────────────────────────────────────────────
   const ready = !loading && !loadError;
-  const detail = detailId != null ? txs.find(t => t.id === detailId) : null;
+  const detail = detailId != null ? txs.find(t => String(t.id) === detailId) : null;
   const detailHistory = detail ? auditLog.filter(e => e.entityId === detail.id) : [];
   const detailOwner = managedBy(detail);              // 'project' | 'employee' | null
   const detailManaged = detailOwner === 'employee';
@@ -1091,16 +1096,19 @@ export default function Transactions() {
               </div>
             )}
 
-            <StatTiles items={[
-              { label: 'Total balance', value: plain(bal.total), icon: Wallet, tone: 'dark',
-                sub: `In ${fmtMoney(bal.totalCredit)} · Out ${fmtMoney(bal.totalDebit)} all time`,
-                onClick: () => showLedger() },
-              { label: 'Bank', value: plain(bal.bank), icon: Landmark, onClick: () => showLedger({ account: BANK }) },
-              { label: 'Cash', value: plain(bal.personal), icon: Banknote, onClick: () => showLedger({ account: CASH }) },
-              { label: 'This month’s net', value: signed(monthNet), icon: monthNet < 0 ? TrendingDown : TrendingUp,
-                tone: monthNet < 0 ? 'bad' : 'good',
-                sub: `In ${fmtMoney(monthFlow.totalCredit)} · Out ${fmtMoney(monthFlow.totalDebit)}`,
-                onClick: () => showLedger({ month: thisMonth }) },
+            <Kpis cols={3} items={[
+              { label: 'Total balance', value: plain(bal.total), icon: Wallet, tone: 'primary',
+                sub: 'Bank and cash together', onClick: () => showLedger() },
+              { label: 'Bank', value: plain(bal.bank), icon: Landmark, tone: 'brand',
+                sub: 'Company bank account', onClick: () => showLedger({ account: BANK }) },
+              { label: 'Cash', value: plain(bal.personal), icon: Banknote, tone: 'warn',
+                sub: 'Cash and savings', onClick: () => showLedger({ account: CASH }) },
+              { label: `Money in · ${monthShort}`, value: `+${fmtMoney(monthFlow.totalCredit)}`, valueTone: 'in', icon: TrendingUp, tone: 'good',
+                sub: `${fmtMoney(bal.totalCredit)} all time`, onClick: () => showLedger({ month: thisMonth, dir: 'in' }) },
+              { label: `Money out · ${monthShort}`, value: `−${fmtMoney(monthFlow.totalDebit)}`, valueTone: 'out', icon: TrendingDown, tone: 'bad',
+                sub: `${fmtMoney(bal.totalDebit)} all time`, onClick: () => showLedger({ month: thisMonth, dir: 'out' }) },
+              { label: `Net · ${monthShort}`, value: signed(monthNet), valueTone: monthNet < 0 ? 'out' : 'in', icon: Scale, tone: monthNet < 0 ? 'bad' : 'good',
+                sub: monthNet < 0 ? 'More went out than came in' : 'More came in than went out', onClick: () => showLedger({ month: thisMonth }) },
             ]} />
 
             <div className="tab-bar tx-tabs" role="tablist" aria-label="View">
@@ -1203,7 +1211,7 @@ export default function Transactions() {
 
       {/* ── Entry detail ─────────────────────────────────────── */}
       <Drawer
-        isOpen={!!detail}
+        isOpen={!!detail && !showForm}
         onClose={() => setDetailId(null)}
         title={detail ? txMain(detail) : ''}
         subtitle={detail ? `${typeLabel(detail)} · ${fmtDate(detail.date)}` : ''}
@@ -1219,8 +1227,9 @@ export default function Transactions() {
         )}
       >
         {detail && (
-          <>
-            <div>
+          <div className="pv-cols">
+            <div className="pv-col">
+            <div className="pv-card">
               <div className={`tx-detail-amount ${detail.type === 'Credit' ? 'amount-in' : 'amount-out'}`}>
                 {detail.type === 'Credit' ? '+' : '−'}{fmtMoney(detail.amount)}
               </div>
@@ -1255,6 +1264,8 @@ export default function Transactions() {
               </div>
             )}
 
+            <div className="pv-card">
+            <h3 className="section-title">Entry details</h3>
             <dl className="kv">
               <dt>Type</dt><dd>{typeLabel(detail)}</dd>
               <dt>Date</dt><dd>{fmtDate(detail.date)}</dd>
@@ -1268,19 +1279,23 @@ export default function Transactions() {
               {detail.monthLabel && <><dt>Salary month</dt><dd>{detail.monthLabel}</dd></>}
               <dt>Remark</dt><dd>{detail.remark || '—'}</dd>
             </dl>
+            </div>
+            </div>
 
-            {detailHistory.length > 0 && (
-              <section className="tx-hist">
+            <aside className="pv-col">
+              <section className="pv-card tx-hist">
                 <h3 className="section-title">History</h3>
-                {detailHistory.map(e => <AuditItem key={e.id} e={e} />)}
+                {detailHistory.length === 0
+                  ? <p className="muted" style={{ margin: 0, fontSize: 'var(--fs-sm)' }}>No changes recorded for this entry.</p>
+                  : detailHistory.map(e => <AuditItem key={e.id} e={e} />)}
               </section>
-            )}
-          </>
+            </aside>
+          </div>
         )}
       </Drawer>
 
       {/* ── Add / edit ───────────────────────────────────────── */}
-      <Modal
+      <Modal page back="Ledger"
         isOpen={showForm}
         onClose={closeForm}
         title={editTx ? 'Edit transaction' : 'Add transaction'}
@@ -1306,7 +1321,7 @@ export default function Transactions() {
       </Modal>
 
       {/* ── Opening balance ──────────────────────────────────── */}
-      <Modal isOpen={showOB} onClose={() => !settingsSaving && setShowOB(false)} title="Opening balance"
+      <Modal page back="Ledger" isOpen={showOB} onClose={() => !settingsSaving && setShowOB(false)} title="Opening balance"
         footer={
           <>
             <button type="button" onClick={() => setShowOB(false)} disabled={settingsSaving} className="mac-btn mac-btn-secondary">Cancel</button>
@@ -1343,7 +1358,7 @@ export default function Transactions() {
       </Modal>
 
       {/* ── Partner salary settings ──────────────────────────── */}
-      <Modal isOpen={showSalConfig} onClose={() => !settingsSaving && setShowSalConfig(false)} title="Partner salary settings" size="sm"
+      <Modal page back="Ledger" isOpen={showSalConfig} onClose={() => !settingsSaving && setShowSalConfig(false)} title="Partner salary settings" size="sm"
         footer={
           <>
             <button type="button" onClick={() => setShowSalConfig(false)} disabled={settingsSaving} className="mac-btn mac-btn-secondary">Cancel</button>
@@ -1363,7 +1378,7 @@ export default function Transactions() {
       </Modal>
 
       {/* ── History (audit log) ──────────────────────────────── */}
-      <Drawer isOpen={showAudit} onClose={() => setShowAudit(false)} title="History"
+      <Drawer page narrow back="Ledger" isOpen={showAudit} onClose={() => setShowAudit(false)} title="History"
         subtitle={`${auditLog.length} ${auditLog.length === 1 ? 'change' : 'changes'} to the ledger, newest first`}>
         {auditLog.length === 0
           ? <div className="empty-panel"><span className="empty-icon"><History size={22} /></span><div className="empty-title">No changes recorded yet</div><div className="empty-text">Every entry added, edited or deleted is listed here with who did it.</div></div>

@@ -3,16 +3,17 @@ import Header from '../components/layout/Header';
 import Badge, { getStatusColor } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
-import { employeesDB, auditDB } from '../lib/db';
+import { employeesDB, projectsDB, auditDB } from '../lib/db';
+import Kpis from '../components/crm/Kpis';
 import { useAuth } from '../contexts/AuthContext';
 import { NumInput } from '../lib/numInput';
 import { DEPARTMENTS, EMPLOYMENT_TYPES, SALARY_TYPES, PAYMENT_METHODS } from '../data/mockData';
 import {
-  useToast, Drawer, Field, FormGrid, FormSection, Toolbar, StatTiles, SkeletonRows, EmptyPanel, ErrorPanel,
+  useToast, Drawer, Field, FormGrid, FormSection, Toolbar, SkeletonRows, EmptyPanel, ErrorPanel,
   RowMenu, Avatar, fmtMoney, fmtDate, todayLocal,
 } from '../components/ui/kit';
 import { Link } from 'react-router-dom';
-import { Plus, Edit2, Trash2, History, AlertTriangle, Banknote, Users, Wallet, CheckCircle2, Clock, Power, Eye, EyeOff, CalendarCheck } from 'lucide-react';
+import { Plus, Edit2, Trash2, History, AlertTriangle, Banknote, Users, Wallet, CheckCircle2, Clock, Power, Eye, EyeOff, CalendarCheck, Phone, Mail, CalendarDays, Building2, FolderKanban, KeyRound } from 'lucide-react';
 import BankChangeRequests from '../components/hr/BankChangeRequests';
 import './HR.css';
 import './Employees.css';
@@ -53,6 +54,75 @@ const blankEmp = () => ({
 const onKeyActivate = fn => e => {
   if ((e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget) { e.preventDefault(); fn(); }
 };
+
+// "2 yr 3 mo" since the joining date
+function tenure(day) {
+  if (!day) return '';
+  const from = new Date(`${String(day).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(+from)) return '';
+  const now = new Date();
+  let months = (now.getFullYear() - from.getFullYear()) * 12 + now.getMonth() - from.getMonth() - (now.getDate() < from.getDate() ? 1 : 0);
+  if (months < 0) return 'Joins soon';
+  if (months === 0) return 'Joined this month';
+  const years = Math.floor(months / 12);
+  months %= 12;
+  return [years ? `${years} yr` : '', months ? `${months} mo` : ''].filter(Boolean).join(' ');
+}
+const tel = n => `tel:${String(n).replace(/[^\d+]/g, '')}`;
+
+// One person on the list page: who they are, how to reach them, what they work on and this month's salary.
+function EmployeeCard({ emp, month, projects, menu, onOpen, onPay }) {
+  const st = salaryState(emp, month);
+  const pct = st.applies ? Math.min(100, Math.round((st.paid / st.salary) * 100)) : 0;
+  const stop = e => e.stopPropagation();
+  return (
+    <article className={`mac-card emp-card ${emp.status !== 'Active' ? 'is-off' : ''}`} role="button" tabIndex={0} onClick={onOpen} onKeyDown={onKeyActivate(onOpen)} aria-label={`Open ${emp.name}`}>
+      <header className="emp-card-head">
+        <Avatar name={emp.name} size={44} />
+        <div className="emp-card-title">
+          <h3>{emp.name}</h3>
+          <p>{emp.role || 'No role set'}</p>
+        </div>
+        <div className="emp-row-actions" onClick={stop} onKeyDown={stop}><RowMenu items={menu} label={`Actions for ${emp.name}`} /></div>
+      </header>
+
+      <div className="emp-card-badges">
+        <Badge color={getStatusColor(emp.status)}>{emp.status}</Badge>
+        {emp.empId && <Badge color="gray">{emp.empId}</Badge>}
+        {emp.department && <Badge color="blue">{emp.department}</Badge>}
+        {emp.employmentType && <Badge color={getStatusColor(emp.employmentType)}>{emp.employmentType}</Badge>}
+        {emp.userId && <Badge color="purple" icon={KeyRound}>Has login</Badge>}
+      </div>
+
+      <ul className="emp-facts">
+        <li><Phone size={14} aria-hidden="true" />{emp.mobile ? <a href={tel(emp.mobile)} onClick={stop}>{emp.mobile}</a> : <span className="faint">No phone</span>}</li>
+        <li><Mail size={14} aria-hidden="true" />{emp.email ? <a href={`mailto:${emp.email}`} onClick={stop} title={emp.email}>{emp.email}</a> : <span className="faint">No email</span>}</li>
+        <li><CalendarDays size={14} aria-hidden="true" /><span>{emp.joiningDate ? `Joined ${fmtDate(emp.joiningDate)}` : 'No joining date'}</span>{tenure(emp.joiningDate) && <em>{tenure(emp.joiningDate)}</em>}</li>
+        <li><Building2 size={14} aria-hidden="true" /><span>{emp.address || 'No address'}</span></li>
+        <li><FolderKanban size={14} aria-hidden="true" />
+          {projects.length === 0 ? <span className="faint">Not on a project</span>
+            : <span title={projects.map(x => x.projectName).join(', ')}>{projects.length === 1 ? projects[0].projectName : `${projects.length} projects: ${projects.map(x => x.projectName).join(', ')}`}</span>}
+        </li>
+      </ul>
+
+      <div className="emp-pay">
+        <div className="emp-pay-top">
+          <span>{emp.salaryType || 'Salary'}{emp.salaryType === 'Monthly' ? ' salary' : ''}</span>
+          <strong>{+emp.salaryAmount > 0 ? fmtMoney(emp.salaryAmount) : 'Not set'}</strong>
+        </div>
+        {st.applies ? (
+          <>
+            <div className={`emp-bar ${st.due <= 0 ? 'full' : ''}`} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={`Salary paid for ${month}`}><span style={{ width: `${pct}%` }} /></div>
+            <div className="emp-pay-foot">
+              <span>{month}: <SalaryCell st={st} /></span>
+              {onPay && <button className="mac-btn mac-btn-secondary" onClick={e => { e.stopPropagation(); onPay(); }}>Pay</button>}
+            </div>
+          </>
+        ) : <div className="emp-pay-foot"><span className="faint">No fixed monthly salary to pay</span></div>}
+      </div>
+    </article>
+  );
+}
 
 function SalaryCell({ st }) {
   if (!st.applies) return <span className="faint">—</span>;
@@ -287,6 +357,7 @@ export default function Employees() {
 
   const [emps, setEmps] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
+  const [projects, setProjects] = useState([]);   // only to show who is on what; the page works without it
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
 
@@ -306,6 +377,7 @@ export default function Employees() {
 
   const load = useCallback(async () => {
     setLoading(true); setLoadError(null);
+    projectsDB.getAll().then(setProjects).catch(() => setProjects([]));
     try {
       // The history list is secondary: if it fails the page still works.
       const [empData, auditData] = await Promise.all([
@@ -480,6 +552,7 @@ export default function Employees() {
   }
 
   // ── Render ──────────────────────────────────────────────────────
+  const projectsOf = emp => projects.filter(x => x.status !== 'Completed' && x.status !== 'Cancelled' && (x.assignedEmployees || []).some(e => String(e.id) === String(emp.id)));
   const rowMenu = emp => [
     { label: 'Pay salary', icon: Banknote, onClick: () => openPay(emp) },
     { label: 'Edit', icon: Edit2, onClick: () => openEdit(emp) },
@@ -508,13 +581,13 @@ export default function Employees() {
               action={<button className="mac-btn mac-btn-primary" onClick={openAdd}><Plus size={15} /> Add employee</button>} />
           ) : (
             <>
-              <StatTiles items={[
-                { label: 'Active people', value: stats.active, sub: `${emps.length} in total`, icon: Users },
+              <Kpis cols={4} items={[
+                { label: 'Active people', value: stats.active, sub: `${emps.length} in total`, icon: Users, tone: 'brand' },
                 { label: 'Monthly payroll', value: fmtMoney(stats.payroll), sub: 'Active, on monthly salary', icon: Wallet },
                 { label: 'Paid this month', value: fmtMoney(stats.paid), sub: curMonth, icon: CheckCircle2, tone: 'good' },
-                { label: 'Pending this month', value: fmtMoney(stats.pendingAmount), icon: Clock, tone: stats.pendingCount ? 'warn' : undefined,
-                  sub: pendingOnly ? 'Showing these — tap to show all' : stats.pendingCount ? `${stats.pendingCount} ${stats.pendingCount === 1 ? 'person' : 'people'} — tap to see` : 'Nobody is waiting',
-                  onClick: () => setPendingOnly(p => !p) },
+                { label: 'Pending this month', value: fmtMoney(stats.pendingAmount), icon: Clock, tone: 'warn', active: pendingOnly,
+                  sub: pendingOnly ? 'Showing these. Tap to show all' : stats.pendingCount ? `${stats.pendingCount} ${stats.pendingCount === 1 ? 'person' : 'people'}. Tap to see` : 'Nobody is waiting',
+                  onClick: () => setPendingOnly(v => !v) },
               ]} />
 
               <Toolbar search={search} onSearch={setSearch} placeholder="Search name, role or ID…"
@@ -535,59 +608,12 @@ export default function Employees() {
                 <EmptyPanel icon={Users} title="No one matches these filters" text="Try a different search or clear the filters."
                   action={<button className="mac-btn mac-btn-secondary" onClick={clearFilters}>Clear filters</button>} />
               ) : (
-                <>
-                  <div className="mac-card table-wrap only-desktop">
-                    <table className="data-table">
-                      <thead>
-                        <tr><th>Person</th><th>Department</th><th>Type</th><th>Status</th><th>Salary · {curMonth}</th><th aria-label="Actions" /></tr>
-                      </thead>
-                      <tbody>
-                        {filtered.map(emp => (
-                          <tr key={emp.id} className="clickable" tabIndex={0} onClick={() => setDetailId(emp.id)} onKeyDown={onKeyActivate(() => setDetailId(emp.id))}>
-                            <td>
-                              <div className="emp-person">
-                                <Avatar name={emp.name} />
-                                <div><div className="cell-main">{emp.name}</div><div className="cell-sub">{emp.role || '—'}</div></div>
-                              </div>
-                            </td>
-                            <td>{emp.department || '—'}</td>
-                            <td>{emp.employmentType || '—'}</td>
-                            <td><Badge color={getStatusColor(emp.status)}>{emp.status}</Badge></td>
-                            <td><SalaryCell st={salaryState(emp, curMonth)} /></td>
-                            <td>
-                              <div className="emp-row-actions" onClick={e => e.stopPropagation()}>
-                                {canPayNow(emp) && <button className="mac-btn mac-btn-secondary" onClick={() => openPay(emp)}>Pay</button>}
-                                <RowMenu items={rowMenu(emp)} label={`Actions for ${emp.name}`} />
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  <div className="list-cards only-mobile">
-                    {filtered.map(emp => (
-                      <div key={emp.id} className="list-card" role="button" tabIndex={0} onClick={() => setDetailId(emp.id)} onKeyDown={onKeyActivate(() => setDetailId(emp.id))}>
-                        <div className="emp-card-top">
-                          <div className="emp-person">
-                            <Avatar name={emp.name} />
-                            <div><div className="cell-main">{emp.name}</div><div className="cell-sub">{emp.role || '—'}</div></div>
-                          </div>
-                          <RowMenu items={rowMenu(emp)} label={`Actions for ${emp.name}`} />
-                        </div>
-                        <div className="emp-card-meta">
-                          <Badge color={getStatusColor(emp.status)}>{emp.status}</Badge>
-                          <span className="cell-sub">{[emp.department, emp.employmentType].filter(Boolean).join(' · ')}</span>
-                        </div>
-                        <div className="emp-card-foot">
-                          <SalaryCell st={salaryState(emp, curMonth)} />
-                          {canPayNow(emp) && <button className="mac-btn mac-btn-secondary" onClick={e => { e.stopPropagation(); openPay(emp); }}>Pay</button>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </>
+                <div className="emp-grid">
+                  {filtered.map(emp => (
+                    <EmployeeCard key={emp.id} emp={emp} month={curMonth} menu={rowMenu(emp)} projects={projectsOf(emp)}
+                      onOpen={() => setDetailId(emp.id)} onPay={canPayNow(emp) ? () => openPay(emp) : null} />
+                  ))}
+                </div>
               )}
             </>
           )}

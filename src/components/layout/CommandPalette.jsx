@@ -6,13 +6,12 @@ import { useNavigate } from 'react-router-dom';
 import * as Dialog from '@radix-ui/react-dialog';
 import {
   RiArrowDownLine, RiArrowUpLine, RiCornerDownLeftLine, RiLockPasswordLine, RiLogoutBoxRLine,
-  RiMoonLine, RiSearchLine, RiSideBarLine, RiSunLine, RiUserLine,
+  RiSearchLine, RiSideBarLine, RiUserLine,
 } from '@remixicon/react';
 import { useAuth } from '../../contexts/AuthContext';
 import { usePeople, roleLabel } from '../../lib/people';
 import { Avatar } from '../ui/Avatar';
 import { Kbd, modKey } from '../ui/Kbd';
-import { useTheme } from '../ui/theme';
 import { useNavSections, useShell } from './shell';
 
 // every word typed must appear somewhere; titles that start with the query come first
@@ -31,7 +30,6 @@ function PaletteBody({ onClose }) {
   const { people } = usePeople();
   const sections = useNavSections();
   const { collapsed, toggleCollapsed, openChangePassword } = useShell();
-  const { resolved, toggle: toggleTheme } = useTheme();
   const [query, setQuery] = useState('');
   const [sel, setSel] = useState(0);
   const listRef = useRef(null);
@@ -51,7 +49,6 @@ function PaletteBody({ onClose }) {
       };
     });
     const actions = [
-      { key: 'act:theme', title: resolved === 'dark' ? 'Switch to light theme' : 'Switch to dark theme', keywords: 'appearance mode dark light', icon: resolved === 'dark' ? RiSunLine : RiMoonLine, run: toggleTheme },
       { key: 'act:sidebar', title: collapsed ? 'Expand sidebar' : 'Collapse sidebar', keywords: 'menu navigation rail', icon: RiSideBarLine, hint: `${modKey()} B`, run: toggleCollapsed },
       { key: 'act:password', title: 'Change password', keywords: 'security', icon: RiLockPasswordLine, run: () => requestAnimationFrame(openChangePassword) },
       { key: 'act:signout', title: 'Sign out', keywords: 'log out logout', icon: RiLogoutBoxRLine, run: () => logout() },
@@ -69,7 +66,7 @@ function PaletteBody({ onClose }) {
       { title: 'People', items: pick(persons, words.length ? 8 : 5) },
       { title: 'Actions', items: pick(actions, 6) },
     ].filter(g => g.items.length);
-  }, [sections, people, mine, query, resolved, collapsed, navigate, toggleTheme, toggleCollapsed, openChangePassword, logout]);
+  }, [sections, people, mine, query, collapsed, navigate, toggleCollapsed, openChangePassword, logout]);
 
   const flat = useMemo(() => groups.flatMap(g => g.items), [groups]);
   const active = Math.min(sel, Math.max(0, flat.length - 1));

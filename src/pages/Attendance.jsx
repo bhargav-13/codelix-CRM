@@ -17,7 +17,11 @@ import {
   currentMonth, monthLabel, monthDates, weekdayOf, dayOfMonth, daySummary,
 } from '../lib/hr';
 import { MonthNav, Notice, TabBar } from '../components/hr/parts';
-import { AlertTriangle, CalendarOff, CheckCircle2, Edit2, Info, Plus, RefreshCw, ScanFace, Trash2, Users } from 'lucide-react';
+import HolidayCalendar from '../components/hr/HolidayCalendar';
+import CorrectionRequests from '../components/hr/CorrectionRequests';
+import PayableDays from '../components/hr/PayableDays';
+import { employeesDB } from '../lib/db';
+import { Wifi, WifiOff, AlertTriangle, CheckCircle2, Edit2, Info, LayoutGrid, LogIn, LogOut, ScanFace, Table2, Timer, Users } from 'lucide-react';
 import './HR.css';
 
 const STATUS_BADGE = { present: 'green', late: 'orange', half: 'purple', absent: 'red', leave: 'blue', holiday: 'gray', off: 'gray', none: 'gray', untracked: 'gray' };
@@ -81,22 +85,34 @@ const OFF_REASON = {
   ON_LEAVE: 'You are on approved leave today.',
 };
 
-function TodayCard({ today, now, policy, holidayName }) {
+function TodayCard({ today, now, policy, holidayName, net, punching, onPunch }) {
   const clock = new Date(now);
   const live = today.punchIn && !today.punchOut ? Math.max(+today.workedMinutes || 0, Math.floor((now - new Date(today.punchIn).getTime()) / 60000)) : +today.workedMinutes || 0;
   const halfBelow = (+policy?.halfDayBelowHours || 0) * 60;
   const reason = today.reason
     || (today.status === 'HOLIDAY' && holidayName ? `Today is a holiday (${holidayName}).` : OFF_REASON[today.status]) || '';
   const kind = today.punchIn && today.punchOut ? 'done' : today.punchIn ? 'in' : reason ? 'off' : 'waiting';
+  // Punching from the app: on when a partner has entered the office network, usable only on it.
+  // Flexible start: whoever comes in within the buffer is on time, and their day ends that much
+  // later. In at 10:30 with an 8-hour day means out at 6:30.
+  const fullMinutes = Math.round((+policy?.fullDayHours || 0) * 60);
+  const dayEnds = today.punchIn && fullMinutes > 0 ? new Date(new Date(today.punchIn).getTime() + fullMinutes * 60000) : null;
+  const leftEarly = kind === 'done' && fullMinutes > 0 && (+today.workedMinutes || 0) < fullMinutes;
+  const byApp = !!net?.enabled;
+  const sinceIn = today.punchIn ? Math.floor((now - new Date(today.punchIn).getTime()) / 60000) : 0;
+  const tooSoon = kind === 'in' && sinceIn >= 0 && sinceIn < 30;
+  // The server is on this same computer (a local test): it always sees "this computer", whatever WiFi it is on.
+  const localTest = /^(127\.|::1$|0:0:0:0:0:0:0:1$)/.test(net?.address || '');
   return (
     <section className="mac-card hr-today" aria-label="Today">
       <div>
         <div className="hr-clock" aria-label="Office time">{fmtClock(clock)}</div>
-        <div className="hr-clock-date">{fmtLongDate(clock)}{policy?.officeStart ? ` · Office hours ${fmtTime(policy.officeStart)} – ${fmtTime(policy.officeEnd)}` : ''}</div>
+        <div className="hr-clock-date">{fmtLongDate(clock)}{policy?.officeStart ? ` · Office hours ${fmtTime(policy.officeStart)} – ${fmtTime(policy.officeEnd)}${+policy.lateAfterMinutes > 0 ? `, come in up to ${policy.lateAfterMinutes} min later and leave that much later` : ''}` : ''}</div>
         <div className="hr-today-facts">
           <div className="hr-fact"><span>Status</span><span><StatusBadge status={today.status} /></span></div>
           <div className="hr-fact"><span>In</span><span>{fmtTime(today.punchIn)}</span></div>
           <div className="hr-fact"><span>Out</span><span>{fmtTime(today.punchOut)}</span></div>
+          {dayEnds && <div className="hr-fact"><span>{today.punchOut ? 'Full day was until' : 'Your day ends at'}</span><span>{fmtTime(dayEnds)}</span></div>}
           <div className="hr-fact"><span>{today.punchOut || !today.punchIn ? 'Worked' : 'Worked so far'}</span><span>{today.punchIn ? fmtMinutes(live) : '—'}</span></div>
         </div>
       </div>
@@ -107,20 +123,37 @@ function TodayCard({ today, now, policy, holidayName }) {
             {kind === 'done' ? 'Done for the day'
               : kind === 'in' ? `In since ${fmtTime(today.punchIn)}`
               : kind === 'off' ? 'No work today'
-              : 'Not scanned in yet'}
+              : byApp ? 'Not punched in yet' : 'Not scanned in yet'}
           </strong>
         </div>
+        {byApp && (
+          <>
+            <button type="button" className={`mac-btn ${kind === 'waiting' || kind === 'off' ? 'mac-btn-primary' : 'mac-btn-secondary'} hr-punch`} disabled={punching || !net.onOfficeNetwork || tooSoon} onClick={onPunch}>
+              {net.onOfficeNetwork ? <Wifi size={16} aria-hidden="true" /> : <WifiOff size={16} aria-hidden="true" />}
+              {punching ? 'Saving…' : kind === 'done' ? 'Punch out again' : kind === 'in' ? 'Punch out' : 'Punch in'}
+            </button>
+            <p className={`hr-net ${net.onOfficeNetwork ? 'is-on' : 'is-off'}`} role="status">
+              {localTest ? 'Local test site: the server runs on this computer, so the WiFi check cannot be tested here. It works on the live site.'
+                : net.onOfficeNetwork ? 'You are on the office network.'
+                : `You are not on the office network${net.address ? ` (your address is ${net.address})` : ''}. Connect to the office WiFi to punch.`}
+            </p>
+          </>
+        )}
         <p className="hr-note" style={{ textAlign: 'center' }}>
           {kind === 'done' ? `${fmtTime(today.punchIn)} – ${fmtTime(today.punchOut)} · ${fmtMinutes(today.workedMinutes)}`
-            : kind === 'in' ? 'Scan on the office device again when you leave — your last scan of the day is your out time.'
-            : kind === 'off' ? 'Nothing to scan today.'
+            : kind === 'in' ? (byApp ? (tooSoon ? `Punch out opens 30 minutes after punch in (${30 - sinceIn} min to go).` : 'Press Punch out when you leave. Your last punch of the day is your out time.')
+              : 'Scan on the office device again when you leave — your last scan of the day is your out time.')
+            : kind === 'off' ? (byApp ? 'No work is expected today.' : 'Nothing to scan today.')
+            : byApp ? 'Press Punch in when you reach the office. It works only on the office WiFi.'
             : 'Scan your face on the office device when you arrive. It shows up here within a minute or two.'}
         </p>
       </div>
-      {(reason || today.status === 'LATE' || today.status === 'HALF_DAY' || (kind === 'in' && halfBelow > 0 && live < halfBelow)) && (
+      {(reason || (kind === 'in' && dayEnds) || leftEarly || today.status === 'LATE' || today.status === 'HALF_DAY' || (kind === 'in' && halfBelow > 0 && live < halfBelow)) && (
         <div className="hr-today-notes">
           {reason && <Notice tone="info" icon={Info}>{reason}</Notice>}
-          {today.status === 'LATE' && <Notice>You are marked late today{policy?.officeStart ? ` — office starts at ${fmtTime(policy.officeStart)} and anything more than ${policy.lateAfterMinutes} minutes after that counts as late` : ''}.</Notice>}
+          {kind === 'in' && dayEnds && <Notice tone="info" icon={Info}>You came in at {fmtTime(today.punchIn)}, so a full day of {fmtNum(policy.fullDayHours)} hours ends at {fmtTime(dayEnds)}.</Notice>}
+          {leftEarly && today.status !== 'HALF_DAY' && <Notice>You worked {fmtMinutes(today.workedMinutes)}, which is {fmtMinutes(fullMinutes - today.workedMinutes)} short of a full day of {fmtNum(policy.fullDayHours)} hours.</Notice>}
+          {today.status === 'LATE' && <Notice>You are marked late today{policy?.officeStart ? `: office starts at ${fmtTime(policy.officeStart)}, you may come in up to ${policy.lateAfterMinutes} minutes after that, and later than that counts as late` : ''}.</Notice>}
           {today.status === 'HALF_DAY' && <Notice>Today counts as a half day{halfBelow > 0 && today.punchOut ? ` — fewer than ${fmtNum(policy.halfDayBelowHours)} hours were worked` : ''}.</Notice>}
           {kind === 'in' && today.status !== 'HALF_DAY' && halfBelow > 0 && live < halfBelow && (
             <Notice tone="info" icon={Info}>You have worked {fmtMinutes(live)} so far. Leaving before {fmtNum(policy.halfDayBelowHours)} hours counts as a half day.</Notice>
@@ -187,7 +220,15 @@ function MyAttendance() {
   const monthRef = useRef(month);
   useEffect(() => { monthRef.current = month; });
 
+  // Is punching from the app on, and am I at the office? Asked again whenever today is refreshed,
+  // because walking in or out of WiFi range changes the answer.
+  const [net, setNet] = useState(null);
+  const [punching, setPunching] = useState(false);
+  // my own monthly salary, only to show what the paid days are worth; the page works without it
+  const [salary, setSalary] = useState(0);
+  useEffect(() => { employeesDB.me().then(e => setSalary(e?.salaryType === 'Monthly' ? +e.salaryAmount || 0 : 0)).catch(() => {}); }, []);
   const loadToday = useCallback(async () => {
+    attendanceAPI.network().then(setNet).catch(() => {});
     try {
       const t = await attendanceAPI.today();
       const server = t?.serverTime ? new Date(t.serverTime).getTime() : NaN;
@@ -196,6 +237,20 @@ function MyAttendance() {
       setClock({ offset, now: Date.now() + offset });
     } catch (e) { console.error(e); setTodayError(e); }
   }, []);
+  async function punch() {
+    if (punching) return;
+    setPunching(true);
+    try {
+      const t = await attendanceAPI.punch();
+      setToday(t);
+      toast.success(t?.punchOut ? `Punched out at ${fmtTime(t.punchOut)}` : `Punched in at ${fmtTime(t?.punchIn)}`);
+      loadToday();
+    } catch (e) {
+      toast.error('Could not punch', e);
+      attendanceAPI.network().then(setNet).catch(() => {});
+    }
+    setPunching(false);
+  }
 
   const loadMonth = useCallback(async (m, { quiet = false } = {}) => {
     if (!quiet) { setMonthLoading(true); setMonthError(null); }
@@ -278,11 +333,11 @@ function MyAttendance() {
 
   return (
     <div>
-      <Header title="Attendance" subtitle="Your scans from the office device, and your month" />
+      <Header title="Attendance" subtitle="Your punches, your month and what you are paid for" />
       <div className="page-body">
         {todayError && !today ? <ErrorPanel title="Could not load today’s attendance" error={todayError} onRetry={loadToday} />
           : !today ? <SkeletonRows rows={3} />
-          : <TodayCard today={today} now={clock.now} policy={policy} holidayName={holidayNames.get(todayDate)} />}
+          : <TodayCard today={today} now={clock.now} policy={policy} holidayName={holidayNames.get(todayDate)} net={net} punching={punching} onPunch={punch} />}
 
         <section className="mac-card hr-card" aria-label="My month">
           <div className="hr-head-row">
@@ -317,6 +372,10 @@ function MyAttendance() {
               </>
             )}
         </section>
+
+        {!monthLoading && !monthError && data?.days?.length > 0 && (
+          <PayableDays month={month} days={data.days} summary={data.summary} today={todayDate} salary={salary} />
+        )}
 
         {requests.length > 0 && (
           <section className="mac-card hr-card" aria-label="My correction requests">
@@ -473,6 +532,77 @@ function TeamGrid({ month, rows, today, holidayNames, focusId, onPick }) {
   );
 }
 
+// One card per person: the day in focus (today, or the last day of an earlier month), the month's
+// totals and every day of the month as a small square. A square opens that day for correction.
+function TeamCards({ month, rows, today, holidayNames, focusId, onPick }) {
+  const dates = useMemo(() => monthDates(month), [month]);
+  const focusDate = month === today.slice(0, 7) ? today : dates[dates.length - 1];
+  const focusRef = useRef(null);
+  useEffect(() => { focusRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, [focusId, month]);
+  return (
+    <div className="att-cards">
+      {rows.map(row => {
+        const byDate = new Map((row.days || []).map(d => [d.date, d]));
+        const sum = row.summary || {};
+        const day = byDate.get(focusDate);
+        const leave = (+sum.paidLeave || 0) + (+sum.unpaidLeave || 0);
+        const worked = +sum.present || 0;   // already counts late days in full and half days as half
+        const counted = worked + (+sum.absent || 0);
+        const rate = counted > 0 ? Math.round((worked / counted) * 100) : null;
+        const focused = focusId != null && String(row.employeeId) === String(focusId);
+        const stats = [['Present', sum.present, 'present'], ['Late', sum.late, 'late'], ['Half day', sum.halfDays, 'half'], ['Absent', sum.absent, 'absent'], ['Leave', leave, 'leave']];
+        return (
+          <article key={row.employeeId} ref={focused ? focusRef : undefined} className={`mac-card att-card ${focused ? 'is-focus' : ''}`}>
+            <header className="att-card-head">
+              <Avatar name={row.employeeName} size={40} />
+              <div className="att-card-title">
+                <h3>{row.employeeName}</h3>
+                <p>{focusDate === today ? 'Today' : fmtDate(focusDate)}{+sum.notTracked > 0 ? ` · ${fmtNum(sum.notTracked)} days not tracked` : ''}</p>
+              </div>
+              {day ? <StatusBadge status={day.status} /> : <Badge color="gray">No record</Badge>}
+            </header>
+
+            <dl className="att-card-day">
+              <div><dt><LogIn size={13} aria-hidden="true" /> In</dt><dd>{day?.punchIn ? fmtTime(day.punchIn) : '—'}</dd></div>
+              <div><dt><LogOut size={13} aria-hidden="true" /> Out</dt><dd>{day?.punchOut ? fmtTime(day.punchOut) : day?.punchIn ? 'Not yet' : '—'}</dd></div>
+              <div><dt><Timer size={13} aria-hidden="true" /> Worked</dt><dd>{day?.workedMinutes ? fmtMinutes(day.workedMinutes) : '—'}</dd></div>
+            </dl>
+
+            <div className="att-card-stats">
+              {stats.map(([label, value, tone]) => (
+                <div key={label}><span className={`hr-dot ${tone}`} aria-hidden="true" /><strong>{fmtNum(value)}</strong><span>{label}</span></div>
+              ))}
+            </div>
+
+            <div className="att-card-rate">
+              <div className="att-card-rate-top">
+                <span>{monthLabel(month)}: {rate == null ? 'no working day counted yet' : `at work ${rate}% of counted days`}</span>
+                <strong>{fmtMinutes(sum.workedMinutes)}</strong>
+              </div>
+              <div className="att-bar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={rate ?? 0} aria-label="Share of counted days at work"><span style={{ width: `${rate ?? 0}%` }} /></div>
+              <div className="att-card-rate-foot"><span>Payable days</span><strong>{sum.payableDays != null ? fmtNum(sum.payableDays) : '—'}</strong></div>
+            </div>
+
+            <div className="att-strip" role="group" aria-label={`${row.employeeName}, each day of ${monthLabel(month)}`}>
+              {dates.map(date => {
+                const d = byDate.get(date);
+                if (!d) return <span key={date} className="att-strip-gap" />;
+                const m = statusMeta(d.status);
+                const tip = cellTip(row, d, holidayNames.get(date));
+                return (
+                  <Tooltip key={date} content={tip} delay={150}>
+                    <button type="button" className={`hr-cell att-strip-cell hr-s-${m.tone} ${d.corrected ? 'is-corrected' : ''} ${date === today ? 'is-today' : ''}`} aria-label={tip} onClick={() => onPick(row, d)}>{dayOfMonth(date)}</button>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function TeamTab({ focusId }) {
   const toast = useToast();
   const [today] = useState(todayIST);
@@ -488,6 +618,7 @@ function TeamTab({ focusId }) {
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [layout, setLayout] = useState('cards');   // 'cards' | 'grid'
   const monthRef = useRef(month);
   useEffect(() => { monthRef.current = month; });
 
@@ -560,12 +691,17 @@ function TeamTab({ focusId }) {
 
       <div className="hr-head-row">
         <MonthNav month={month} onChange={setMonth} max={today.slice(0, 7)} />
+        <div className="att-layout" role="group" aria-label="How to show the team">
+          <button type="button" className={layout === 'cards' ? 'active' : ''} aria-pressed={layout === 'cards'} onClick={() => setLayout('cards')}><LayoutGrid size={15} /> Cards</button>
+          <button type="button" className={layout === 'grid' ? 'active' : ''} aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')}><Table2 size={15} /> Month table</button>
+        </div>
         <Legend />
       </div>
 
       {loading ? <SkeletonRows rows={6} />
         : loadError ? <ErrorPanel title="Could not load attendance" error={loadError} onRetry={() => load(month)} />
         : rows.length === 0 ? <EmptyPanel icon={Users} title="No active employees" text="Attendance appears here once there are active employees." />
+        : layout === 'cards' ? <TeamCards month={month} rows={rows} today={today} holidayNames={holidayNames} focusId={focusId} onPick={openDay} />
         : <TeamGrid month={month} rows={rows} today={today} holidayNames={holidayNames} focusId={focusId} onPick={openDay} />}
 
       <Drawer isOpen={!!edit} onClose={() => { if (!confirmRemove) closeEdit(); }} width={480}
@@ -617,129 +753,6 @@ function TeamTab({ focusId }) {
 }
 
 // ═════════════════════════════════════════════════════════════════
-// Partner: holidays
-// ═════════════════════════════════════════════════════════════════
-function HolidaysTab() {
-  const toast = useToast();
-  const [year, setYear] = useState(() => +todayIST().slice(0, 4));
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
-  const [form, setForm] = useState(null);     // { id, date, name, version }
-  const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [deleteId, setDeleteId] = useState(null);
-  const yearRef = useRef(year);
-  useEffect(() => { yearRef.current = year; });
-
-  const load = useCallback(async y => {
-    setLoading(true); setLoadError(null);
-    try {
-      const data = await holidaysAPI.list(y);
-      if (yearRef.current !== y) return;
-      setItems([...data].sort((a, b) => String(a.date).localeCompare(String(b.date))));
-    } catch (e) { console.error(e); if (yearRef.current === y) setLoadError(e); }
-    if (yearRef.current === y) setLoading(false);
-  }, []);
-  useEffect(() => { load(year); }, [year, load]);
-
-  const openAdd = () => { setForm({ id: null, date: `${year}-01-01`, name: '' }); setErrors({}); };
-  const openEdit = h => { setForm({ id: h.id, date: h.date, name: h.name || '', version: h.version }); setErrors({}); };
-  const setField = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(er => (er[k] ? { ...er, [k]: undefined } : er)); };
-
-  async function save() {
-    if (saving || !form) return;
-    const er = {};
-    if (!form.date) er.date = 'Pick the date';
-    else if (items.some(h => h.date === form.date && h.id !== form.id)) er.date = 'There is already a holiday on this date';
-    if (!form.name.trim()) er.name = 'Give the holiday a name';
-    setErrors(er);
-    if (Object.keys(er).length) return;
-    setSaving(true);
-    try {
-      if (form.id) await holidaysAPI.update(form.id, { date: form.date, name: form.name.trim(), version: form.version });
-      else await holidaysAPI.create({ date: form.date, name: form.name.trim() });
-      toast.success(form.id ? 'Holiday updated' : `${form.name.trim()} added`);
-      setForm(null);
-      const y = +form.date.slice(0, 4);
-      if (y !== yearRef.current) setYear(y); else load(y);
-    } catch (e) { toast.error(form.id ? 'Could not save the holiday' : 'Could not add the holiday', e); }
-    setSaving(false);
-  }
-
-  async function remove(id) {
-    const h = items.find(x => x.id === id);
-    try {
-      await holidaysAPI.remove(id);
-      setItems(xs => xs.filter(x => x.id !== id));
-      toast.success(`${h?.name || 'Holiday'} deleted`);
-    } catch (e) { toast.error('Could not delete the holiday', e); }
-  }
-
-  const menu = h => [
-    { label: 'Edit', icon: Edit2, onClick: () => openEdit(h) },
-    { label: 'Delete', icon: Trash2, danger: true, onClick: () => setDeleteId(h.id) },
-  ];
-  return (
-    <>
-      <div className="hr-head-row">
-        <div className="hr-month" role="group" aria-label="Year">
-          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setYear(y => y - 1)}>{year - 1}</button>
-          <span className="hr-month-label" style={{ minWidth: 64 }} aria-live="polite">{year}</span>
-          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setYear(y => y + 1)}>{year + 1}</button>
-        </div>
-        <button type="button" className="mac-btn mac-btn-primary" onClick={openAdd}><Plus size={15} /> Add holiday</button>
-      </div>
-
-      {loading ? <SkeletonRows rows={5} />
-        : loadError ? <ErrorPanel title="Could not load holidays" error={loadError} onRetry={() => load(year)} />
-        : items.length === 0 ? (
-          <EmptyPanel icon={CalendarOff} title={`No holidays for ${year} yet`} text="Holidays are not counted as working days: nobody is marked absent and leave does not use them up."
-            action={<button type="button" className="mac-btn mac-btn-primary" onClick={openAdd}><Plus size={15} /> Add holiday</button>} />
-        ) : (
-          <div className="mac-card table-wrap">
-            <table className="data-table">
-              <thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th aria-label="Actions" /></tr></thead>
-              <tbody>
-                {items.map(h => (
-                  <tr key={h.id}>
-                    <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(h.date)}</td>
-                    <td className="cell-sub">{WEEKDAY_LABEL[weekdayOf(h.date)]}</td>
-                    <td className="cell-main">{h.name}</td>
-                    <td><div style={{ display: 'flex', justifyContent: 'flex-end' }}><RowMenu items={menu(h)} label={`Actions for ${h.name}`} /></div></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-      <Modal isOpen={!!form} onClose={() => { if (!saving) setForm(null); }} title={form?.id ? 'Edit holiday' : 'Add holiday'} size="sm"
-        footer={<>
-          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setForm(null)} disabled={saving}>Cancel</button>
-          <button type="submit" form="holiday-form" className="mac-btn mac-btn-primary" disabled={saving}>{saving ? 'Saving…' : form?.id ? 'Save changes' : 'Add holiday'}</button>
-        </>}>
-        {form && (
-          <form id="holiday-form" onSubmit={e => { e.preventDefault(); save(); }} noValidate>
-            <FormGrid cols={1}>
-              <Field label="Date" required error={errors.date}>
-                <input className="mac-input" type="date" value={form.date} onChange={e => setField('date', e.target.value)} />
-              </Field>
-              <Field label="Name" required error={errors.name}>
-                <input className="mac-input" value={form.name} onChange={e => setField('name', e.target.value)} placeholder="e.g. Diwali" />
-              </Field>
-            </FormGrid>
-          </form>
-        )}
-      </Modal>
-
-      <ConfirmDialog isOpen={!!deleteId} onClose={() => setDeleteId(null)} onConfirm={() => { remove(deleteId); }}
-        title="Delete holiday" message="The day becomes a normal working day again, and attendance for it is worked out afresh." />
-    </>
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════
 // Partner: rules (the one policy everyone follows)
 // ═════════════════════════════════════════════════════════════════
 const toDraft = p => ({
@@ -748,10 +761,17 @@ const toDraft = p => ({
   lateAfterMinutes: String(p?.lateAfterMinutes ?? ''), halfDayBelowHours: String(p?.halfDayBelowHours ?? ''), fullDayHours: String(p?.fullDayHours ?? ''),
   paidLeavePerYear: String(p?.paidLeavePerYear ?? ''), leaveYearStartMonth: String(p?.leaveYearStartMonth ?? 4),
   attendanceStartDate: String(p?.attendanceStartDate ?? '').slice(0, 10),
+  officeNetworks: (p?.officeNetworks || []).join('\n'),
 });
+
+// one address or block per line (commas and spaces work too)
+const networkList = text => String(text || '').split(/[\s,]+/).filter(Boolean);
+const NETWORK_ENTRY = /^(\d{1,3}(\.\d{1,3}){3}|[0-9a-fA-F:.]*:[0-9a-fA-F:.]*)(\/\d{1,3})?$/;
 
 function RulesTab() {
   const toast = useToast();
+  const [here, setHere] = useState(null);   // { enabled, onOfficeNetwork, address } for this computer
+  useEffect(() => { attendanceAPI.network().then(setHere).catch(() => {}); }, []);
   const [policy, setPolicy] = useState(null);
   const [draft, setDraft] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -786,6 +806,8 @@ function RulesTab() {
     if (draft.paidLeavePerYear === '' || !(n('paidLeavePerYear') >= 0)) er.paidLeavePerYear = 'Enter 0 or more days';
     if (draft.attendanceStartDate && !/^\d{4}-\d{2}-\d{2}$/.test(draft.attendanceStartDate)) er.attendanceStartDate = 'Pick a date';
     else if (!draft.attendanceStartDate && policy.attendanceStartDate) er.attendanceStartDate = 'Pick the day your team started using the device';
+    const bad = networkList(draft.officeNetworks).find(x => !NETWORK_ENTRY.test(x));
+    if (bad) er.officeNetworks = `“${bad}” is not an internet address. It looks like 203.0.113.25`;
     setErrors(er);
     if (Object.keys(er).length) { toast.error('Some rules need fixing before they can be saved'); return; }
     setSaving(true);
@@ -796,6 +818,7 @@ function RulesTab() {
         lateAfterMinutes: n('lateAfterMinutes'), halfDayBelowHours: n('halfDayBelowHours'), fullDayHours: n('fullDayHours'),
         paidLeavePerYear: n('paidLeavePerYear'), leaveYearStartMonth: n('leaveYearStartMonth'),
         attendanceStartDate: draft.attendanceStartDate || null,
+        officeNetworks: networkList(draft.officeNetworks),
         version: policy.version,
       });
       const next = saved && typeof saved === 'object' ? saved : await policyAPI.get();
@@ -805,10 +828,24 @@ function RulesTab() {
     setSaving(false);
   }
 
+  // in the saved list (the server compares addresses properly) or just typed into the box
+  const hereListed = !!here?.address && (networkList(draft?.officeNetworks).includes(here.address)
+    || (here.onOfficeNetwork && draft?.officeNetworks === toDraft(policy).officeNetworks));
   if (loading) return <SkeletonRows rows={6} />;
   if (loadError || !draft) return <ErrorPanel title="Could not load the rules" error={loadError} onRetry={load} />;
   return (
     <form className="hr-rules" onSubmit={e => { e.preventDefault(); save(); }} noValidate>
+      <div className="rule-now" aria-label="The rules in force now">
+        {[
+          ['Working days', WEEKDAYS.filter(d => policy.workingDays?.includes(d)).map(d => WEEKDAY_LABEL[d]).join(' ') || 'None', `${7 - (policy.workingDays?.length || 0)} weekly off${7 - (policy.workingDays?.length || 0) === 1 ? '' : 's'}`],
+          ['Office hours', `${fmtTime(policy.officeStart)} – ${fmtTime(policy.officeEnd)}`, +policy.lateAfterMinutes > 0 ? `Flexible start: up to ${policy.lateAfterMinutes} min later` : 'No flexible start'],
+          ['Full day', `${fmtNum(policy.fullDayHours)} hours`, `Half day below ${fmtNum(policy.halfDayBelowHours)} hours`],
+          ['Paid leave', `${fmtNum(policy.paidLeavePerYear)} days a year`, `Year starts in ${MONTH_NAMES[(+policy.leaveYearStartMonth || 4) - 1]}`],
+          ['Punching from the app', (policy.officeNetworks || []).length ? 'On' : 'Off', (policy.officeNetworks || []).length ? `${policy.officeNetworks.length} office address${policy.officeNetworks.length === 1 ? '' : 'es'}` : 'No office address entered'],
+        ].map(([label, value, sub]) => (
+          <div key={label} className="mac-card rule-now-card"><span>{label}</span><strong>{value}</strong><em>{sub}</em></div>
+        ))}
+      </div>
       <section className="mac-card hr-card">
         <div>
           <h2 className="section-title">Working week and office hours</h2>
@@ -848,6 +885,25 @@ function RulesTab() {
       </section>
 
       <section className="mac-card hr-card">
+        <div>
+          <h2 className="section-title">Punching from the office WiFi</h2>
+          <p className="hr-note">Employees punch in and out from this app, and it works only from your office internet connection. Enter the office's public internet address below (the static IP from your internet provider), one per line. Leave it empty to switch this off.</p>
+        </div>
+        <Field label="Office internet address" error={errors.officeNetworks} hint="A single address like 203.0.113.25, or a block like 203.0.113.0/24.">
+          <textarea className="mac-input" rows={3} value={draft.officeNetworks} onChange={e => set('officeNetworks', e.target.value)} placeholder="203.0.113.25" spellCheck={false} style={{ fontFamily: 'ui-monospace, Consolas, monospace' }} />
+        </Field>
+        {here?.address && (
+          <div className="hr-here">
+            <span>This computer reaches the server from <strong>{here.address}</strong>. {/^(127\.|::1$|0:0:0:0:0:0:0:1$)/.test(here.address) ? 'That is this computer itself (a local test site), so it says nothing about the office WiFi. On the live site this shows your real internet address.' : hereListed ? 'It is in the list.' : 'If you are at the office now, this is the address to add.'}</span>
+            {!hereListed && (
+              <button type="button" className="mac-btn mac-btn-secondary" onClick={() => set('officeNetworks', [...networkList(draft.officeNetworks), here.address].join('\n'))}>Add this address</button>
+            )}
+          </div>
+        )}
+        <p className="hr-note">The device and partner corrections keep working alongside this. A punch out counts once it is at least 30 minutes after the punch in, and the time is always the server's, not the phone's.</p>
+      </section>
+
+      <section className="mac-card hr-card">
         <h2 className="section-title">Leave</h2>
         <FormGrid>
           <Field label="Paid leave per year (days)" error={errors.paidLeavePerYear} hint="Someone who joins part-way through the year gets a proportionate share">
@@ -873,188 +929,6 @@ function RulesTab() {
   );
 }
 
-// ═════════════════════════════════════════════════════════════════
-// Partner: the office Biomax device and its agent
-// ═════════════════════════════════════════════════════════════════
-const STALE_MINUTES = 10;
-const fmtWhen = v => (v ? `${fmtDate(String(v).slice(0, 10))}, ${fmtTime(v)}` : '—');
-const minutesAgo = (v, now) => (v ? Math.floor((now - new Date(v).getTime()) / 60000) : null);
-const ago = m => (m == null ? 'never' : m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.floor(m / 60)} h ago` : `${Math.floor(m / 1440)} days ago`);
-
-function DeviceTab() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [now, setNow] = useState(0);
-  const load = useCallback(async () => {
-    setLoading(true); setError(null);
-    try { setData(await attendanceAPI.deviceSync()); setNow(Date.now()); } catch (e) { console.error(e); setError(e); }
-    setLoading(false);
-  }, []);
-  useEffect(() => { load(); }, [load]);
-
-  if (loading && !data) return <SkeletonRows rows={4} />;
-  if (error && !data) return <ErrorPanel title="Could not load the device status" error={error} onRetry={load} />;
-  const devices = data?.devices || [];
-  const unmatched = [...(data?.unmatched || [])].sort((a, b) => String(a.deviceUserId).localeCompare(String(b.deviceUserId), undefined, { numeric: true }));
-  return (
-    <>
-      <section className="mac-card hr-card">
-        <div className="hr-head-row">
-          <div>
-            <h2 className="section-title">Office device</h2>
-            <p className="hr-note">Attendance comes from the Biomax device. A small program on the office PC sends new scans here every minute while that PC is on the office Wi-Fi.</p>
-          </div>
-          <button type="button" className="mac-btn mac-btn-secondary" onClick={load} disabled={loading}><RefreshCw size={15} aria-hidden="true" /> Refresh</button>
-        </div>
-        {!data?.configured && <Notice tone="bad" icon={AlertTriangle}>Device sync is switched off on the server. Set DEVICE_SYNC_KEY on the server and the same key in the office agent’s config.json.</Notice>}
-        {devices.length === 0
-          ? <EmptyPanel icon={ScanFace} title="The office agent has not checked in yet" text="Install it on the office PC — see office-agent/README.md in the backend." />
-          : (
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead><tr><th>Device</th><th>Office PC</th><th>Last check-in</th><th>Newest scan</th></tr></thead>
-                <tbody>
-                  {devices.map(d => {
-                    const m = minutesAgo(d.lastSeenAt, now);
-                    const stale = m == null || m > STALE_MINUTES;
-                    return (
-                      <tr key={d.deviceKey}>
-                        <td className="hr-mono">{d.deviceKey}</td>
-                        <td>{d.agentHost || '—'}</td>
-                        <td><Badge color={stale ? 'orange' : 'green'}>{ago(m)}</Badge></td>
-                        <td>{fmtWhen(d.lastPunchAt)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        {devices.some(d => (minutesAgo(d.lastSeenAt, now) ?? Infinity) > STALE_MINUTES) && (
-          <Notice>The office PC has not checked in for a while. That is normal outside office hours or when it is away from the office Wi-Fi; scans made meanwhile are kept on the device and sent when it is back.</Notice>
-        )}
-      </section>
-
-      <section className="mac-card hr-card">
-        <div>
-          <h2 className="section-title">Scans not linked to anyone</h2>
-          <p className="hr-note">These people are enrolled on the device but no employee has their number. Open Employees, edit the person and enter it as <strong>Device user ID</strong> — their past scans are counted straight away.</p>
-        </div>
-        {unmatched.length === 0
-          ? <p className="hr-note"><CheckCircle2 size={14} aria-hidden="true" style={{ verticalAlign: '-2px' }} /> Every scan belongs to an employee.</p>
-          : (
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead><tr><th>Device user ID</th><th>Scans</th><th>First scan</th><th>Last scan</th></tr></thead>
-                <tbody>
-                  {unmatched.map(u => (
-                    <tr key={u.deviceUserId}>
-                      <td className="hr-mono">{u.deviceUserId}</td>
-                      <td>{u.scans}</td>
-                      <td>{fmtWhen(u.firstScanAt)}</td>
-                      <td>{fmtWhen(u.lastScanAt)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-      </section>
-    </>
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════
-// Partner: correction requests from employees
-// ═════════════════════════════════════════════════════════════════
-function RequestsTab({ onCount }) {
-  const toast = useToast();
-  const [items, setItems] = useState(null);
-  const [error, setError] = useState(null);
-  const [showAll, setShowAll] = useState(false);
-  const [decide, setDecide] = useState(null);       // { req, kind: 'approve' | 'reject', note }
-  const [busy, setBusy] = useState(false);
-  const load = useCallback(async () => {
-    setError(null);
-    try { const list = await correctionsAPI.list(); setItems(list); onCount?.(list.filter(r => r.status === 'PENDING').length); }
-    catch (e) { console.error(e); setError(e); }
-  }, [onCount]);
-  useEffect(() => { load(); }, [load]);
-
-  async function submit() {
-    if (!decide || busy) return;
-    if (decide.kind === 'reject' && !decide.note.trim()) { toast.error('Say why it is rejected'); return; }
-    setBusy(true);
-    try {
-      if (decide.kind === 'approve') await correctionsAPI.approve(decide.req.id, decide.note.trim());
-      else await correctionsAPI.reject(decide.req.id, decide.note.trim());
-      toast.success(decide.kind === 'approve' ? 'Approved — the day is corrected' : 'Rejected — they have been told why');
-      setDecide(null);
-      load();
-    } catch (e) { toast.error('Could not save the decision', e); }
-    setBusy(false);
-  }
-
-  if (error && !items) return <ErrorPanel title="Could not load the requests" error={error} onRetry={load} />;
-  if (!items) return <SkeletonRows rows={4} />;
-  const open = items.filter(r => r.status === 'PENDING');
-  const shown = showAll ? items : open;
-  return (
-    <>
-      <div className="hr-head-row">
-        <p className="hr-note" style={{ margin: 0 }}>Employees ask here when the device missed a scan. Approving writes a correction for that day; the device's own scans stay underneath.</p>
-        <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setShowAll(v => !v)}>{showAll ? 'Show open only' : 'Show history'}</button>
-      </div>
-      {shown.length === 0
-        ? <EmptyPanel icon={CheckCircle2} title={showAll ? 'No requests yet' : 'Nothing waiting'} text="Correction requests from employees appear here." />
-        : (
-          <div className="att-req-list">
-            {shown.map(r => (
-              <section key={r.id} className="mac-card hr-card att-req-card">
-                <div className="hr-head-row">
-                  <div>
-                    <h3 className="section-title" style={{ margin: 0 }}>{r.employeeName}</h3>
-                    <span className="faint">{fmtDayLong(r.date)}</span>
-                  </div>
-                  <ReqBadge status={r.status} />
-                </div>
-                <dl className="kv">
-                  <dt>Recorded now</dt><dd>{r.recordedIn ? `${fmtTime(r.recordedIn)} – ${fmtTime(r.recordedOut)}` : 'Nothing recorded'}</dd>
-                  <dt>Asked for</dt><dd>{reqTimes(r)}</dd>
-                  <dt>Reason</dt><dd>{r.reason}</dd>
-                  {r.decisionNote && <><dt>Decision</dt><dd>{r.decisionNote}{r.decidedBy ? ` — ${r.decidedBy}` : ''}</dd></>}
-                </dl>
-                {r.status === 'PENDING' && (
-                  <div className="att-req-actions">
-                    <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setDecide({ req: r, kind: 'reject', note: '' })}>Reject</button>
-                    <button type="button" className="mac-btn mac-btn-primary" onClick={() => setDecide({ req: r, kind: 'approve', note: '' })}>Approve</button>
-                  </div>
-                )}
-              </section>
-            ))}
-          </div>
-        )}
-
-      <Modal isOpen={!!decide} onClose={() => !busy && setDecide(null)}
-        title={decide?.kind === 'approve' ? 'Approve correction' : 'Reject correction'}
-        description={decide ? `${decide.req.employeeName} · ${fmtDayLong(decide.req.date)}` : ''}
-        footer={<>
-          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setDecide(null)} disabled={busy}>Cancel</button>
-          <button type="button" className={`mac-btn ${decide?.kind === 'reject' ? 'mac-btn-danger' : 'mac-btn-primary'}`} onClick={submit} disabled={busy}>
-            {busy ? 'Saving…' : decide?.kind === 'approve' ? 'Approve' : 'Reject'}
-          </button>
-        </>}>
-        {decide && (
-          <Field label={decide.kind === 'reject' ? 'Why (they will see this)' : 'Note (optional)'} required={decide.kind === 'reject'}>
-            <textarea className="mac-input" rows={3} value={decide.note} onChange={e => setDecide(d => ({ ...d, note: e.target.value }))} autoFocus />
-          </Field>
-        )}
-      </Modal>
-    </>
-  );
-}
-
 function TeamAttendance() {
   const [params] = useSearchParams();
   const focusId = params.get('employee');
@@ -1065,14 +939,13 @@ function TeamAttendance() {
   }, []);
   return (
     <div>
-      <Header title="Attendance" subtitle="Who is in, the month at a glance, holidays, rules and the office device" />
+      <Header title="Attendance" subtitle="Who is in, the month at a glance, requests, holidays and rules" />
       <div className="page-body">
-        <TabBar label="Attendance sections" value={tab} onChange={setTab} tabs={[['team', 'Team'], ['requests', pending ? `Requests (${pending})` : 'Requests'], ['holidays', 'Holidays'], ['rules', 'Rules'], ['device', 'Device']]} />
+        <TabBar label="Attendance sections" value={tab} onChange={setTab} tabs={[['team', 'Team'], ['requests', pending ? `Requests (${pending})` : 'Requests'], ['holidays', 'Holidays'], ['rules', 'Rules']]} />
         {tab === 'team' && <TeamTab focusId={focusId} />}
-        {tab === 'holidays' && <HolidaysTab />}
+        {tab === 'holidays' && <HolidayCalendar />}
         {tab === 'rules' && <RulesTab />}
-        {tab === 'device' && <DeviceTab />}
-        {tab === 'requests' && <RequestsTab onCount={setPending} />}
+        {tab === 'requests' && <CorrectionRequests onCount={setPending} />}
       </div>
     </div>
   );

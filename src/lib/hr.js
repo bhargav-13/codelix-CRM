@@ -27,6 +27,10 @@ export const holidaysAPI = {
 
 // ─── Attendance ──────────────────────────────────────────────────
 export const attendanceAPI = {
+  // Punching from the app, allowed only from the office's internet address (set in the rules).
+  // network → { enabled, onOfficeNetwork, address }; punch → the same shape as today()
+  network: () => http.get('/attendance/network'),
+  punch: () => http.post('/attendance/punch'),
   today: () => http.get('/attendance/today'),                 // own day record + reason (day off) + serverTime
   mine: month => http.get(`/attendance/me${query({ month })}`), // { month, days, summary }
   team: month => list(http.get(`/attendance${query({ month })}`)), // partner: [{ employeeId, employeeName, days, summary }]

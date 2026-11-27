@@ -5,6 +5,7 @@
 // this folder (Button, Dropdown, Drawer, Toast, Avatar … built on Radix with the
 // AlignUI tokens); the exports and props here are the stable API pages rely on.
 // Styles for the layout pieces live in src/index.css under "UX KIT".
+import { rupees } from '../../lib/money';
 import { useEffect, useId, useRef } from 'react';
 import { RiAlertLine, RiCloseLine, RiMoreLine, RiRefreshLine, RiSearchLine } from '@remixicon/react';
 import { Dropdown } from './Dropdown';
@@ -189,7 +190,8 @@ export function Avatar({ person, name = '', size = 32, src, ...rest }) {
 
 // Money and dates, one format everywhere (India)
 // whole rupees stay short; anything with paise shows both decimals
-export const fmtMoney = n => { const v = Number(n || 0); const whole = Math.abs(v - Math.round(v)) < 0.005; return '₹' + v.toLocaleString('en-IN', { minimumFractionDigits: whole ? 0 : 2, maximumFractionDigits: whole ? 0 : 2 }); };
+// ₹12,50,000 below one crore, ₹2.36 Cr. from one crore up (see lib/money.js)
+export const fmtMoney = n => { const v = Number(n || 0); return (v < 0 ? '-' : '') + rupees(v); };
 export const fmtDate = d => {
   if (!d) return '—';
   const x = new Date(String(d).length <= 10 ? `${d}T00:00:00` : d);

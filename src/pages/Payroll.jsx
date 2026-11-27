@@ -5,14 +5,13 @@ import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { useAuth } from '../contexts/AuthContext';
-import { employeesDB } from '../lib/db';
 import { NumInput } from '../lib/numInput';
 import { PAYMENT_METHODS } from '../data/mockData';
 import {
   useToast, Field, FormGrid, StatTiles, SkeletonRows, EmptyPanel, ErrorPanel, RowMenu, Avatar, fmtMoney, fmtDate, todayLocal,
 } from '../components/ui/kit';
 import {
-  payrollAPI, advancesAPI, openPayslipPdf, runMeta, RUN_STEPS, runTotals, lineDeductions,
+  payrollAPI, openPayslipPdf, runMeta, RUN_STEPS, runTotals, lineDeductions,
   monthLabel, currentMonth, lastCompletedMonth, fmtNum,
 } from '../lib/hr';
 import { Notice, TabBar } from '../components/hr/parts';
@@ -20,6 +19,8 @@ import {
   ArrowLeft, Banknote, Check, CheckCircle2, ChevronDown, Download, Eye, FileText, HandCoins, Info, Lock, Plus, Receipt,
   RefreshCw, Trash2, Undo2, Wallet,
 } from 'lucide-react';
+import Kpis from '../components/crm/Kpis';
+import codelixLogo from '../assets/codelix.svg';
 import './HR.css';
 
 // Same account names the Employees and Transactions pages use
@@ -33,11 +34,13 @@ const money = v => (v === '' || v == null ? 0 : +v || 0);
 // The payslip, readable on screen. `slip` is the payslip JSON: the line's
 // fields (flat, or under `line`) + companyName + policy snapshot.
 // ═════════════════════════════════════════════════════════════════
-function SlipRows({ rows, total, totalLabel }) {
+function SlipRows({ rows, total, totalLabel, tone }) {
   return (
-    <dl className="hr-slip-rows">
-      {rows.filter(([, v], i) => i === 0 || money(v) !== 0).map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{fmtMoney(v)}</dd></div>)}
-      <div className="sum"><dt>{totalLabel}</dt><dd>{fmtMoney(total)}</dd></div>
+    <dl className={`slip-rows ${tone || ''}`}>
+      {rows.filter(([, v], i) => i === 0 || money(v) !== 0).map(([k, v, hint]) => (
+        <div key={k}><dt>{k}{hint && <small>{hint}</small>}</dt><dd>{tone === 'is-minus' && money(v) > 0 ? '−' : ''}{fmtMoney(v)}</dd></div>
+      ))}
+      <div className="sum"><dt>{totalLabel}</dt><dd>{tone === 'is-minus' && total > 0 ? '−' : ''}{fmtMoney(total)}</dd></div>
     </dl>
   );
 }
@@ -46,33 +49,90 @@ export function PayslipView({ slip }) {
   const l = slip?.line || slip || {};
   const label = slip?.monthLabel || l.monthLabel || monthLabel(slip?.month || l.month);
   const paidAt = slip?.paidAt || l.paidAt;
-  const earnings = [['Monthly salary', l.gross ?? l.monthlySalary], ['Bonus', l.bonus]];
+  const salary = money(l.gross ?? l.monthlySalary);
+  const days = +l.daysInMonth || 0;
+  const perDay = days ? salary / days : 0;
+  const earnings = [['Monthly salary', salary, days ? `${fmtMoney(Math.round(perDay))} a day × ${fmtNum(days)} days` : ''], ['Bonus', l.bonus]];
   const deductions = [
-    [`Unpaid days (${fmtNum(l.unpaidDays)})`, l.unpaidDeduction], ['Advance recovery', l.advanceRecovery], ['Other deductions', l.otherDeduction],
+    ['Unpaid days', l.unpaidDeduction, +l.unpaidDays > 0 ? `${fmtNum(l.unpaidDays)} day${+l.unpaidDays === 1 ? '' : 's'} × ${fmtMoney(Math.round(perDay))}` : 'No unpaid day'],
+    ['Other deductions', l.otherDeduction],
   ];
-  const sum = rows => rows.reduce((s, [, v]) => s + money(v), 0);
+  const sum = rows => rows.reduce((t, [, v]) => t + money(v), 0);
+  const earned = sum(earnings), cut = sum(deductions);
+  const keep = earned > 0 ? Math.max(0, Math.min(100, ((earned - cut) / earned) * 100)) : 100;
+  const leave = (+l.paidLeave || 0) + (+l.unpaidLeave || 0);
+  const stats = [
+    ['Paid days', fmtNum(l.payableDays), `of ${fmtNum(days)}`, 'good'],
+    ['Unpaid days', fmtNum(l.unpaidDays), +l.unpaidDays > 0 ? 'not paid' : 'none', +l.unpaidDays > 0 ? 'bad' : ''],
+    ['Present', fmtNum(l.present), 'days', ''],
+    ['Half days', fmtNum(l.halfDays), 'half paid', ''],
+    ['Absent', fmtNum(l.absent), 'days', +l.absent > 0 ? 'bad' : ''],
+    ['Leave', fmtNum(leave), +l.unpaidLeave > 0 ? `${fmtNum(l.unpaidLeave)} unpaid` : 'all paid', ''],
+    ['Late', fmtNum(l.lateCount), +l.lateCount === 1 ? 'time' : 'times', +l.lateCount > 0 ? 'warn' : ''],
+  ];
+  if (+l.notTrackedDays > 0) stats.push(['Not tracked', fmtNum(l.notTrackedDays), 'paid', '']);
   return (
-    <div className="hr-slip">
-      <div className="hr-slip-head">
-        <div>
-          <div className="hr-slip-co">{slip?.companyName || 'Codelix'}</div>
-          <div className="hr-note">Payslip for {label}</div>
+    <div className="slip">
+      <header className="slip-head">
+        <div className="slip-brand">
+          <img src={codelixLogo} alt="" width="30" height="42" />
+          <div>
+            <div className="slip-co">{slip?.companyName || 'Codelix IT Solutions'}</div>
+            <div className="slip-kind">codelixitsolutions.com</div>
+          </div>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div className="cell-main">{l.employeeName || '—'}</div>
-          <div className="cell-sub">{[l.empId, paidAt ? `Paid ${fmtDate(String(paidAt).slice(0, 10))}` : null].filter(Boolean).join(' · ') || '—'}</div>
+        <div className="slip-who">
+          <strong className="slip-doc">PAYSLIP</strong>
+          <span>{label}</span>
+          <span>No. {[l.empId || 'EMP', slip?.month || l.month].filter(Boolean).join('/')}</span>
         </div>
-      </div>
-      <div className="hr-slip-cols">
-        <section><h3 className="form-section-title" style={{ marginBottom: 10 }}>Earnings</h3><SlipRows rows={earnings} total={sum(earnings)} totalLabel="Total earnings" /></section>
-        <section><h3 className="form-section-title" style={{ marginBottom: 10 }}>Deductions</h3><SlipRows rows={deductions} total={sum(deductions)} totalLabel="Total deductions" /></section>
-      </div>
-      <div className="hr-slip-net"><span>Net pay</span><b>{fmtMoney(l.net)}</b></div>
-      <section>
-        <h3 className="form-section-title" style={{ marginBottom: 10 }}>Attendance</h3>
-        <AttendanceBreakdown line={l} />
+      </header>
+
+      <section className="slip-box">
+        <h3>Employee</h3>
+        <dl className="slip-facts">
+          <div><dt>Name</dt><dd>{l.employeeName || '—'}</dd></div>
+          <div><dt>Employee ID</dt><dd>{l.empId || '—'}</dd></div>
+          <div><dt>Designation</dt><dd>{slip?.designation || '—'}</dd></div>
+          <div><dt>Department</dt><dd>{slip?.department || '—'}</dd></div>
+          <div><dt>Date of joining</dt><dd>{slip?.joiningDate ? fmtDate(slip.joiningDate) : '—'}</dd></div>
+          <div><dt>Pay period</dt><dd>{label}</dd></div>
+          <div><dt>Email</dt><dd>{slip?.employeeEmail || '—'}</dd></div>
+          <div><dt>Mobile</dt><dd>{slip?.employeeMobile || '—'}</dd></div>
+          <div><dt>Status</dt><dd><Badge color={paidAt ? 'green' : 'orange'}>{paidAt ? 'Paid' : 'Approved, not yet paid'}</Badge></dd></div>
+          <div><dt>Paid on</dt><dd>{paidAt ? fmtDate(String(paidAt).slice(0, 10)) : '—'}</dd></div>
+          <div className="wide"><dt>Paid to</dt><dd>{slip?.bankDetails || (slip?.upiId ? `UPI ${slip.upiId}` : '—')}</dd></div>
+        </dl>
       </section>
-      {l.note && <p className="hr-note">Note: {l.note}</p>}
+
+      <section className="slip-net">
+        <div>
+          <span>Net pay</span>
+          <b>{fmtMoney(l.net)}</b>
+          <em>{fmtMoney(earned)} earned{cut > 0 ? ` − ${fmtMoney(cut)} deducted` : ', nothing deducted'}</em>
+          {slip?.netInWords && <em className="slip-words">{slip.netInWords}</em>}
+        </div>
+        <div className="slip-net-bar" role="img" aria-label={`${Math.round(keep)}% of earnings paid out`}>
+          <span style={{ width: `${keep}%` }} />
+        </div>
+        <div className="slip-net-key"><span><i className="keep" /> Paid out {Math.round(keep)}%</span>{cut > 0 && <span><i className="cut" /> Deducted {Math.round(100 - keep)}%</span>}</div>
+      </section>
+
+      <div className="slip-cols">
+        <section className="slip-box"><h3>Earnings</h3><SlipRows rows={earnings} total={earned} totalLabel="Total earnings" /></section>
+        <section className="slip-box"><h3>Deductions</h3><SlipRows rows={deductions} total={cut} totalLabel="Total deductions" tone="is-minus" /></section>
+      </div>
+
+      <section className="slip-box">
+        <h3>Attendance this month</h3>
+        <div className="slip-stats">
+          {stats.map(([name, value, sub, tone]) => <div key={name} className={tone ? `is-${tone}` : ''}><strong>{value}</strong><span>{name}</span><em>{sub}</em></div>)}
+        </div>
+        {days > 0 && salary > 0 && (
+          <p className="slip-math">{fmtMoney(salary)} ÷ {fmtNum(days)} days × {fmtNum(l.payableDays)} paid days = <b>{fmtMoney(salary - money(l.unpaidDeduction))}</b>{money(l.bonus) > 0 ? ` + ${fmtMoney(l.bonus)} bonus` : ''}{money(l.otherDeduction) > 0 ? ` − ${fmtMoney(l.otherDeduction)} other deductions` : ''}</p>
+        )}
+      </section>
+      {l.note && <p className="slip-note"><strong>Note:</strong> {l.note}</p>}
     </div>
   );
 }
@@ -97,42 +157,6 @@ function AttendanceBreakdown({ line: l }) {
 // ═════════════════════════════════════════════════════════════════
 // Employee: my payslips
 // ═════════════════════════════════════════════════════════════════
-// The employee's own salary advances: what was given, what has been recovered, what is left.
-function MyAdvances() {
-  const [items, setItems] = useState(null);
-  useEffect(() => {
-    let live = true;
-    advancesAPI.mine().then(a => { if (live) setItems(a); }).catch(e => { console.error(e); if (live) setItems([]); });
-    return () => { live = false; };
-  }, []);
-  if (!items || items.length === 0) return null;
-  const left = items.reduce((sum, a) => sum + (+a.outstanding || 0), 0);
-  return (
-    <section className="mac-card hr-card" aria-label="My salary advances">
-      <div className="hr-head-row">
-        <h2 className="section-title">My salary advances</h2>
-        <span className="faint">{left > 0 ? `${fmtMoney(left)} still to be recovered` : 'All recovered'}</span>
-      </div>
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead><tr><th>Given on</th><th className="num">Amount</th><th className="num">Recovered per month</th><th className="num">Recovered</th><th className="num">Left</th></tr></thead>
-          <tbody>
-            {items.map(a => (
-              <tr key={a.id}>
-                <td>{fmtDate(a.date)}</td>
-                <td className="num">{fmtMoney(a.amount)}</td>
-                <td className="num">{+a.recoverPerMonth > 0 ? fmtMoney(a.recoverPerMonth) : '—'}</td>
-                <td className="num">{fmtMoney(a.recovered)}</td>
-                <td className="num"><span className="cell-main">{fmtMoney(a.outstanding)}</span></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="hr-note" style={{ margin: 0 }}>The monthly recovery is taken from your salary in each payroll until nothing is left.</p>
-    </section>
-  );
-}
 
 function MyPayslips() {
   const toast = useToast();
@@ -181,46 +205,49 @@ function MyPayslips() {
           : slips.length === 0 ? <EmptyPanel icon={Receipt} title="No payslips yet" text="A payslip appears here each month once your salary has been paid." />
           : (
             <>
-              <div className="mac-card table-wrap only-desktop">
-                <table className="data-table">
-                  <thead><tr><th>Month</th><th>Paid on</th><th className="num">Net pay</th><th aria-label="Actions" /></tr></thead>
-                  <tbody>
-                    {slips.map(s => (
-                      <tr key={s.runId}>
-                        <td className="cell-main">{labelOf(s)}</td>
-                        <td>{s.paidAt ? fmtDate(String(s.paidAt).slice(0, 10)) : '—'}</td>
-                        <td className="num"><span className="cell-main">{fmtMoney(s.net)}</span></td>
-                        <td><div className="hr-actions" style={{ justifyContent: 'flex-end' }}>
-                          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => openView(s)}><Eye size={15} /> View</button>
-                          {pdfBtn(s)}
-                        </div></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="only-mobile">
-                <div className="list-cards">
-                  {slips.map(s => (
-                    <div key={s.runId} className="list-card" style={{ cursor: 'default' }}>
-                      <div className="hr-head-row">
-                        <div><div className="cell-main">{labelOf(s)}</div><div className="cell-sub">{s.paidAt ? `Paid ${fmtDate(String(s.paidAt).slice(0, 10))}` : 'Not paid yet'}</div></div>
-                        <span className="cell-main" style={{ fontSize: 'var(--fs-lg)' }}>{fmtMoney(s.net)}</span>
+              <Kpis cols={3} items={[
+                { label: 'Latest payslip', value: fmtMoney(slips[0].net), icon: Banknote, tone: 'primary', sub: labelOf(slips[0]) },
+                { label: `Received in ${String(slips[0].month).slice(0, 4)}`, value: fmtMoney(slips.filter(x => String(x.month).slice(0, 4) === String(slips[0].month).slice(0, 4)).reduce((t, x) => t + money(x.net), 0)), icon: Wallet, tone: 'good', sub: 'Net pay, all payslips this year' },
+                { label: 'Payslips', value: slips.length, icon: Receipt, sub: slips.length > 1 ? `Since ${labelOf(slips[slips.length - 1])}` : 'Your first one' },
+              ]} />
+              <div className="slip-grid">
+                {slips.map((x, i) => {
+                  const prev = slips[i + 1];
+                  const diff = prev ? money(x.net) - money(prev.net) : 0;
+                  return (
+                    <article key={x.runId} className="mac-card slip-card" role="button" tabIndex={0} onClick={() => openView(x)}
+                      onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openView(x); } }} aria-label={`Open the payslip for ${labelOf(x)}`}>
+                      <header>
+                        <span className="slip-card-month"><b>{labelOf(x).split(' ')[0].slice(0, 3)}</b>{String(x.month).slice(0, 4)}</span>
+                        <div><h3>{labelOf(x)}</h3><p>{x.paidAt ? `Paid on ${fmtDate(String(x.paidAt).slice(0, 10))}` : 'Not paid yet'}</p></div>
+                        <Badge color={x.paidAt ? 'green' : 'orange'}>{x.paidAt ? 'Paid' : 'Pending'}</Badge>
+                      </header>
+                      <div className="slip-card-net">
+                        <span>Net pay</span>
+                        <b>{fmtMoney(x.net)}</b>
+                        {prev && diff !== 0 && <em className={diff > 0 ? 'up' : 'down'}>{diff > 0 ? '+' : '−'}{fmtMoney(Math.abs(diff))} vs {labelOf(prev).split(' ')[0]}</em>}
+                        {prev && diff === 0 && <em>Same as {labelOf(prev).split(' ')[0]}</em>}
                       </div>
-                      <div className="hr-actions">
-                        <button type="button" className="mac-btn mac-btn-secondary" onClick={() => openView(s)}><Eye size={15} /> View</button>
-                        {pdfBtn(s)}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                      {(x.payableDays != null || x.unpaidDays != null) && (
+                        <dl className="slip-card-facts">
+                          {x.payableDays != null && <div><dt>Paid days</dt><dd>{fmtNum(x.payableDays)}</dd></div>}
+                          {x.unpaidDays != null && <div><dt>Unpaid days</dt><dd>{fmtNum(x.unpaidDays)}</dd></div>}
+                          {x.gross != null && <div><dt>Salary</dt><dd>{fmtMoney(x.gross)}</dd></div>}
+                        </dl>
+                      )}
+                      <footer onClick={e => e.stopPropagation()}>
+                        <button type="button" className="mac-btn mac-btn-secondary" onClick={() => openView(x)}><Eye size={15} /> View</button>
+                        {pdfBtn(x)}
+                      </footer>
+                    </article>
+                  );
+                })}
               </div>
             </>
           )}
-        <MyAdvances />
       </div>
 
-      <Modal isOpen={!!view} onClose={() => setView(null)} title={view ? `Payslip — ${labelOf(view.item)}` : 'Payslip'} size="lg"
+      <Modal page back="My payslips" isOpen={!!view} onClose={() => setView(null)} title={view ? `Payslip for ${labelOf(view.item)}` : 'Payslip'} size="lg"
         footer={view && <>
           <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setView(null)}>Close</button>
           {pdfBtn(view.item, true)}
@@ -367,7 +394,7 @@ export function RunView({ run, onBack, onChanged, onDeleted }) {
 
       <StatTiles items={[
         { label: 'Gross', value: fmtMoney(totals.gross), sub: `${lines.length} ${lines.length === 1 ? 'person' : 'people'}`, icon: Wallet },
-        { label: 'Deductions', value: fmtMoney(totals.unpaidDeduction + totals.otherDeduction), sub: `+ ${fmtMoney(totals.advanceRecovery)} advance recovery`, icon: FileText },
+        { label: 'Deductions', value: fmtMoney(totals.unpaidDeduction + totals.otherDeduction), sub: 'Unpaid days and other deductions', icon: FileText },
         { label: 'Net pay', value: fmtMoney(totals.net), sub: totals.bonus ? `Includes ${fmtMoney(totals.bonus)} bonus` : 'After deductions', icon: Banknote, tone: 'brand' },
         { label: run.status === 'PAID' ? 'Still payable' : 'Payable now', value: fmtMoney(totals.payable), sub: totals.alreadyPaid ? `${fmtMoney(totals.alreadyPaid)} already paid` : 'Nothing paid yet', icon: HandCoins, tone: totals.payable > 0 ? 'warn' : 'good' },
       ]} />
@@ -381,7 +408,7 @@ export function RunView({ run, onBack, onChanged, onDeleted }) {
               <tr>
                 <th className="hr-sticky">Employee</th>
                 <th className="num">Payable days</th><th className="num">Unpaid days</th><th className="num">Gross</th><th className="num">Deductions</th>
-                <th className="num">Advance recovery</th><th className="num">Bonus</th><th className="num">Net</th><th className="num">Already paid</th><th className="num">Payable</th>
+                <th className="num">Bonus</th><th className="num">Net</th><th className="num">Already paid</th><th className="num">Payable</th>
                 <th aria-label="Payslip" />
               </tr>
             </thead>
@@ -405,7 +432,6 @@ export function RunView({ run, onBack, onChanged, onDeleted }) {
                       <td className="num">{+l.unpaidDays > 0 ? <span className="amount-out">{fmtNum(l.unpaidDays)}</span> : '0'}</td>
                       <td className="num">{fmtMoney(l.gross)}</td>
                       <td className="num">{lineDeductions(l) > 0 ? `−${fmtMoney(lineDeductions(l))}` : '—'}</td>
-                      <td className="num">{+l.advanceRecovery > 0 ? `−${fmtMoney(l.advanceRecovery)}` : '—'}</td>
                       <td className="num">{+l.bonus > 0 ? `+${fmtMoney(l.bonus)}` : '—'}</td>
                       <td className="num"><span className="cell-main">{fmtMoney(l.net)}</span></td>
                       <td className="num">{+l.alreadyPaid > 0 ? fmtMoney(l.alreadyPaid) : '—'}</td>
@@ -437,9 +463,6 @@ export function RunView({ run, onBack, onChanged, onDeleted }) {
                                   <Field label="Other deduction (₹)">
                                     <NumInput className="mac-input" value={d.otherDeduction} onChange={v => setDraft(l.employeeId, 'otherDeduction', v)} placeholder="0" />
                                   </Field>
-                                  <Field label="Advance recovery (₹)" hint="Cannot be more than the advance still outstanding">
-                                    <NumInput className="mac-input" value={d.advanceRecovery} onChange={v => setDraft(l.employeeId, 'advanceRecovery', v)} placeholder="0" />
-                                  </Field>
                                   <Field label="Note" span={3}>
                                     <input className="mac-input" value={d.note} onChange={e => setDraft(l.employeeId, 'note', e.target.value)} placeholder="Shown on the payslip, e.g. Diwali bonus" />
                                   </Field>
@@ -463,7 +486,6 @@ export function RunView({ run, onBack, onChanged, onDeleted }) {
                 <td className="hr-sticky">Total</td><td /><td />
                 <td className="num">{fmtMoney(totals.gross)}</td>
                 <td className="num">{fmtMoney(totals.unpaidDeduction + totals.otherDeduction)}</td>
-                <td className="num">{fmtMoney(totals.advanceRecovery)}</td>
                 <td className="num">{fmtMoney(totals.bonus)}</td>
                 <td className="num">{fmtMoney(totals.net)}</td>
                 <td className="num">{fmtMoney(totals.alreadyPaid)}</td>
@@ -501,7 +523,7 @@ export function RunView({ run, onBack, onChanged, onDeleted }) {
                 {toPay.map(l => <div key={l.employeeId}><span>{l.employeeName}</span><span className="cell-main tabular">{fmtMoney(l.payable)}</span></div>)}
               </div>
             ) : <Notice tone="info" icon={Info}>Everyone was already paid for {label}. This only marks the payroll as paid.</Notice>}
-            <p className="hr-note">This records one salary payment per person and adds each as an expense (Employee Salary) to Transactions, takes the advance recoveries off what they owe, and marks the payroll as paid. It does not move any money — make the transfers yourself. A paid payroll cannot be reopened.</p>
+            <p className="hr-note">This records one salary payment per person and adds each as an expense (Employee Salary) to Transactions, and marks the payroll as paid. It does not move any money — make the transfers yourself. A paid payroll cannot be reopened.</p>
           </form>
         )}
       </Modal>
@@ -513,185 +535,7 @@ export function RunView({ run, onBack, onChanged, onDeleted }) {
 }
 
 // ═════════════════════════════════════════════════════════════════
-// Partner: advances
-// ═════════════════════════════════════════════════════════════════
-const blankAdvance = empId => ({ employeeId: empId ? String(empId) : '', amount: '', date: todayLocal(), method: 'Bank Transfer', account: PAID_FROM[0], recoverPerMonth: '', note: '' });
-
-function AdvancesTab() {
-  const toast = useToast();
-  const [emps, setEmps] = useState([]);
-  const [byEmp, setByEmp] = useState({});       // employeeId → [advance]
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
-  const [form, setForm] = useState(null);
-  const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [del, setDel] = useState(null);         // { employeeId, advance }
-
-  const load = useCallback(async ({ quiet = false } = {}) => {
-    if (!quiet) { setLoading(true); setLoadError(null); }
-    try {
-      const people = (await employeesDB.getAll()).filter(e => e.status === 'Active');
-      const settled = await Promise.allSettled(people.map(e => advancesAPI.list(e.id)));
-      const failed = settled.find(s => s.status === 'rejected');
-      if (people.length && settled.every(s => s.status === 'rejected')) throw failed.reason;
-      if (failed) console.error(failed.reason);
-      const map = {};
-      settled.forEach((s, i) => { map[people[i].id] = s.status === 'fulfilled' ? s.value : []; });
-      setEmps(people); setByEmp(map); setLoadError(null);
-    } catch (e) { console.error(e); if (!quiet) setLoadError(e); }
-    setLoading(false);
-  }, []);
-  useEffect(() => { load(); }, [load]);
-
-  const perEmp = useMemo(() => emps.map(e => {
-    const list = byEmp[e.id] || [];
-    const sum = k => list.reduce((s, a) => s + (+a[k] || 0), 0);
-    return { emp: e, count: list.length, given: sum('amount'), recovered: sum('recovered'), outstanding: sum('outstanding'), perMonth: list.filter(a => +a.outstanding > 0).reduce((s, a) => s + (+a.recoverPerMonth || 0), 0) };
-  }).filter(r => r.count > 0), [emps, byEmp]);
-  const history = useMemo(() => emps.flatMap(e => (byEmp[e.id] || []).map(a => ({ ...a, employeeId: e.id, employeeName: e.name })))
-    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))), [emps, byEmp]);
-  const outstanding = perEmp.reduce((s, r) => s + r.outstanding, 0);
-
-  const openForm = empId => { setForm(blankAdvance(empId)); setErrors({}); };
-  const setField = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(er => (er[k] ? { ...er, [k]: undefined } : er)); };
-
-  async function save() {
-    if (saving || !form) return;
-    const er = {};
-    const emp = emps.find(e => String(e.id) === form.employeeId);
-    if (!emp) er.employeeId = 'Choose who gets the advance';
-    if (!(+form.amount > 0)) er.amount = 'Enter an amount greater than 0';
-    if (!form.date) er.date = 'Pick the date';
-    if (form.recoverPerMonth !== '' && !(+form.recoverPerMonth >= 0)) er.recoverPerMonth = 'Enter a number';
-    else if (+form.recoverPerMonth > +form.amount) er.recoverPerMonth = 'Cannot be more than the advance';
-    setErrors(er);
-    if (Object.keys(er).length) return;
-    setSaving(true);
-    try {
-      await advancesAPI.give(emp.id, form);
-      toast.success(`Advance of ${fmtMoney(form.amount)} to ${emp.name} recorded and added to Transactions`);
-      setForm(null);
-      load({ quiet: true });
-    } catch (e) { toast.error('Could not record the advance. Nothing was saved', e); }
-    setSaving(false);
-  }
-
-  async function remove() {
-    const { employeeId, advance } = del;
-    try {
-      await advancesAPI.remove(employeeId, advance.id);
-      setByEmp(m => ({ ...m, [employeeId]: (m[employeeId] || []).filter(a => a.id !== advance.id) }));
-      toast.success('Advance deleted');
-    } catch (e) { toast.error('Could not delete the advance', e); }
-  }
-
-  if (loading) return <SkeletonRows rows={5} />;
-  if (loadError) return <ErrorPanel title="Could not load advances" error={loadError} onRetry={load} />;
-  const giveBtn = <button type="button" className="mac-btn mac-btn-primary" onClick={() => openForm()} disabled={emps.length === 0}><Plus size={15} /> Give advance</button>;
-  return (
-    <>
-      <div className="hr-head-row">
-        <p className="hr-note" style={{ flex: 1, minWidth: 200 }}>
-          {outstanding > 0 ? `${fmtMoney(outstanding)} is still to be recovered. Each payroll takes the monthly amount off the salary until an advance is cleared.` : 'Money given ahead of salary, recovered a little each month through payroll.'}
-        </p>
-        {giveBtn}
-      </div>
-
-      {history.length === 0 ? <EmptyPanel icon={HandCoins} title="No advances yet" text="Give an advance and choose how much to take back from each month’s salary." action={giveBtn} />
-        : (
-          <>
-            <h2 className="section-title">Outstanding by employee</h2>
-            <div className="mac-card table-wrap">
-              <table className="data-table">
-                <thead><tr><th>Employee</th><th className="num">Given</th><th className="num">Recovered</th><th className="num">Outstanding</th><th className="num">Per month</th><th aria-label="Actions" /></tr></thead>
-                <tbody>
-                  {perEmp.map(r => (
-                    <tr key={r.emp.id}>
-                      <td><div className="hr-person"><Avatar name={r.emp.name} /><div><div className="cell-main">{r.emp.name}</div><div className="cell-sub">{r.count} advance{r.count === 1 ? '' : 's'}</div></div></div></td>
-                      <td className="num">{fmtMoney(r.given)}</td>
-                      <td className="num">{fmtMoney(r.recovered)}</td>
-                      <td className="num">{r.outstanding > 0 ? <span className="amount-out">{fmtMoney(r.outstanding)}</span> : <span className="amount-in">Cleared</span>}</td>
-                      <td className="num">{r.perMonth > 0 ? fmtMoney(r.perMonth) : '—'}</td>
-                      <td><div style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button" className="mac-btn mac-btn-secondary" onClick={() => openForm(r.emp.id)}>Give more</button></div></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <h2 className="section-title">History</h2>
-            <div className="mac-card table-wrap">
-              <table className="data-table">
-                <thead><tr><th>Date</th><th>Employee</th><th className="num">Amount</th><th className="num">Per month</th><th className="num">Recovered</th><th className="num">Outstanding</th><th aria-label="Actions" /></tr></thead>
-                <tbody>
-                  {history.map(a => (
-                    <tr key={`${a.employeeId}-${a.id}`}>
-                      <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(a.date)}</td>
-                      <td><div className="cell-main">{a.employeeName}</div>{a.note && <div className="cell-sub">{a.note}</div>}</td>
-                      <td className="num">{fmtMoney(a.amount)}</td>
-                      <td className="num">{+a.recoverPerMonth > 0 ? fmtMoney(a.recoverPerMonth) : '—'}</td>
-                      <td className="num">{fmtMoney(a.recovered)}</td>
-                      <td className="num">{+a.outstanding > 0 ? fmtMoney(a.outstanding) : <span className="amount-in">Cleared</span>}</td>
-                      <td>
-                        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                          {!(+a.recovered > 0) && <RowMenu label={`Actions for the advance to ${a.employeeName}`} items={[{ label: 'Delete', icon: Trash2, danger: true, onClick: () => setDel({ employeeId: a.employeeId, advance: a }) }]} />}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-
-      <Modal isOpen={!!form} onClose={() => { if (!saving) setForm(null); }} title="Give advance" size="md"
-        footer={<>
-          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setForm(null)} disabled={saving}>Cancel</button>
-          <button type="submit" form="advance-form" className="mac-btn mac-btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Record advance'}</button>
-        </>}>
-        {form && (
-          <form id="advance-form" onSubmit={e => { e.preventDefault(); save(); }} noValidate>
-            <FormGrid>
-              <Field label="Employee" required error={errors.employeeId} span={2}>
-                <select className="mac-select" value={form.employeeId} onChange={e => setField('employeeId', e.target.value)}>
-                  <option value="">Choose…</option>
-                  {emps.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                </select>
-              </Field>
-              <Field label="Amount (₹)" required error={errors.amount}>
-                <NumInput className="mac-input" value={form.amount} onChange={v => setField('amount', v)} placeholder="0" />
-              </Field>
-              <Field label="Recover per month (₹)" error={errors.recoverPerMonth} hint="Taken from each payroll until cleared. Leave empty to decide in each payroll.">
-                <NumInput className="mac-input" value={form.recoverPerMonth} onChange={v => setField('recoverPerMonth', v)} placeholder="0" />
-              </Field>
-              <Field label="Date given" required error={errors.date}>
-                <input className="mac-input" type="date" value={form.date} onChange={e => setField('date', e.target.value)} />
-              </Field>
-              <Field label="Method">
-                <select className="mac-select" value={form.method} onChange={e => setField('method', e.target.value)}>{PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}</select>
-              </Field>
-              <Field label="Paid from">
-                <select className="mac-select" value={form.account} onChange={e => setField('account', e.target.value)}>{PAID_FROM.map(a => <option key={a}>{a}</option>)}</select>
-              </Field>
-              <Field label="Note">
-                <input className="mac-input" value={form.note} onChange={e => setField('note', e.target.value)} placeholder="Optional" />
-              </Field>
-            </FormGrid>
-            <p className="hr-note" style={{ marginTop: 14 }}>Saving also adds an expense (Salary advance) to Transactions.</p>
-          </form>
-        )}
-      </Modal>
-
-      <ConfirmDialog isOpen={!!del} onClose={() => setDel(null)} onConfirm={remove}
-        title="Delete advance" message={del ? `Delete the ${fmtMoney(del.advance.amount)} advance to ${emps.find(e => e.id === del.employeeId)?.name || 'this employee'}? Nothing has been recovered from it yet.` : ''} />
-    </>
-  );
-}
-
-// ═════════════════════════════════════════════════════════════════
-// Partner: runs list + routing between list / run / advances
+// Partner: runs list + routing between list and run
 // ═════════════════════════════════════════════════════════════════
 function TeamPayroll() {
   const toast = useToast();
@@ -700,7 +544,6 @@ function TeamPayroll() {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
-  const [tab, setTab] = useState('runs');
   const [start, setStart] = useState(null);       // { month }
   const [startError, setStartError] = useState('');
   const [saving, setSaving] = useState(false);
@@ -750,11 +593,11 @@ function TeamPayroll() {
       <Plus size={15} /> {hasNext ? 'Start payroll' : `Start payroll for ${monthLabel(nextMonth)}`}
     </button>
   );
-  const subtitle = run ? `${labelOf(run)} · ${runMeta(run.status).label}` : loading ? 'Loading…' : loadError ? 'Could not load' : 'Salaries worked out from attendance, leave and advances';
+  const subtitle = run ? `${labelOf(run)} · ${runMeta(run.status).label}` : loading ? 'Loading…' : loadError ? 'Could not load' : 'Salaries worked out from attendance and leave';
 
   return (
     <div>
-      <Header title="Payroll" subtitle={subtitle} actions={!run && !openId && tab === 'runs' && !loading && !loadError ? startBtn : null} />
+      <Header title="Payroll" subtitle={subtitle} actions={!run && !openId && !loading && !loadError ? startBtn : null} />
       <div className="page-body">
         {loading ? <SkeletonRows rows={6} />
           : loadError ? <ErrorPanel title="Could not load payroll" error={loadError} onRetry={load} />
@@ -763,10 +606,8 @@ function TeamPayroll() {
             : <EmptyPanel icon={FileText} title="This payroll run was not found" text="It may have been deleted." action={<button type="button" className="mac-btn mac-btn-secondary" onClick={() => openRun(null)}>All payroll runs</button>} />)
           : (
             <>
-              <TabBar label="Payroll sections" value={tab} onChange={setTab} tabs={[['runs', 'Payroll runs'], ['advances', 'Advances']]} />
-              {tab === 'advances' && <AdvancesTab />}
-              {tab === 'runs' && (runs.length === 0 ? (
-                <EmptyPanel icon={Wallet} title="No payroll yet" text="Start a payroll for a month: it works out each person’s pay from their attendance, leave and advances for you to check." action={startBtn} />
+              {(runs.length === 0 ? (
+                <EmptyPanel icon={Wallet} title="No payroll yet" text="Start a payroll for a month: it works out each person’s pay from their attendance and leave for you to check." action={startBtn} />
               ) : (
                 <>
                   <div className="mac-card table-wrap only-desktop">

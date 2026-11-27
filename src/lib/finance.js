@@ -1,3 +1,4 @@
+import { rupees } from './money';
 // ================================================================
 // Codelix OMS — finance engine (pure functions, no React)
 //
@@ -339,14 +340,14 @@ export function computeReceivables(projects = []) {
 // ── Formatting ────────────────────────────────────────────────────
 export const fmtINR = (n, { sign = false } = {}) => {
   const v = Math.round(+n || 0);
-  const s = '₹' + Math.abs(v).toLocaleString('en-IN');
+  const s = rupees(v, { paise: false });
   if (v < 0) return '−' + s;
   return sign && v > 0 ? '+' + s : s;
 };
-// Compact: ₹1.2L, ₹3.4Cr, ₹45K
+// Compact: ₹1.2L, ₹3.4 Cr., ₹45K
 export const fmtCompact = n => {
   const v = +n || 0, a = Math.abs(v), neg = v < 0 ? '−' : '';
-  if (a >= 1e7) return `${neg}₹${(a / 1e7).toFixed(a >= 1e8 ? 0 : 1)}Cr`;
+  if (a >= 1e7) return `${neg}₹${(a / 1e7).toFixed(a >= 1e8 ? 0 : 1)} Cr.`;
   if (a >= 1e5) return `${neg}₹${(a / 1e5).toFixed(a >= 1e6 ? 0 : 1)}L`;
   if (a >= 1e3) return `${neg}₹${(a / 1e3).toFixed(0)}K`;
   return `${neg}₹${Math.round(a)}`;

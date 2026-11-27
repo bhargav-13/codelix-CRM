@@ -43,18 +43,28 @@ const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 // CLIENTS
 // ─────────────────────────────────────────────
 const clients = resource('/clients', c => ({
-  ...tidy(c, { num: ['proposalValue', 'finalPrice'] }),
+  // closing details are set only through updateStatus; createdBy is stamped by the server
+  ...tidy(c, { num: ['proposalValue', 'finalPrice'], drop: ['lostReason', 'wonReasons', 'closeNote', 'closedDate', 'createdBy', 'projectId'] }),
   createdDate: c.createdDate || todayISO(),
   followupHistory: c.followupHistory || [],
 }));
 
 export const clientsDB = {
   ...clients,
-  // entry: { date, note, nextFollowup } — the server stamps who and when, and returns the client
-  addFollowup: async (id, { date, note, nextFollowup }) =>
-    seen(await http.post(`/clients/${id}/followups`, { date, note: note || null, nextFollowup: nextFollowup || null })),
-  // → the updated client
-  updateStatus: async (id, status) => seen(await http.patch(`/clients/${id}/status`, { status })),
+  // entry: { date, note, status, nextFollowup } — the server stamps who and when, and returns the client
+  addFollowup: async (id, { date, note, status, nextFollowup }) =>
+    seen(await http.post(`/clients/${id}/followups`, { date, note: note || null, status: status || null, nextFollowup: nextFollowup || null })),
+  // Draft | Won ({ wonReasons, finalPrice, closeNote }) | Lost ({ lostReason, closeNote }: the server
+  // sets the next follow-up from the reason) → the updated client
+  // Won also takes { proposalValue, projectId }: the price that was proposed (the discount is
+  // that minus finalPrice) and the project created from the lead.
+  updateStatus: async (id, status, { lostReason, wonReasons, closeNote, finalPrice, proposalValue, projectId } = {}) => {
+    const money = v => (v === '' || v == null || Number.isNaN(+v) ? null : +v);
+    return seen(await http.patch(`/clients/${id}/status`, {
+      status, lostReason: lostReason || null, wonReasons: wonReasons || [], closeNote: closeNote || null,
+      finalPrice: money(finalPrice), proposalValue: money(proposalValue), projectId: projectId || null,
+    }));
+  },
 };
 
 // ─────────────────────────────────────────────

@@ -198,9 +198,10 @@ export default function Work() {
   }, [projects, people, tasks, sprints, byId, childrenBy, childStats, loggedBy, project]);
 
   const assignedToMe = useCallback(t => t.assignees.some(a => samePerson(a, me)), [me]);
-  const isMine = useCallback(t => assignedToMe(t) || samePerson(t.reporterRef, me) || (t.watchers || []).some(w => samePerson(w, me)), [me, assignedToMe]);
 
-  const scoped = useMemo(() => tasks.filter(t => (scope === 'mine' ? isMine(t) : scope === 'all' ? true : t.projectId === scope)), [tasks, scope, isMine]);
+  // "My work" is only what is assigned to me. Tasks I raised or watch for someone else are theirs:
+  // they show under All work and under the project.
+  const scoped = useMemo(() => tasks.filter(t => (scope === 'mine' ? assignedToMe(t) : scope === 'all' ? true : t.projectId === scope)), [tasks, scope, assignedToMe]);
 
   const focus = view === 'focus';
   const filtered = useMemo(() => {

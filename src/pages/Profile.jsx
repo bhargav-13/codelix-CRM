@@ -4,9 +4,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  RiBriefcaseLine, RiCalendarLine, RiCameraLine, RiComputerLine, RiDeleteBinLine, RiExternalLinkLine, RiIdCardLine,
-  RiLockPasswordLine, RiLogoutBoxRLine, RiMailLine, RiMoonLine, RiPaletteLine, RiShieldKeyholeLine, RiShieldUserLine,
-  RiSunLine, RiUpload2Line, RiUserLine,
+  RiBriefcaseLine, RiCalendarLine, RiCameraLine, RiDeleteBinLine, RiExternalLinkLine, RiIdCardLine,
+  RiLockPasswordLine, RiLogoutBoxRLine, RiMailLine, RiShieldKeyholeLine, RiShieldUserLine,
+  RiUpload2Line, RiUserLine,
 } from '@remixicon/react';
 import Header from '../components/layout/Header';
 import { useShell } from '../components/layout/shell';
@@ -15,11 +15,9 @@ import { ErrorPanel, Field, FormGrid, fmtDate, todayLocal, useToast } from '../c
 import { Button } from '../components/ui/Button';
 import { TextInput, Textarea } from '../components/ui/Input';
 import { Dropdown } from '../components/ui/Dropdown';
-import { SegmentedControl } from '../components/ui/Tabs';
 import Badge from '../components/ui/Badge';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
 import ImageCropDialog, { IMAGE_TYPES, imageProblem } from '../components/ui/ImageCropDialog';
-import { useTheme } from '../components/ui/theme';
 import { personPath } from '../components/ui/Person';
 import { useAuth } from '../contexts/AuthContext';
 import { profileAPI, refreshPeople } from '../lib/people';
@@ -28,11 +26,6 @@ import BankDetailsCard from '../components/hr/BankDetailsCard';
 
 const FIELDS = ['fullName', 'jobTitle', 'phone', 'dateOfBirth', 'address', 'emergencyContact', 'bio'];
 const BIO_MAX = 500;
-const THEMES = [
-  { value: 'light', label: 'Light', icon: RiSunLine },
-  { value: 'dark', label: 'Dark', icon: RiMoonLine },
-  { value: 'system', label: 'System', icon: RiComputerLine },
-];
 
 const toForm = p => Object.fromEntries(FIELDS.map(k => [k, k === 'dateOfBirth' ? String(p?.[k] || '').slice(0, 10) : p?.[k] ?? '']));
 
@@ -62,7 +55,6 @@ function validate(f) {
 export default function Profile() {
   const { me, user, person, isPartner, logout, refreshMe } = useAuth();
   const { openChangePassword } = useShell();
-  const { theme, setTheme } = useTheme();
   const toast = useToast();
 
   const [profile, setProfile] = useState(null);
@@ -255,10 +247,6 @@ export default function Profile() {
                   <Button variant="error" mode="lighter" size="small" leftIcon={RiLogoutBoxRLine} loading={signingOut} loadingText="Signing out…" className="justify-start"
                     onClick={() => { setSigningOut(true); logout(); }}>Sign out</Button>
                 </div>
-              </ProfileCard>
-
-              <ProfileCard icon={RiPaletteLine} title="Appearance" sub="System follows your device setting.">
-                <SegmentedControl fullWidth label="Theme" options={THEMES} value={theme} onChange={setTheme} />
               </ProfileCard>
             </div>
           </div>

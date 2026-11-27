@@ -29,15 +29,23 @@ function Legend({ items }) {
 // Simple line chart (one numeric axis), hover shows values
 function LineChart({ xs, series, height = 200 }) {
   const [hi, setHi] = useState(null);
-  const W = 640, H = height, pl = 34, pr = 8, pt = 8, pb = 22;
+  const W = 640, H = height, pl = 8, pr = 8, pt = 20, pb = 22;
   const max = Math.max(1, ...series.flatMap(s => s.values.filter(v => v != null)));
   const x = i => pl + (i / Math.max(1, xs.length - 1)) * (W - pl - pr);
   const y = v => pt + (1 - v / max) * (H - pt - pb);
   const every = Math.ceil(xs.length / 8);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Line chart" onMouseLeave={() => setHi(null)}>
-      {[0, 0.5, 1].map(f => <g key={f}><line x1={pl} x2={W - pr} y1={y(max * f)} y2={y(max * f)} stroke={C.grid} /><text x={pl - 6} y={y(max * f)} dy="0.32em" textAnchor="end" fontSize="10" fill={C.muted}>{Math.round(max * f)}</text></g>)}
+      <line x1={pl} x2={W - pr} y1={y(0)} y2={y(0)} stroke="var(--ink-2)" />
       {xs.map((l, i) => i % every === 0 && <text key={i} x={x(i)} y={H - 6} textAnchor="middle" fontSize="10" fill={C.muted}>{l}</text>)}
+      {series.filter(s => !s.dash).map(s => {
+        const first = s.values.findIndex(v => v != null);
+        let last = -1;
+        s.values.forEach((v, i) => { if (v != null) last = i; });
+        return [first, last].filter((i, k, list) => i >= 0 && list.indexOf(i) === k).map(i => (
+          <text key={s.name + i} x={x(i)} y={y(s.values[i]) - 8} textAnchor={i === 0 ? 'start' : 'end'} fontSize="10.5" fontWeight="600" fill={C.ink}>{s.values[i]}</text>
+        ));
+      })}
       {series.map(s => {
         const pts = s.values.map((v, i) => (v == null ? null : [x(i), y(v)])).filter(Boolean);
         return <path key={s.name} d={pts.map((p, i) => `${i ? 'L' : 'M'}${p[0]},${p[1]}`).join('')} fill="none" stroke={s.color} strokeWidth="2" strokeDasharray={s.dash ? '5 4' : undefined} strokeLinejoin="round" strokeLinecap="round" />;
@@ -59,14 +67,14 @@ function LineChart({ xs, series, height = 200 }) {
 
 function Bars({ xs, series, height = 180 }) {
   const [hi, setHi] = useState(null);
-  const W = 640, H = height, pl = 30, pb = 22, pt = 8;
+  const W = 640, H = height, pl = 4, pb = 22, pt = 16;
   const max = Math.max(1, ...series.flatMap(s => s.values));
   const band = (W - pl) / Math.max(1, xs.length);
   const bw = Math.min(22, (band - 8) / series.length - 2);
   const y = v => pt + (1 - v / max) * (H - pt - pb);
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Bar chart" onMouseLeave={() => setHi(null)}>
-      {[0, 0.5, 1].map(f => <g key={f}><line x1={pl} x2={W} y1={y(max * f)} y2={y(max * f)} stroke={C.grid} /><text x={pl - 6} y={y(max * f)} dy="0.32em" textAnchor="end" fontSize="10" fill={C.muted}>{Math.round(max * f)}</text></g>)}
+      <line x1={pl} x2={W} y1={H - pb} y2={H - pb} stroke="var(--ink-2)" />
       {xs.map((l, i) => {
         const cx = pl + band * i + band / 2;
         return <g key={i} onMouseEnter={() => setHi(i)}>
@@ -74,7 +82,12 @@ function Bars({ xs, series, height = 180 }) {
           {series.map((s, k) => {
             const v = s.values[i]; const x0 = cx - (series.length * (bw + 2)) / 2 + k * (bw + 2);
             const h = Math.max(0, (H - pb) - y(v));
-            return h > 0 ? <rect key={s.name} x={x0} y={y(v)} width={bw} height={h} rx="3" fill={s.color}><title>{`${l} · ${s.name}: ${v}`}</title></rect> : null;
+            return h > 0 ? (
+              <g key={s.name}>
+                <rect x={x0} y={y(v)} width={bw} height={h} fill={s.color}><title>{`${l} · ${s.name}: ${v}`}</title></rect>
+                <text x={x0 + bw / 2} y={y(v) - 3} textAnchor="middle" fontSize="9.5" fontWeight={k === 0 ? 600 : 400} fill={k === 0 ? C.ink : C.muted}>{v}</text>
+              </g>
+            ) : null;
           })}
           <text x={cx} y={H - 6} textAnchor="middle" fontSize="10" fill={C.muted}>{l}</text>
         </g>;

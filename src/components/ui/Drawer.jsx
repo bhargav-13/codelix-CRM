@@ -1,17 +1,26 @@
 // Drawer: a detail / edit panel sliding in from the right, on Radix Dialog.
-// Props unchanged: isOpen, onClose, title, subtitle, actions, footer, width.
+// Props: isOpen, onClose, title, subtitle, actions, footer, width.
+// The panel takes half the screen (never less than MIN_WIDTH, and the whole screen on a phone).
+// With `page` it is not a panel at all but a full page over the content area (PageView), used
+// for long lists such as a history; `back` names its button.
 import * as Dialog from '@radix-ui/react-dialog';
 import { RiCloseLine } from '@remixicon/react';
 import { focusOnOpen } from './Modal';
+import PageView from './PageView';
 
-export default function Drawer({ isOpen, onClose, title, subtitle, actions, footer, width = 520, initialFocus, children }) {
+const MIN_WIDTH = 720;
+
+export default function Drawer({ isOpen, onClose, title, subtitle, actions, footer, width = 520, initialFocus, page = false, back, narrow, children }) {
+  if (page) {
+    return <PageView isOpen={!!isOpen} onClose={onClose} title={title} subtitle={subtitle} actions={actions} footer={footer} back={back} narrow={narrow}>{children}</PageView>;
+  }
   return (
     <Dialog.Root open={!!isOpen} onOpenChange={open => { if (!open) onClose?.(); }}>
       <Dialog.Portal>
         <Dialog.Overlay className="drawer-overlay ui-overlay">
           <Dialog.Content
             className="drawer ui-drawer"
-            style={{ maxWidth: width }}
+            style={{ maxWidth: `max(50vw, ${Math.max(width, MIN_WIDTH)}px)` }}
             onOpenAutoFocus={e => focusOnOpen(e, initialFocus)}
             {...(subtitle ? {} : { 'aria-describedby': undefined })}
           >

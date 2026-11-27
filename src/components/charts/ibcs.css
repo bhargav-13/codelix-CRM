@@ -1,0 +1,83 @@
+/* IBCS-style charts (see ibcs.jsx). Ink only; green and red are kept for good and bad. */
+.ib-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; font-size: var(--fs-sm); line-height: 1.45; color: var(--ink-2); }
+.ib-title strong { font-size: var(--fs-md); font-weight: 600; color: var(--ink); }
+.ib-title em { font-style: normal; font-weight: 400; color: var(--ink-2); }
+
+.ib-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
+.ib-card { display: flex; flex-direction: column; gap: 16px; padding: 20px; min-width: 0; }
+.ib-wide { grid-column: 1 / -1; }
+.ib-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ib-empty { margin: auto; padding: 20px 0; font-size: var(--fs-sm); color: var(--ink-3); text-align: center; }
+
+/* Horizontal bars: name, then the bar starting on a common axis line, then its value */
+.ib-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ib-bars li { display: grid; grid-template-columns: minmax(90px, 34%) minmax(0, 1fr); align-items: center; column-gap: 10px; font-size: var(--fs-sm); }
+.ib-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.ib-track { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 5px 0; border-left: 1px solid var(--ink-2); }
+.ib-bar { display: block; height: 16px; min-width: 1px; background: var(--ink); flex-shrink: 0; }
+.ib-bar.is-good { background: var(--good); } .ib-bar.is-bad { background: var(--bad); } .ib-bar.is-cmp { background: var(--line-strong); }
+.ib-val { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.ib-val em { font-style: normal; font-weight: 400; color: var(--ink-3); margin-left: 6px; }
+
+/* Columns over time */
+.ib-fig { margin: 0; display: flex; flex-direction: column; min-width: 0; }
+.ib-fig figcaption { font-size: var(--fs-sm); font-weight: 600; color: var(--ink); margin-bottom: 6px; }
+.ib-cols { display: flex; align-items: stretch; padding-top: 18px; padding-bottom: 2px; box-sizing: content-box; }
+.ib-col { position: relative; flex: 1 1 0; min-width: 0; }
+.ib-zero { position: absolute; left: 0; right: 0; height: 1px; background: var(--ink-2); z-index: 2; }
+.ib-colbar { position: absolute; left: 50%; width: min(34px, 56%); transform: translateX(-50%); background: var(--ink); z-index: 1; }
+.ib-colbar.is-cmp { background: var(--line-strong); transform: translateX(-78%); z-index: 0; }
+.ib-colbar.is-bad { background: var(--bad); }
+.ib-colval { position: absolute; left: 50%; transform: translateX(-50%); font-size: 11px; line-height: 14px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; white-space: nowrap; z-index: 3; }
+.ib-collabels { display: flex; margin-top: 6px; }
+.ib-collabels span { flex: 1 1 0; min-width: 0; text-align: center; font-size: 11px; color: var(--ink-2); white-space: nowrap; overflow: hidden; }
+.ib-multiples { display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); gap: 20px; }
+
+/* Pin for a rate */
+.ib-pin { display: grid; grid-template-columns: minmax(40px, 1fr) 44px; align-items: center; gap: 10px; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.ib-pin.is-none { grid-template-columns: 1fr; text-align: right; color: var(--ink-3); }
+.ib-pin-track { position: relative; display: block; height: 14px; border-left: 1px solid var(--ink-2); }
+.ib-pin-line { position: absolute; left: 0; top: 6px; height: 2px; background: var(--ink); min-width: 0; }
+.ib-pin-line::after { content: ''; position: absolute; right: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
+.ib-pin-text { text-align: right; color: var(--ink); font-weight: 600; }
+
+/* Number with a bar in a table cell */
+.ib-cellbar { display: grid; grid-template-columns: minmax(40px, 1fr) 32px; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+.ib-cellbar-track { display: block; height: 12px; border-left: 1px solid var(--ink-2); }
+.ib-cellbar-track span { display: block; height: 100%; background: var(--ink); }
+.ib-cellbar-val { text-align: right; font-weight: 600; }
+
+.ib-table { table-layout: fixed; width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.ib-table th { text-align: left; padding: 6px 10px; font-size: 12px; font-weight: 500; color: var(--ink-2); border-bottom: 1px solid var(--ink); white-space: nowrap; }
+.ib-table td { padding: 8px 10px; border-bottom: 1px solid var(--line); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-table th:first-child, .ib-table td:first-child { padding-left: 0; }
+.ib-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.ib-table tr.ib-total td { font-weight: 600; border-top: 1px solid var(--ink); border-bottom: 2px solid var(--ink); }
+
+/* Headline numbers: plain, with the comparison underneath */
+.ib-kpis { display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); gap: 12px; }
+.ib-kpi { display: grid; grid-template-rows: 18px 36px 16px; gap: 6px; padding: 16px; min-width: 0; }
+.ib-kpi > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-kpi-label { font-size: var(--fs-sm); color: var(--ink-2); }
+.ib-kpi-value { font-size: 28px; line-height: 36px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ib-kpi-sub { font-size: var(--fs-xs); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.ib-good { color: var(--good); } .ib-bad { color: var(--bad); }
+
+@media (max-width: 1100px) { .ib-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .ib-grid { grid-template-columns: 1fr; } .ib-multiples { grid-template-columns: 1fr; } }
+@media (max-width: 480px) { .ib-kpis { grid-template-columns: 1fr; } .ib-bars li { grid-template-columns: minmax(70px, 40%) minmax(0, 1fr); } }
+
+/* Actual in front of its comparison, on one axis (table cell) */
+.ib-pair { position: relative; display: block; height: 16px; border-left: 1px solid var(--ink-2); }
+.ib-pair span { position: absolute; left: 0; top: 4px; height: 12px; background: var(--ink); }
+.ib-pair span.is-cmp { top: 0; background: var(--line-strong); }
+
+/* Colour: blue by default, green for wins and money in, red for losses and money out, orange for caution */
+.ib-bar.is-brand, .ib-colbar.is-brand { background: var(--brand); }
+.ib-bar.is-warn, .ib-colbar.is-warn { background: var(--warn); }
+.ib-colbar.is-good { background: var(--good); }
+.ib-cellbar-track span { background: var(--brand); }
+.ib-pin-line, .ib-pin-line::after { background: var(--good); }
+.ib-pin.is-bad .ib-pin-line, .ib-pin.is-bad .ib-pin-line::after { background: var(--bad); }
+.ib-pair span { background: var(--good); }
+.ib-pair span.is-cmp { background: var(--line-strong); }

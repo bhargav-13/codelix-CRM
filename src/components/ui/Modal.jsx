@@ -8,6 +8,7 @@
 // Pass `footer` for the action row so it stays visible while the body scrolls.
 import * as Dialog from '@radix-ui/react-dialog';
 import { RiCloseLine } from '@remixicon/react';
+import PageView from './PageView';
 
 const SIZES = { sm: '440px', md: '560px', lg: '680px', xl: '860px', full: '1060px' };
 
@@ -22,7 +23,11 @@ export function focusOnOpen(event, initialFocus) {
   (first || panel).focus({ preventScroll: true });
 }
 
-export default function Modal({ isOpen, onClose, title, description, children, size = 'md', footer, initialFocus, className = '' }) {
+// `page`: no popup. The same content opens as a full page over the content area (`back` names its button).
+export default function Modal({ isOpen, onClose, title, description, children, size = 'md', footer, initialFocus, className = '', page = false, back }) {
+  if (page) {
+    return <PageView isOpen={!!isOpen} onClose={onClose} title={title} subtitle={description} footer={footer} back={back} narrow>{children}</PageView>;
+  }
   return (
     <Dialog.Root open={!!isOpen} onOpenChange={open => { if (!open) onClose?.(); }}>
       <Dialog.Portal>

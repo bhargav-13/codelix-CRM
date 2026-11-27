@@ -28,7 +28,7 @@
 
 .crm-log { display: flex; flex-direction: column; gap: 12px; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface-2); }
 .crm-log textarea { resize: vertical; min-height: 76px; }
-.crm-log-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.crm-log-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .crm-presets { display: flex; gap: 6px; flex-wrap: wrap; }
 .crm-presets button { height: 36px; padding: 0 12px; border-radius: var(--r-pill); border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-2); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
 .crm-presets button:hover { color: var(--ink); background: var(--surface); border-color: var(--ink-3); }
@@ -54,3 +54,73 @@
 .crm-audit li:last-child { border-bottom: none; }
 .crm-audit-main { flex: 1; min-width: 0; }
 .crm-audit-when { font-size: var(--fs-xs); color: var(--ink-3); white-space: nowrap; }
+
+/* Where the lead stands: draft with the two closing buttons, or the won / lost summary */
+.crm-outcome { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface-2); }
+.crm-outcome.is-won { background: var(--good-soft); border-color: transparent; }
+.crm-outcome.is-lost { background: var(--bad-soft); border-color: transparent; }
+.crm-outcome-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-weight: 600; color: var(--ink); }
+.crm-outcome-head > span { display: inline-flex; align-items: center; gap: 6px; }
+.crm-outcome.is-won .crm-outcome-head > span:first-child { color: var(--good); }
+.crm-outcome.is-lost .crm-outcome-head > span:first-child { color: var(--bad); }
+.crm-outcome p { margin: 0; font-size: var(--fs-sm); color: var(--ink-2); }
+.crm-outcome-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.crm-outcome-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.crm-outcome-actions .mac-btn { flex: 1 1 130px; }
+.crm-tags { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* Follow-up cards: every card is the same size with the same three lines */
+.crm-count { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: var(--r-pill); background: var(--surface-3); color: var(--ink-2); font-size: var(--fs-xs); font-weight: 600; font-variant-numeric: tabular-nums; }
+.crm-fu-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+.crm-fu { display: grid; grid-template-rows: 18px 22px 18px; align-content: space-between; justify-items: start; gap: 8px; height: 100px; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface); color: var(--ink); font: inherit; text-align: left; cursor: pointer; min-width: 0; transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease); }
+.crm-fu > * { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-fu:hover { border-color: var(--accent); }
+.crm-fu:focus-visible { outline: none; box-shadow: var(--ring); }
+.crm-fu.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.crm-fu strong { font-size: var(--fs-md); line-height: 22px; font-variant-numeric: tabular-nums; }
+.crm-fu-no { font-size: var(--fs-xs); line-height: 18px; font-weight: 600; color: var(--ink-3); }
+.crm-fu-tag { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); line-height: 18px; font-weight: 600; color: var(--ink-2); }
+.crm-fu-tag i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex-shrink: 0; }
+.crm-fu-tag.is-green i { background: var(--good); } .crm-fu-tag.is-red i { background: var(--bad); }
+.crm-fu-tag.is-blue i { background: var(--brand); } .crm-fu-tag.is-orange i { background: var(--warn); }
+.crm-fu-tag.is-purple i { background: var(--color-purple-500, #7d52f4); }
+.crm-fu-add { border-style: dashed; color: var(--brand); }
+.crm-fu-add strong { color: var(--brand); font-size: var(--fs-sm); }
+.crm-fu-plus { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; }
+.crm-fu-planned { border-style: dashed; background: var(--surface-2); }
+.crm-fu-planned.is-overdue { background: var(--bad-soft); border-color: var(--bad); } .crm-fu-planned.is-overdue .crm-fu-tag { color: var(--bad); }
+.crm-fu-planned.is-today { background: var(--warn-soft); border-color: var(--warn); } .crm-fu-planned.is-today .crm-fu-tag { color: var(--warn); }
+.crm-fu-detail { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--accent); border-radius: var(--r-md); background: var(--surface-2); }
+.crm-fu-detail-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.crm-fu-note { margin: 0; font-size: var(--fs-md); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Mark won / lost dialog */
+.crm-close { display: flex; flex-direction: column; gap: 14px; }
+.crm-close textarea { resize: vertical; min-height: 76px; }
+.crm-plan { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink-2); font-size: var(--fs-sm); font-weight: 500; }
+.crm-plan.has-date { background: var(--warn-soft); color: var(--ink); }
+.crm-plan svg { flex-shrink: 0; }
+
+/* Leads table: fixed columns, one line per cell line */
+.crm-table { table-layout: fixed; }
+.crm-table td { height: 64px; }
+.crm-ell { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-table .crm-client > div { flex: 1; }
+.crm-center { text-align: center !important; }
+.crm-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 24px; padding: 0 8px; border-radius: var(--r-pill); background: var(--surface-3); color: var(--ink); font-size: var(--fs-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+.crm-due-chip.is-overdue, .crm-due-chip.is-today { display: inline-block; padding: 3px 10px; border-radius: var(--r-pill); font-size: var(--fs-sm); max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.crm-due-chip.is-overdue { background: var(--bad-soft); }
+.crm-due-chip.is-today { background: var(--warn-soft); }
+
+/* Lead page: the outcome box is a card like its neighbours */
+.pv .crm-outcome, .drawer .crm-outcome { background: var(--surface); border-color: var(--line); box-shadow: var(--shadow-card); padding: 20px; border-radius: var(--r-lg); }
+.pv .crm-outcome.is-won, .drawer .crm-outcome.is-won { background: var(--good-soft); border-color: transparent; }
+.pv .crm-outcome.is-lost, .drawer .crm-outcome.is-lost { background: var(--bad-soft); border-color: transparent; }
+.pv .crm-outcome-actions .mac-btn { flex: 0 1 180px; }
+.pv .crm-fu-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+
+/* Won lead: proposed price, discount, final price */
+.crm-deal { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 0; padding: 12px; border-radius: var(--r-md); background: var(--surface); }
+.crm-deal dt { font-size: var(--fs-xs); color: var(--ink-3); }
+.crm-deal dd { margin: 2px 0 0; font-size: var(--fs-md); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.crm-outcome .mac-btn { text-decoration: none; }

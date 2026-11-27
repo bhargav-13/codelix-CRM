@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import TrendChart from '../charts/TrendChart';
+import { IbcsColumns, IbcsTitle } from '../charts/ibcs';
 import {
   resolvePeriod, previousPeriod, samePeriodLastYear, effectiveEnd, summarize, buildColumns, buildStatement,
   computeReceivables, gstClientSet, currentMonth, addMonths, txMonth, rangeLabel,
@@ -62,6 +62,7 @@ export default function FinanceOverview({ txs, projects }) {
     return cols.map((c, i) => ({ label: c.label, fullLabel: rangeLabel(c.start, c.end), revenue: s.revenue[i], expense: s.expense[i], profit: s.profit[i], margin: s.margin[i] }));
   }, [txs, now, opts, ctx]);
 
+  const trendMax = Math.max(1, ...trend.flatMap(t => [t.revenue, t.expense, t.profit]));
   const receivables = useMemo(() => computeReceivables(projects), [projects]);
   const { cur, prev, yoy } = view;
 
@@ -119,8 +120,12 @@ export default function FinanceOverview({ txs, projects }) {
       </div>
 
       <div>
-        <div style={{ fontSize: 12, fontWeight: 600, color: INK.secondary, marginBottom: 6 }}>Last 12 months</div>
-        <TrendChart points={trend} height={220} />
+        <IbcsTitle what="Revenue, expenses and net profit" unit="₹" when="Last 12 months, actual" />
+        <div className="ib-multiples" style={{ '--n': 3, marginTop: 12 }}>
+          <IbcsColumns label="Revenue" tone="brand" height={130} format={fmtCompact} max={trendMax} points={trend.map(t => ({ label: t.label, value: t.revenue }))} />
+          <IbcsColumns label="Expenses" tone="warn" height={130} format={fmtCompact} max={trendMax} points={trend.map(t => ({ label: t.label, value: t.expense }))} />
+          <IbcsColumns label="Net profit" tone="good" height={130} format={fmtCompact} max={trendMax} negBad points={trend.map(t => ({ label: t.label, value: t.profit }))} />
+        </div>
       </div>
 
       <style>{`.fo-tabs{max-width:100%;overflow-x:auto;scrollbar-width:none}.fo-tabs::-webkit-scrollbar{display:none}.fo-tabs .tab-item{flex-shrink:0}

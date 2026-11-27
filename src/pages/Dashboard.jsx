@@ -14,16 +14,15 @@ import { useAuth } from '../contexts/AuthContext';
 import { clientsDB, transactionsDB, employeesDB, projectsDB, settingsDB } from '../lib/db';
 import { computeBalances } from '../lib/finance';
 import FinanceOverview from '../components/dashboard/FinanceOverview';
+import { inr } from '../lib/money';
+import { IbcsBars } from '../components/charts/ibcs';
 import TodayAttendance from '../components/dashboard/TodayAttendance';
 
-const fmt = n => '₹' + Number(n || 0).toLocaleString('en-IN');
+const fmt = n => inr(n);
 const longDate = () => new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const greeting = () => { const h = new Date().getHours(); return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'; };
 
-const PIPELINE = [
-  ['Hot', 'var(--color-red-500)'], ['Warm', 'var(--color-orange-500)'], ['Cold', 'var(--color-blue-500)'],
-  ['Closed Won', 'var(--color-green-500)'], ['Closed Lost', 'var(--color-neutral-400)'],
-];
+const PIPELINE = [['Draft', 'brand'], ['Won', 'good'], ['Lost', 'bad']];
 
 // A headline number. The whole tile is a button that opens the page behind it.
 function Tile({ label, value, sub, icon: Icon, dark, onClick }) {
@@ -139,12 +138,13 @@ export function DashboardView({ data, subtitle }) {
   const today = todayLocal();
   const go = to => () => navigate(to);
 
-  const isActive = c => c.status !== 'Closed Won' && c.status !== 'Closed Lost';
+  // A lost lead can still carry a follow-up (try again later); a won one never does.
+  const isActive = c => c.status !== 'Won';
   const overdueFollowups = clients.filter(c => isActive(c) && c.nextFollowup && c.nextFollowup < today);
   const todayFollowups   = clients.filter(c => isActive(c) && c.nextFollowup === today);
-  const hotClients       = clients.filter(c => c.status === 'Hot');
-  const leads            = clients.filter(c => ['Hot', 'Warm'].includes(c.status))
-    .sort((a, b) => ({ Hot: 0, Warm: 1 }[a.status] ?? 9) - ({ Hot: 0, Warm: 1 }[b.status] ?? 9));
+  const openLeads        = clients.filter(c => c.status === 'Draft');
+  const leads            = clients.filter(c => isActive(c) && c.nextFollowup)
+    .sort((a, b) => a.nextFollowup.localeCompare(b.nextFollowup));
   const activeProjects   = projects.filter(p => p.status === 'In Progress');
   const activeEmployees  = employees.filter(e => e.status === 'Active');
   const curMonthLabel    = new Date().toLocaleString('en-IN', { month: 'long', year: 'numeric' });
@@ -168,7 +168,7 @@ export function DashboardView({ data, subtitle }) {
         <div className="dash-top">
           <div className="tile-grid">
             <Tile dark label="Total balance" value={fmt(bal.total)} sub={`Cash ${fmt(bal.cash)} · Bank ${fmt(bal.bank)}`} icon={RiWalletLine} onClick={go('/transactions')} />
-            <Tile label="Clients" value={clients.length} sub={`${hotClients.length} hot lead${hotClients.length === 1 ? '' : 's'}`} icon={RiGroupLine} onClick={go('/crm')} />
+            <Tile label="Clients" value={clients.length} sub={`${openLeads.length} open lead${openLeads.length === 1 ? '' : 's'}`} icon={RiGroupLine} onClick={go('/crm')} />
             <Tile label="Active projects" value={activeProjects.length} sub={`${projects.filter(p => p.status === 'Completed').length} completed`} icon={RiFolder3Line} onClick={go('/projects')} />
             <Tile label="Team" value={activeEmployees.length} sub={pendingSalaries.length > 0 ? `${pendingSalaries.length} salary pending` : 'All paid this month'} icon={RiTeamLine} onClick={go('/employees')} />
           </div>
@@ -236,27 +236,8 @@ export function DashboardView({ data, subtitle }) {
 
           {/* Client pipeline */}
           <section className="mac-card" style={{ padding: 20 }}>
-            <CardHead title="Client pipeline" hint={`${clients.length} total`} action="CRM" onAction={go('/crm')} />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {PIPELINE.map(([status, color]) => {
-                const count = clients.filter(c => c.status === status).length;
-                const pct = clients.length ? Math.round((count / clients.length) * 100) : 0;
-                return (
-                  <button key={status} type="button" className="row-link" onClick={go('/crm')} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}
-                    aria-label={`${status}: ${count} client${count === 1 ? '' : 's'}, ${pct}%`}>
-                    <span style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--ink-2)' }}>
-                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />{status}
-                      </span>
-                      <span className="tabular" style={{ fontWeight: 600 }}>{count}</span>
-                    </span>
-                    <span style={{ display: 'block', height: 6, borderRadius: 100, background: 'var(--surface-3)', overflow: 'hidden' }}>
-                      <span style={{ display: 'block', height: '100%', borderRadius: 100, background: color, width: `${pct}%`, transition: 'width 500ms var(--ease)' }} />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            <CardHead title="Leads by status" hint={`${clients.length} total`} action="CRM" onAction={go('/crm')} />
+            <IbcsBars share rows={PIPELINE.map(([status, tone]) => ({ name: status, tone, value: clients.filter(c => c.status === status).length }))} empty="No leads yet." />
           </section>
 
           {/* Active projects */}
@@ -314,9 +295,9 @@ export function DashboardView({ data, subtitle }) {
 
           {/* Hot leads */}
           <section className="mac-card" style={{ padding: 20 }}>
-            <CardHead title="Leads to follow up" hint={`${hotClients.length} hot`} action="CRM" onAction={go('/crm')} />
+            <CardHead title="Leads to follow up" hint={`${overdueFollowups.length} overdue`} action="CRM" onAction={go('/crm')} />
             {leads.length === 0
-              ? <Empty>No hot or warm leads</Empty>
+              ? <Empty>No follow-ups planned</Empty>
               : leads.slice(0, 6).map(c => {
                 const isOverdue = c.nextFollowup && c.nextFollowup < today;
                 return (
@@ -325,7 +306,7 @@ export function DashboardView({ data, subtitle }) {
                     <span style={{ flex: 1, minWidth: 0 }}>
                       <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                         <span style={{ fontSize: 13.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.clientName}</span>
-                        <Badge color={getStatusColor(c.status)}>{c.status}</Badge>
+                        <Badge color={getStatusColor(c.interest || c.status)}>{c.interest || c.status}</Badge>
                       </span>
                       <span style={{ display: 'block', fontSize: 12, color: isOverdue ? 'var(--bad)' : 'var(--ink-3)', fontWeight: isOverdue ? 500 : 400 }}>
                         {c.nextFollowup ? `${isOverdue ? 'Overdue · ' : 'Follow up '}${fmtDate(c.nextFollowup)}` : 'No follow-up set'}

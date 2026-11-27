@@ -41,7 +41,8 @@ export { Badge };
 export function getStatusColor(status) {
   const map = {
     'Hot':'hot','Warm':'warm','Cold':'cold',
-    'Closed Won':'won','Closed Lost':'lost',
+    'Closed Won':'won','Closed Lost':'lost','Won':'won','Lost':'lost','Draft':'blue',
+    'Connected':'green','No response':'red','Meeting done':'blue','Proposal sent':'purple','Call back later':'orange',
     'High':'high','Medium':'medium','Low':'low',
     'Active':'active','Inactive':'inactive','Left':'left',
     'In Progress':'inprogress','Completed':'completed',
