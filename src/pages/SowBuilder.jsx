@@ -158,9 +158,17 @@ export default function SowBuilder() {
   const th = themeOf(d.theme);
   const accent = d.accent || th.accent;
 
-  function fillFromProject(id) {
-    const p = projects.find(x => String(x.id) === String(id));
-    if (!p) return;
+  // The project box is a list and a text box in one: choosing (or typing the exact name of) a saved
+  // project fills in its details; any other text is simply the project name.
+  const projectName = p => String(p.name || p.projectName || '').trim();
+  function setProject(text) {
+    const p = text.trim() && projects.find(x => projectName(x).toLowerCase() === text.trim().toLowerCase());
+    if (p && projectName(p).toLowerCase() !== d.project.title.trim().toLowerCase()) fillFromProject(p);
+    else up('project.title', text);
+  }
+  const clientNames = [...new Set([...clients.map(c => c.companyName || c.clientName), ...projects.map(p => p.clientName)].map(n => String(n || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+  function fillFromProject(p) {
     const c = clients.find(x => [x.clientName, x.companyName].some(n => n && String(n).trim().toLowerCase() === String(p.clientName || '').trim().toLowerCase()));
     setD(prev => ({
       ...prev,
@@ -170,7 +178,7 @@ export default function SowBuilder() {
       pricing: { ...prev.pricing, total: p.valuation ? String(p.valuation) : prev.pricing.total, gst: p.billingType ? p.billingType !== 'Without GST' : prev.pricing.gst,
         schedule: (p.milestones || []).length ? p.milestones.map(m => ({ label: m.label, percent: m.percent, when: '' })) : prev.pricing.schedule },
     }));
-    toast.success('Filled from the project');
+    toast.success(`Filled from ${projectName(p)}`);
   }
 
   async function pickImage(file, key, opts) {
@@ -276,21 +284,19 @@ export default function SowBuilder() {
             </Sec>
 
             <Sec title="Client and project" open>
-              {projects.length > 0 && (
-                <Field label="Fill from a project" hint="Copies the client, project name, value and payment milestones.">
-                  {id => <select id={id} className="mac-select" value="" onChange={e => fillFromProject(e.target.value)}>
-                    <option value="">Choose a project…</option>
-                    {projects.map(p => <option key={p.id} value={p.id}>{[p.name || p.projectName, p.clientName].filter(Boolean).join(' · ')}</option>)}
-                  </select>}
-                </Field>
-              )}
+              <Field label="Project" required hint={projects.length ? 'Choose a saved project to fill in its client, value and payment milestones, or type a new name.' : 'Type the project name.'}>
+                {id => <>
+                  <input id={id} className="mac-input" list="sow-projects" value={d.project.title} onChange={e => setProject(e.target.value)} placeholder="Choose or type a project" maxLength={90} autoComplete="off" />
+                  <datalist id="sow-projects">{projects.map(p => <option key={p.id} value={projectName(p)}>{p.clientName || ''}</option>)}</datalist>
+                </>}
+              </Field>
               <FormGrid>
-                <Field label="Client (company)" required>{id => <input id={id} className="mac-input" value={d.client.name} onChange={e => up('client.name', e.target.value)} placeholder="Client or company name" />}</Field>
+                <Field label="Client (company)" required>{id => <input id={id} className="mac-input" list="sow-clients" autoComplete="off" value={d.client.name} onChange={e => up('client.name', e.target.value)} placeholder="Choose or type a client" />}</Field>
                 <Field label="Contact person">{id => <input id={id} className="mac-input" value={d.client.contact} onChange={e => up('client.contact', e.target.value)} placeholder="Full name" />}</Field>
                 <Field label="Designation">{id => <input id={id} className="mac-input" value={d.client.designation} onChange={e => up('client.designation', e.target.value)} placeholder="e.g. Director" />}</Field>
                 <Field label="Project duration">{id => <input id={id} className="mac-input" value={d.project.duration} onChange={e => up('project.duration', e.target.value)} placeholder="e.g. 10 weeks" />}</Field>
               </FormGrid>
-              <Field label="Project name" required>{id => <input id={id} className="mac-input" value={d.project.title} onChange={e => up('project.title', e.target.value)} maxLength={90} />}</Field>
+              <datalist id="sow-clients">{clientNames.map(n => <option key={n} value={n} />)}</datalist>
               <Field label="Line under the title">{id => <input id={id} className="mac-input" value={d.project.subtitle} onChange={e => up('project.subtitle', e.target.value)} maxLength={160} />}</Field>
               <FormGrid>
                 <Field label="SOW number">{id => <input id={id} className="mac-input" value={d.doc.number} onChange={e => up('doc.number', e.target.value)} />}</Field>
