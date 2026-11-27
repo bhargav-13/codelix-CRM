@@ -16,8 +16,9 @@ export const DOC_TYPES = [
   { id: 'sow',        label: 'SOW (scope of work)',                     text: 'Exactly what is included and what is not, with deliverables and timelines.' },
   { id: 'welcome',    label: 'Welcome letter',                          text: 'Sent when a client signs on: who their contacts are and what happens next.' },
   { id: 'nda',        label: 'NDA',                                     text: 'The confidentiality agreement signed with a client or vendor.' },
-  { id: 'thank_you',  label: 'Thank you letter',                        text: 'Sent when a project is delivered or a payment is received.' },
+  { id: 'thank_you',  label: 'Thank you letter',                        text: 'Sent when a project is delivered, to thank the client for the work.' },
   { id: 'milestones', label: 'Project milestones and payment schedule', text: 'Each milestone with its date, and the payment due against it.' },
+  { id: 'payment_ack', label: 'Payment acknowledgement letter',         text: 'Confirms a payment was received: the amount, the date and what it was for.' },
 ];
 export const OTHER_TYPE = { id: 'other', label: 'Other' };
 export const docTypeLabel = id => DOC_TYPES.find(t => t.id === id)?.label || OTHER_TYPE.label;

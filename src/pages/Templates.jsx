@@ -2,10 +2,10 @@
 import Header from '../components/layout/Header';
 import Badge from '../components/ui/Badge';
 import { DOC_TYPES } from '../lib/documents';
-import { FileText, FileSignature, HandHeart, ShieldCheck, Heart, CalendarRange, Info } from 'lucide-react';
+import { FileText, FileSignature, HandHeart, ShieldCheck, Heart, CalendarRange, ReceiptText, Info } from 'lucide-react';
 import './Documents.css';
 
-const ICONS = { proposal: FileText, sow: FileSignature, welcome: HandHeart, nda: ShieldCheck, thank_you: Heart, milestones: CalendarRange };
+const ICONS = { proposal: FileText, sow: FileSignature, welcome: HandHeart, nda: ShieldCheck, thank_you: Heart, milestones: CalendarRange, payment_ack: ReceiptText };
 
 export default function Templates() {
   return (
