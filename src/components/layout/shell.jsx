@@ -4,7 +4,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import {
   RiArchiveLine, RiCalendarCheckLine, RiChat3Line, RiFileCopy2Line, RiFileList3Line, RiFlightTakeoffLine, RiFolder3Line, RiGroupLine, RiHandCoinLine,
-  RiKanbanView, RiKey2Line, RiLayoutGridLine, RiLineChartLine, RiMoneyRupeeCircleLine, RiShieldCheckLine, RiTeamLine,
+  RiGlobalLine, RiKanbanView, RiKey2Line, RiLayoutGridLine, RiLineChartLine, RiMoneyRupeeCircleLine, RiShieldCheckLine, RiTeamLine,
 } from '@remixicon/react';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -17,6 +17,7 @@ const PARTNER_NAV = [
   { title: 'Overview', items: [
     { icon: RiLayoutGridLine, label: 'Dashboard', to: '/', keywords: 'home overview' },
     { icon: RiLineChartLine, label: 'P&L Reports', to: '/reports', keywords: 'profit loss finance report' },
+    { icon: RiGlobalLine, label: 'Website', to: '/website', keywords: 'analytics google search console seo clicks impressions traffic sitemap' },
   ] },
   { title: 'Business', items: [
     { icon: RiGroupLine, label: 'CRM', to: '/crm', keywords: 'clients leads customers follow-up' },

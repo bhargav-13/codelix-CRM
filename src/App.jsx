@@ -12,6 +12,7 @@ import NoAccess from './pages/NoAccess';
 import ChangePassword from './pages/ChangePassword';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Reports = lazy(() => import('./pages/Reports'));
+const Website = lazy(() => import('./pages/Website'));
 const CRM = lazy(() => import('./pages/CRM'));
 const Transactions = lazy(() => import('./pages/Transactions'));
 const Employees = lazy(() => import('./pages/Employees'));
@@ -90,6 +91,7 @@ function AppContent() {
         <Routes>
           <Route path="/"             element={<Dashboard />} />
           <Route path="/reports"      element={<Reports />} />
+          <Route path="/website"      element={<Website />} />
           <Route path="/crm"          element={<CRM />} />
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/employees"    element={<Employees />} />

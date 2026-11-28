@@ -1,0 +1,42 @@
+/* Website analytics */
+.web-note { margin: 0; font-size: var(--fs-sm); color: var(--ink-3); }
+.web-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+@media (max-width: 900px) { .web-grid2 { grid-template-columns: minmax(0, 1fr); } }
+
+.web-metrics { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.web-metrics button { height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--surface); color: var(--ink-2); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.web-metrics button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink, #fff); }
+.web-metrics button:focus-visible { outline: none; box-shadow: var(--ring); }
+
+.web-trend svg { display: block; width: 100%; height: auto; }
+.web-grid { stroke: var(--line); stroke-width: 1; }
+.web-axis { fill: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.web-line { fill: none; stroke: var(--brand); stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+.web-line.prev { stroke: var(--ink-3); stroke-width: 1.5; stroke-dasharray: 5 5; opacity: .7; }
+.web-cursor { stroke: var(--line-strong); stroke-width: 1; }
+.web-dot { fill: var(--surface); stroke: var(--brand); stroke-width: 2.5; }
+.web-trend-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin-top: 6px; font-size: var(--fs-sm); color: var(--ink-2); }
+.web-trend-foot i { display: inline-block; width: 18px; height: 0; margin-right: 6px; vertical-align: middle; border-top: 2.5px solid var(--brand); }
+.web-trend-foot i.prev { border-top: 1.5px dashed var(--ink-3); }
+.web-trend-foot strong { margin-left: auto; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.web-table { table-layout: fixed; }
+.web-table th:first-child, .web-table td:first-child { width: 46%; }
+.web-th { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.web-th:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 4px; }
+.web-key { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.web-key a { color: var(--brand); text-decoration: none; }
+.web-key a:hover { text-decoration: underline; }
+
+.web-idea { display: flex; flex-direction: column; gap: 8px; padding: 16px; }
+.web-idea .section-title { display: flex; align-items: center; gap: 6px; margin: 0; }
+.web-idea-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.web-idea-list li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line); font-size: var(--fs-sm); }
+.web-idea-list li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); }
+.web-idea-list li em { flex: none; font-style: normal; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+.web-check { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.web-check .section-title { margin: 0; }
+.web-check-form { display: flex; gap: 8px; flex-wrap: wrap; }
+.web-check-form input { flex: 1 1 320px; }
+.web-break { overflow-wrap: anywhere; }
