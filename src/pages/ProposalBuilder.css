@@ -1,0 +1,67 @@
+/* Proposal builder: the bits the SOW builder styles (SowBuilder.css) do not cover. */
+.pp-print { position: absolute; left: -20000px; top: 0; width: 1440px; pointer-events: none; }
+
+.ppf-warn { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 0; padding: 10px 12px; border-radius: var(--r-md); border: 1px solid var(--color-warning, #f59e0b); background: var(--surface); color: var(--ink); font-size: var(--fs-sm); }
+.ppf-warn svg { flex: none; margin-top: 1px; color: var(--color-warning, #d97706); }
+.sow-bar + .sow-layout, .ppf-warn + .sow-layout { margin-top: 12px; }
+
+.ppf-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.ppf-preset { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px 5px 5px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font: inherit; font-size: var(--fs-sm); color: var(--ink-2); cursor: pointer; }
+.ppf-preset:hover { border-color: var(--line-strong); }
+.ppf-preset.on { border-color: var(--accent); box-shadow: var(--ring); color: var(--ink); }
+.ppf-preset:focus-visible { outline: none; box-shadow: var(--ring); }
+.ppf-preset > span { display: inline-flex; align-items: center; gap: 2px; padding: 3px 4px; border-radius: 999px; border: 1px solid var(--line); }
+.ppf-preset i { display: block; width: 10px; height: 10px; border-radius: 50%; }
+
+.ppf-colours { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.ppf-colour { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); cursor: pointer; min-width: 0; }
+.ppf-colour:focus-within { box-shadow: var(--ring); border-color: var(--accent); }
+.ppf-colour input { flex: none; width: 30px; height: 30px; padding: 0; border: 0; background: none; cursor: pointer; }
+.ppf-colour span { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.ppf-colour b { font-size: var(--fs-sm); font-weight: 600; color: var(--ink); }
+.ppf-colour em { font-style: normal; font-size: 11px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+.ppf-sum { margin: 0; font-size: var(--fs-sm); color: var(--ink-2); }
+.ppf-sum b { color: var(--ink); }
+
+
+/* the page the form is editing, flashed once when the preview scrolls to it */
+.pp-slot.pp-flash { animation: pp-flash 1.1s ease-out; }
+@keyframes pp-flash {
+  0%, 35% { box-shadow: 0 0 0 3px var(--accent), 0 8px 28px rgba(15, 23, 42, .12); }
+  100% { box-shadow: 0 1px 3px rgba(15, 23, 42, .12), 0 8px 28px rgba(15, 23, 42, .08); }
+}
+
+/* the preview runs from just under the sticky page header to the bottom of the window */
+@media (min-width: 1001px) {
+  .pp-builder .sow-stage-wrap { top: calc(var(--pp-head, 120px) + 10px); height: calc(100dvh - var(--pp-head, 120px) - 20px); }
+}
+
+.ppf-tip { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 0; font-size: var(--fs-sm); color: var(--ink-2); }
+
+/* preview size controls above the pages */
+.pp-builder .sow-stage-wrap { display: flex; flex-direction: column; }
+.pp-builder .sow-stage { flex: 1 1 auto; height: auto; min-height: 0; }
+.ppf-zoom { flex: none; display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.ppf-zoom-pct { min-width: 42px; text-align: center; font-size: var(--fs-sm); font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.ppf-zoom-gap { flex: 1 1 auto; }
+.ppf-zoom .mac-btn { padding: 4px 10px; font-size: var(--fs-sm); }
+.ppf-zoom .mac-btn.on { background: var(--surface-2); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-strong); }
+
+/* ── the form, one part at a time ── */
+.ppf-steps { position: sticky; top: calc(var(--pp-head, 120px) + 10px); z-index: 4; display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: 0 6px 16px -12px rgba(15, 23, 42, .25); }
+.ppf-step { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 4px; border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--surface); color: var(--ink-2); font: inherit; font-size: var(--fs-sm); font-weight: 500; cursor: pointer; white-space: nowrap; }
+.ppf-step:hover { border-color: var(--line-strong); color: var(--ink); }
+.ppf-step:focus-visible { outline: none; box-shadow: var(--ring); }
+.ppf-step-n { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; border-radius: 50%; background: var(--surface-3); color: var(--ink-2); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ppf-step.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink, #fff); }
+.ppf-step.on .ppf-step-n { background: rgba(255, 255, 255, .22); color: inherit; }
+.ppf-step.off { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--line-strong); }
+
+.sowf-page { scroll-margin-top: 160px; }
+.sowf-page-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.sowf-page-head h2 { margin: 0; font-size: var(--fs-lg, 16px); font-weight: 600; color: var(--ink); }
+.sowf-page-head .sowf-reset { margin: 0; align-self: auto; }
+.ppf-stepnav { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0 12px; }
+
+.pp-builder .pp-slot { cursor: pointer; }

@@ -31,6 +31,52 @@ const moneyOf = p => {
   const paid = paidOf(p);
   return { value, paid, balance: Math.max(0, value - paid), pct: value ? Math.round((paid / value) * 100) : 0, fullyPaid: value > 0 && paid >= value };
 };
+// Months from the start date to the due date, counted by the calendar: 1 Jan → 1 Mar is 2,
+// 1 Jan → 16 Feb is 1.5. Null when either date is missing or the due date is first.
+function monthsBetween(from, to) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to || '') || to < from) return null;
+  const [y1, m1, d1] = from.split('-').map(Number), [y2, m2, d2] = to.split('-').map(Number);
+  const inMonth = new Date(y2, m2, 0).getDate();
+  return Math.max(0, Math.round(((y2 - y1) * 12 + (m2 - m1) + (d2 - d1) / inMonth) * 10) / 10);
+}
+// Profit margin: the value we keep (before GST) minus monthly cost × months.
+// state: 'ok' | 'noCost' (no monthly cost entered) | 'noDates' | 'noValue'
+function marginOf(p) {
+  const withGst = p.billingType === 'With GST';
+  const revenue = withGst ? gstBreakdown(p.valuation).taxable : +p.valuation || 0;
+  const monthly = p.monthlyCost === '' || p.monthlyCost == null ? null : +p.monthlyCost;
+  const months = monthsBetween(p.startDate, p.dueDate);
+  if (!(revenue > 0)) return { state: 'noValue' };
+  if (monthly == null || Number.isNaN(monthly)) return { state: 'noCost', revenue };
+  if (months == null) return { state: 'noDates', revenue, monthly };
+  const cost = Math.round(monthly * months);
+  const profit = revenue - cost;
+  const pct = Math.round((profit / revenue) * 1000) / 10;
+  return { state: 'ok', revenue, monthly, months, cost, profit, pct, tone: pct >= 40 ? 'good' : pct >= 15 ? 'warn' : 'bad', withGst };
+}
+const monthsText = n => `${n % 1 ? n.toFixed(1) : n} month${n === 1 ? '' : 's'}`;
+
+// The margin line on a card and in the project view.
+function MarginLine({ p, compact }) {
+  const g = marginOf(p);
+  if (g.state === 'noValue') return null;
+  if (g.state !== 'ok') {
+    return (
+      <div className="proj-margin is-empty">
+        <span>Margin</span>
+        <em>{g.state === 'noCost' ? 'Add the monthly cost to see it' : 'Add start and due dates to see it'}</em>
+      </div>
+    );
+  }
+  return (
+    <div className={`proj-margin is-${g.tone}`} title={`${fmtMoney(g.revenue)}${g.withGst ? ' before GST' : ''} − ${fmtMoney(g.monthly)} × ${monthsText(g.months)} = ${fmtMoney(g.profit)}`}>
+      <span>Margin</span>
+      <strong>{g.pct}%</strong>
+      <em>{fmtMoney(g.profit)} profit{compact ? '' : ` · cost ${fmtMoney(g.cost)} (${fmtMoney(g.monthly)} × ${monthsText(g.months)})`}</em>
+    </div>
+  );
+}
+
 const isOverdue = p => !!p.dueDate && p.dueDate < todayLocal() && p.status !== 'Completed' && p.status !== 'Cancelled';
 
 // Payments live in a JSON list on the project. New ones get a stable `key`;
@@ -135,6 +181,7 @@ function ProjectCard({ p, menu, onOpen }) {
           <div><dt>Balance</dt><dd className={m.balance > 0 ? 'is-due' : 'is-clear'}>{m.balance > 0 ? fmtMoney(m.balance) : 'Nil'}</dd></div>
           <div><dt>Payments</dt><dd>{(p.payments || []).length}</dd></div>
         </dl>
+        <MarginLine p={p} />
       </div>
 
       <ul className="proj-facts">
@@ -236,6 +283,15 @@ function ProjectForm({ v, set, errors, employees, partners, onSubmit }) {
           </Field>
           <Field label="Next payment due">
             <input className="mac-input" type="date" value={v.nextPaymentDue || ''} onChange={e => set('nextPaymentDue', e.target.value)} />
+          </Field>
+          <Field label="Our cost per month (₹)" error={errors.monthlyCost}
+            hint={(() => {
+              const g = marginOf(v);
+              if (g.state === 'ok') return `${fmtMoney(g.monthly)} × ${monthsText(g.months)} = ${fmtMoney(g.cost)} cost · ${fmtMoney(g.profit)} profit · ${g.pct}% margin`;
+              if (g.state === 'noDates') return 'Add the start and due dates to work out the margin.';
+              return 'Team, tools and hosting for this project each month. Used for the profit margin.';
+            })()}>
+            <NumInput className="mac-input" value={v.monthlyCost ?? ''} onChange={val => set('monthlyCost', val)} placeholder="e.g. 10000" />
           </Field>
         </FormGrid>
       </FormSection>
@@ -372,7 +428,16 @@ function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDele
           {withGst && m.value > 0 && <><dt>Value before GST</dt><dd>{fmtMoney(gst.taxable)}</dd><dt>GST amount (18%)</dt><dd>{fmtMoney(gst.gst)}</dd></>}
           <dt>Received</dt><dd className="amount-in">{fmtMoney(m.paid)}{m.value > 0 ? ` (${m.pct}%)` : ''}</dd>
           <dt>Balance to collect</dt><dd>{fmtMoney(m.balance)}</dd>
+          {(() => {
+            const g = marginOf(proj);
+            if (g.state !== 'ok') return null;
+            return <>
+              <dt>Our cost</dt><dd>{fmtMoney(g.cost)} <span className="muted">({fmtMoney(g.monthly)} × {monthsText(g.months)})</span></dd>
+              <dt>Profit</dt><dd className={g.profit >= 0 ? 'amount-in' : 'amount-out'}>{fmtMoney(g.profit)}</dd>
+            </>;
+          })()}
         </dl>
+        <MarginLine p={proj} compact />
       </section>
 
       <section className="pv-card">
@@ -565,6 +630,7 @@ export default function Projects() {
     if (!v.projectName?.trim()) errors.projectName = 'Enter a project name';
     if (v.valuation !== '' && v.valuation != null && !(+v.valuation >= 0)) errors.valuation = 'Enter a number';
     if (v.startDate && v.dueDate && v.dueDate < v.startDate) errors.dueDate = 'Due date is before the start date';
+    if (v.monthlyCost !== '' && v.monthlyCost != null && !(+v.monthlyCost >= 0)) errors.monthlyCost = 'Enter a number';
     setFormErrors(errors);
     if (Object.keys(errors).length) return;
 

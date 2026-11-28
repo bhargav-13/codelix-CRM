@@ -120,7 +120,7 @@ export const employeesDB = {
 // project save never carries the payments list.
 // ─────────────────────────────────────────────
 const cleanProject = p => ({
-  ...tidy(p, { num: ['valuation'], drop: ['payments', 'key'] }),
+  ...tidy(p, { num: ['valuation', 'monthlyCost'], drop: ['payments', 'key'] }),
   billingType: p.billingType || 'Without GST',
   milestones: p.milestones || [],
   assignedEmployees: p.assignedEmployees || [],

@@ -22,6 +22,8 @@
 .sowf-row-fields > input { flex: 1 1 130px; min-width: 0; }
 .sowf-row-fields > textarea { flex: 1 1 100%; min-height: 56px; }
 .sowf-add { align-self: flex-start; }
+.sowf-reset { align-self: flex-end; margin: -6px -6px -4px 0; font-size: var(--fs-sm); }
+.sowf-row-tools { flex: none; display: inline-flex; align-items: center; }
 .sowf-toggle { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--ink-2); cursor: pointer; }
 .sowf-toggle input { width: 16px; height: 16px; accent-color: var(--accent); }
 
@@ -78,3 +80,6 @@
 .sow-pdf-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-md); font-weight: 600; color: var(--ink); }
 .sow-pdf-frame { flex: 1 1 auto; width: 100%; border: 0; background: #525659; }
 .sow-print { position: absolute; left: -10000px; top: 0; width: 794px; pointer-events: none; }
+
+/* text boxes that grow with their text (see AutoArea) */
+.sowf-auto { resize: none !important; overflow: hidden !important; min-height: 0 !important; line-height: 1.45; }

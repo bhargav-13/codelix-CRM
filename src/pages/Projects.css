@@ -67,3 +67,17 @@
 .proj-audit { display: flex; flex-direction: column; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .proj-audit:last-child { border-bottom: none; }
 .proj-audit-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+
+/* profit margin: value before GST minus monthly cost × months */
+.proj-margin { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; padding: 8px 10px; border-radius: var(--r-sm); background: var(--surface); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.proj-margin > span { font-size: var(--fs-xs); color: var(--ink-3); }
+.proj-margin strong { font-size: var(--fs-lg, 16px); }
+.proj-margin em { font-style: normal; color: var(--ink-2); }
+.proj-margin.is-good strong { color: var(--good); }
+.proj-margin.is-warn strong { color: var(--warn); }
+.proj-margin.is-bad strong { color: var(--bad); }
+.proj-margin.is-good { box-shadow: inset 3px 0 0 var(--good); }
+.proj-margin.is-warn { box-shadow: inset 3px 0 0 var(--warn); }
+.proj-margin.is-bad { box-shadow: inset 3px 0 0 var(--bad); }
+.proj-margin.is-empty em { color: var(--ink-3); }
+.pv-card .proj-margin { margin-top: 10px; background: var(--surface-2); }

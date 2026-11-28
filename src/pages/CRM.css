@@ -124,3 +124,30 @@
 .crm-deal dt { font-size: var(--fs-xs); color: var(--ink-3); }
 .crm-deal dd { margin: 2px 0 0; font-size: var(--fs-md); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .crm-outcome .mac-btn { text-decoration: none; }
+
+/* ── colour by status (stripe and soft tint) and priority (flag) ── */
+.crm-row { --crm-stripe: var(--brand); }
+.crm-row.crm-s-won { --crm-stripe: var(--good); }
+.crm-row.crm-s-lost { --crm-stripe: var(--bad); }
+.crm-table tr.crm-row > td:first-child { box-shadow: inset 4px 0 0 var(--crm-stripe); }
+.crm-table tr.crm-row.crm-s-won > td { background: color-mix(in srgb, var(--good-soft) 55%, transparent); }
+.crm-table tr.crm-row.crm-s-lost > td { background: color-mix(in srgb, var(--bad-soft) 45%, transparent); }
+.crm-table tr.crm-row.crm-s-draft.crm-p-high > td { background: color-mix(in srgb, var(--warn-soft) 45%, transparent); }
+.crm-card-row.crm-row .list-card { box-shadow: inset 4px 0 0 var(--crm-stripe); }
+.crm-card-row.crm-s-won .list-card { background: color-mix(in srgb, var(--good-soft) 60%, var(--surface)); }
+.crm-card-row.crm-s-lost .list-card { background: color-mix(in srgb, var(--bad-soft) 50%, var(--surface)); }
+
+.crm-badges { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.crm-flag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--r-pill); font-size: var(--fs-xs); font-weight: 600; line-height: 18px; white-space: nowrap; }
+.crm-flag-high { background: var(--bad-soft); color: var(--bad); }
+.crm-flag-medium { background: var(--warn-soft); color: var(--warn); }
+.crm-flag-low { background: var(--surface-3); color: var(--ink-2); }
+
+/* ── quick actions on every lead ── */
+.crm-acts { display: inline-flex; gap: 2px; }
+.crm-acts .icon-btn { color: var(--ink-3); }
+.crm-acts .icon-btn:hover { color: var(--brand); background: var(--brand-soft); }
+.crm-card-acts { display: flex; flex-direction: column; justify-content: center; gap: 4px; }
+.crm-card-acts .icon-btn, .crm-card-acts .crm-call { width: 40px; height: 40px; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

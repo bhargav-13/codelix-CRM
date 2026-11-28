@@ -1,7 +1,7 @@
 // CRM leads. A lead is captured first (who, industry, what they want); after the meetings it is
 // closed as Won or Lost with the reason. Follow-ups are numbered cards under each lead.
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import Badge, { getStatusColor } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -19,7 +19,7 @@ import { SERVICE_TYPES, INDUSTRIES, SOURCES, PRIORITIES, LEAD_INTEREST, LOST_REA
 import { discountOf, WON, LOST, DRAFT, addDays, lossFollowup, isOpen, isOverdue, isDueToday, followupCount, numberedFollowups, insights } from '../lib/crm';
 import {
   Plus, Phone, Mail, Globe, Edit2, Trash2, History, AlertCircle, CalendarClock, Repeat, IndianRupee, Users, SearchX,
-  Trophy, XCircle, RotateCcw, BarChart3, List, CalendarPlus, FolderKanban,
+  Trophy, XCircle, RotateCcw, BarChart3, List, CalendarPlus, FolderKanban, FileText, Flag,
 } from 'lucide-react';
 import './CRM.css';
 
@@ -29,6 +29,12 @@ const STATUS_CHIPS = [
   { value: WON, label: 'Won' },
   { value: LOST, label: 'Lost' },
 ];
+// Colours: the stripe on each lead follows its status, the flag its priority.
+const STATUS_TONE = { [DRAFT]: 'draft', [WON]: 'won', [LOST]: 'lost' };
+const PRIORITY_TONE = { High: 'high', Medium: 'medium', Low: 'low' };
+const toneOf = c => `crm-s-${STATUS_TONE[c.status] || 'draft'} crm-p-${PRIORITY_TONE[c.priority] || 'none'}`;
+const PriorityFlag = ({ p }) => (p ? <span className={`crm-flag crm-flag-${PRIORITY_TONE[p] || 'none'}`} title={`${p} priority`}><Flag size={12} aria-hidden="true" />{p}</span> : null);
+
 const NEXT_PRESETS = [['Tomorrow', 1], ['In 3 days', 3], ['In a week', 7]];
 const HIDE_CLOSED_AFTER_DAYS = 20;
 
@@ -493,6 +499,8 @@ export default function CRM() {
   const currentUser = displayName || user?.email || 'Unknown';
   const toast = useToast();
   const today = todayLocal();
+  const navigate = useNavigate();
+  const makeProposal = c => navigate(`/templates/proposal?lead=${encodeURIComponent(c.id)}`);
 
   const [clients, setClients] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
@@ -772,16 +780,16 @@ export default function CRM() {
                 <div className="mac-card only-desktop">
                   <div className="table-wrap">
                     <table className="data-table crm-table">
-                      <colgroup><col style={{ width: '22%' }} /><col style={{ width: '22%' }} /><col style={{ width: '15%' }} /><col style={{ width: '9%' }} /><col style={{ width: '12%' }} /><col style={{ width: '20%' }} /></colgroup>
+                      <colgroup><col style={{ width: '21%' }} /><col style={{ width: '19%' }} /><col style={{ width: '17%' }} /><col style={{ width: '8%' }} /><col style={{ width: '11%' }} /><col style={{ width: '14%' }} /><col style={{ width: '10%' }} /></colgroup>
                       <thead>
                         <tr>
                           <th>Client</th><th>Project</th><th>Status</th><th className="crm-center">Follow-ups</th>
-                          <th className="num">Value</th><th>Next follow-up</th>
+                          <th className="num">Value</th><th>Next follow-up</th><th className="crm-center"><span className="sr-only">Actions</span></th>
                         </tr>
                       </thead>
                       <tbody>
                         {visible.map(c => (
-                          <tr key={c.id} className="clickable" tabIndex={0} onClick={() => setDetailId(c.id)}
+                          <tr key={c.id} className={`clickable crm-row ${toneOf(c)}`} tabIndex={0} onClick={() => setDetailId(c.id)}
                             onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setDetailId(c.id); } }}>
                             <td>
                               <div className="crm-client">
@@ -797,12 +805,18 @@ export default function CRM() {
                               <div className="cell-sub crm-ell">{[c.industry, c.source].filter(Boolean).join(' · ') || '—'}</div>
                             </td>
                             <td>
-                              <Badge color={getStatusColor(c.status)}>{c.status}</Badge>
+                              <span className="crm-badges"><Badge color={getStatusColor(c.status)} dot>{c.status}</Badge><PriorityFlag p={c.priority} /></span>
                               <div className="cell-sub crm-ell" title={statusNote(c) || undefined}>{statusNote(c) || '—'}</div>
                             </td>
                             <td className="crm-center"><span className="crm-pill">{followupCount(c)}</span></td>
                             <td className="num">{(c.status === WON && c.finalPrice) || c.proposalValue ? fmtMoney((c.status === WON && c.finalPrice) || c.proposalValue) : '—'}</td>
                             <td><span className={`crm-due crm-due-chip ${dueState(c, today)}`}>{dueLabel(c, today)}</span></td>
+                            <td className="crm-center">
+                              <span className="crm-acts" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+                                <button type="button" className="icon-btn plain" onClick={() => openEdit(c)} aria-label={`Edit ${c.clientName}`} title="Edit lead"><Edit2 size={16} /></button>
+                                <button type="button" className="icon-btn plain" onClick={() => makeProposal(c)} aria-label={`Make a proposal for ${c.clientName}`} title="Make proposal"><FileText size={16} /></button>
+                              </span>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -812,7 +826,7 @@ export default function CRM() {
 
                 <div className="list-cards only-mobile">
                   {visible.map(c => (
-                    <div key={c.id} className="crm-card-row">
+                    <div key={c.id} className={`crm-card-row crm-row ${toneOf(c)}`}>
                       <button className="list-card" onClick={() => setDetailId(c.id)}>
                         <span className="crm-card-top">
                           <span className="cell-main">{c.clientName}</span>
@@ -820,12 +834,17 @@ export default function CRM() {
                         </span>
                         <span className="cell-sub">{[c.companyName, c.projectType].filter(Boolean).join(' · ') || '—'}</span>
                         <span className="crm-card-meta">
-                          <Badge color={getStatusColor(c.status)}>{c.status}</Badge>
+                          <Badge color={getStatusColor(c.status)} dot>{c.status}</Badge>
+                          <PriorityFlag p={c.priority} />
                           <span className="cell-sub">{followupCount(c)} follow-up{followupCount(c) === 1 ? '' : 's'}</span>
                           {!!c.proposalValue && <span className="cell-main">{fmtMoney(c.proposalValue)}</span>}
                         </span>
                       </button>
-                      {c.contact && <a className="icon-btn crm-call" href={telHref(c.contact)} aria-label={`Call ${c.clientName}`}><Phone size={17} /></a>}
+                      <span className="crm-card-acts">
+                        <button type="button" className="icon-btn" onClick={() => openEdit(c)} aria-label={`Edit ${c.clientName}`}><Edit2 size={16} /></button>
+                        <button type="button" className="icon-btn" onClick={() => makeProposal(c)} aria-label={`Make a proposal for ${c.clientName}`}><FileText size={16} /></button>
+                        {c.contact && <a className="icon-btn crm-call" href={telHref(c.contact)} aria-label={`Call ${c.clientName}`}><Phone size={17} /></a>}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -847,7 +866,11 @@ export default function CRM() {
         onClose={() => setDetailId(null)}
         title={detail?.clientName}
         subtitle={detail && ([detail.companyName, detail.projectType].filter(Boolean).join(' · ') || 'Lead')}
-        actions={detail && <RowMenu items={rowMenu(detail)} label="Lead actions" />}
+        actions={detail && <>
+          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => makeProposal(detail)}><FileText size={15} /> Make proposal</button>
+          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => openEdit(detail)}><Edit2 size={15} /> Edit</button>
+          <RowMenu items={rowMenu(detail).filter(x => x.label !== 'Edit')} label="More lead actions" />
+        </>}
       >
         {detail && <LeadDetail key={detail.id} client={detail} today={today} onClose={(client, kind) => setCloseTarget({ client, kind })} onReopen={reopenLead} onLogFollowup={logFollowup} />}
       </Drawer>

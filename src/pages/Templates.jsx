@@ -7,7 +7,7 @@ import { FileText, FileSignature, HandHeart, ShieldCheck, Heart, CalendarRange, 
 import './Documents.css';
 
 const ICONS = { proposal: FileText, sow: FileSignature, welcome: HandHeart, nda: ShieldCheck, thank_you: Heart, milestones: CalendarRange, payment_ack: ReceiptText };
-const BUILDERS = { sow: '/templates/sow' };   // letter id → its builder page
+const BUILDERS = { proposal: '/templates/proposal', sow: '/templates/sow' };   // letter id → its builder page
 
 export default function Templates() {
   const ready = Object.keys(BUILDERS).length;

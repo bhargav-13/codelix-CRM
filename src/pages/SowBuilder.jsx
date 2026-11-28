@@ -6,80 +6,14 @@ import ConfirmDialog from '../components/ui/ConfirmDialog';
 import { Field, FormGrid, useToast } from '../components/ui/kit';
 import { useMeSummary } from '../components/layout/shell';
 import SowDocument from '../components/sow/SowDocument';
+import { Sec, TextList, Rows, ImagePick, Toggle } from '../components/templates/FormBits';
 import { clientsDB, projectsDB } from '../lib/db';
 import { uploadFile } from '../lib/files';
 import { documentsDB } from '../lib/documents';
 import { pagesToPdf, downloadBlob } from '../lib/pdf';
 import { THEMES, ACCENTS, FONTS, FONT_LINK, PAGE_W, themeOf, palette, blankSow, draft, shrinkImage, pdfName } from '../lib/sow';
-import { ArrowLeft, Download, Eye, FolderPlus, Plus, X, ImagePlus, Trash2, RotateCcw, Check } from 'lucide-react';
+import { ArrowLeft, Download, Eye, FolderPlus, X, RotateCcw, Check } from 'lucide-react';
 import './SowBuilder.css';
-
-// ── small form pieces ───────────────────────────────────────────
-const Sec = ({ title, open, children }) => (
-  <details className="sowf-sec" open={open}>
-    <summary>{title}</summary>
-    <div className="sowf-body">{children}</div>
-  </details>
-);
-
-function TextList({ label, items, onChange, placeholder, addLabel = 'Add' }) {
-  const set = (i, v) => onChange(items.map((x, j) => (j === i ? v : x)));
-  return (
-    <div className="sowf-list">
-      {label && <span className="field-label">{label}</span>}
-      {items.map((x, i) => (
-        <div key={i} className="sowf-line">
-          <input className="mac-input" value={x} onChange={e => set(i, e.target.value)} placeholder={placeholder} aria-label={`${label || 'Item'} ${i + 1}`} />
-          <button type="button" className="icon-btn plain" aria-label={`Remove item ${i + 1}`} onClick={() => onChange(items.filter((_, j) => j !== i))}><X size={15} /></button>
-        </div>
-      ))}
-      <button type="button" className="mac-btn mac-btn-ghost sowf-add" onClick={() => onChange([...items, ''])}><Plus size={14} /> {addLabel}</button>
-    </div>
-  );
-}
-
-// cols: [{ k, label, area, num }]
-function Rows({ rows, onChange, cols, blank, addLabel, name }) {
-  const set = (i, k, v) => onChange(rows.map((r, j) => (j === i ? { ...r, [k]: v } : r)));
-  return (
-    <div className="sowf-list">
-      {rows.map((r, i) => (
-        <div key={i} className="sowf-row">
-          <div className="sowf-row-fields">
-            {cols.map(c => c.area
-              ? <textarea key={c.k} className="mac-input" rows={2} value={r[c.k] ?? ''} onChange={e => set(i, c.k, e.target.value)} placeholder={c.label} aria-label={`${name} ${i + 1}: ${c.label}`} />
-              : <input key={c.k} className="mac-input" type={c.num ? 'number' : 'text'} min={c.num ? 0 : undefined} value={r[c.k] ?? ''} onChange={e => set(i, c.k, e.target.value)}
-                  placeholder={c.label} aria-label={`${name} ${i + 1}: ${c.label}`} style={c.w ? { flex: `0 0 ${c.w}px` } : undefined} />)}
-          </div>
-          <button type="button" className="icon-btn plain" aria-label={`Remove ${name} ${i + 1}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}><X size={15} /></button>
-        </div>
-      ))}
-      <button type="button" className="mac-btn mac-btn-ghost sowf-add" onClick={() => onChange([...rows, { ...blank }])}><Plus size={14} /> {addLabel}</button>
-    </div>
-  );
-}
-
-function ImagePick({ label, hint, value, onPick, onClear, wide }) {
-  const input = useRef(null);
-  return (
-    <div className="sowf-img">
-      <span className={`sowf-img-box ${wide ? 'wide' : ''}`} style={value ? { backgroundImage: `url("${value}")` } : undefined}>{!value && <ImagePlus size={18} aria-hidden="true" />}</span>
-      <span className="sowf-img-text">
-        <span className="field-label">{label}</span>
-        <span className="field-hint">{hint}</span>
-        <span className="sowf-img-actions">
-          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => input.current?.click()}>{value ? 'Change' : 'Choose image'}</button>
-          {value && <button type="button" className="mac-btn mac-btn-ghost" onClick={onClear}><Trash2 size={14} /> Remove</button>}
-        </span>
-      </span>
-      <input ref={input} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={e => { onPick(e.target.files?.[0]); e.target.value = ''; }} />
-    </div>
-  );
-}
-
-const Toggle = ({ checked, onChange, children }) => (
-  <label className="sowf-toggle"><input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} /> <span>{children}</span></label>
-);
 
 // A tiny picture of each design for the picker
 function ThemeTile({ t, active, onPick }) {
