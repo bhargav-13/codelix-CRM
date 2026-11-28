@@ -30,7 +30,11 @@ const STATUS_CHIPS = [
   { value: LOST, label: 'Lost' },
 ];
 // The colour of each lead's card follows its status.
-const STATUS_TONE = { [DRAFT]: 'draft', [WON]: 'won', [LOST]: 'lost' };
+// An open lead's card takes the colour of its type: hot red, warm orange, cold blue.
+const TYPE_TONE = { Hot: 'hot', Warm: 'warm', Cold: 'cold' };
+const leadTone = c => (c.status === WON ? 'won' : c.status === LOST ? 'lost' : TYPE_TONE[c.interest] || 'none');
+const ADDED = [['', 'Added any time'], ['7', 'Added in the last 7 days'], ['30', 'Added in the last 30 days'], ['90', 'Added in the last 90 days'], ['365', 'Added in the last year']];
+const SORTS = [['smart', 'Follow-up due first'], ['newest', 'Newest first'], ['oldest', 'Oldest first'], ['next', 'Next follow-up date'], ['last', 'Last contacted'], ['value', 'Highest value']];
 const NEXT_PRESETS = [['Tomorrow', 1], ['In 3 days', 3], ['In a week', 7]];
 const HIDE_CLOSED_AFTER_DAYS = 20;
 
@@ -513,6 +517,9 @@ export default function CRM() {
   const [due, setDue] = useState('');            // '' | 'overdue' | 'today' (set from the stat tiles)
   const [industry, setIndustry] = useState('');
   const [source, setSource] = useState('');
+  const [interest, setInterest] = useState('');    // '' | Hot | Warm | Cold | none
+  const [added, setAdded] = useState('');          // '' | days back
+  const [sort, setSort] = useState('smart');
 
   // The open lead lives in the address (?lead=…), so the browser's back button closes it.
   const [params, setParams] = useSearchParams();
@@ -586,18 +593,27 @@ export default function CRM() {
         if (due === 'today' && !isDueToday(c, today)) return false;
         if (industry && c.industry !== industry) return false;
         if (source && c.source !== source) return false;
+        if (interest && (interest === 'none' ? !!c.interest : c.interest !== interest)) return false;
+        if (added && !(c.createdDate && c.createdDate >= addDays(today, -added))) return false;
         return true;
       })
       .sort((a, b) => {
+        const str = (x, k) => String(x[k] || '');
+        const money = x => Number((x.status === WON && x.finalPrice) || x.proposalValue) || 0;
+        if (sort === 'newest') return str(b, 'createdDate').localeCompare(str(a, 'createdDate'));
+        if (sort === 'oldest') return (str(a, 'createdDate') || '9').localeCompare(str(b, 'createdDate') || '9');
+        if (sort === 'next') return (str(a, 'nextFollowup') || '9').localeCompare(str(b, 'nextFollowup') || '9');
+        if (sort === 'last') return str(b, 'lastContacted').localeCompare(str(a, 'lastContacted'));
+        if (sort === 'value') return money(b) - money(a);
         const ra = rank(a), rb = rank(b);
         if (ra !== rb) return ra - rb;
         if (ra < 2) return a.nextFollowup.localeCompare(b.nextFollowup);
         return String(b.createdDate || '').localeCompare(String(a.createdDate || ''));
       });
-  }, [clients, q, status, due, industry, source, today, hidesOldClosed, isOldClosed]);
+  }, [clients, q, status, due, industry, source, interest, added, sort, today, hidesOldClosed, isOldClosed]);
 
-  const isFiltered = !!q || status !== 'all' || !!due || !!industry || !!source;
-  const clearFilters = () => { setSearch(''); setStatus('all'); setDue(''); setIndustry(''); setSource(''); };
+  const isFiltered = !!q || status !== 'all' || !!due || !!industry || !!source || !!interest || !!added;
+  const clearFilters = () => { setSearch(''); setStatus('all'); setDue(''); setIndustry(''); setSource(''); setInterest(''); setAdded(''); };
   const detail = detailId ? clients.find(c => String(c.id) === detailId) : null;
 
   const set = (k, v) => {
@@ -769,6 +785,17 @@ export default function CRM() {
                 <option value="">Any industry</option>
                 {INDUSTRIES.map(p => <option key={p}>{p}</option>)}
               </select>
+              <select className="mac-select" aria-label="Lead type" value={interest} onChange={e => setInterest(e.target.value)}>
+                <option value="">Any type</option>
+                {LEAD_INTEREST.map(x => <option key={x}>{x}</option>)}
+                <option value="none">No type set</option>
+              </select>
+              <select className="mac-select" aria-label="Added" value={added} onChange={e => setAdded(e.target.value)}>
+                {ADDED.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+              <select className="mac-select" aria-label="Sort by" value={sort} onChange={e => setSort(e.target.value)}>
+                {SORTS.map(([v, l]) => <option key={v} value={v}>Sort: {l}</option>)}
+              </select>
               <select className="mac-select" aria-label="Lead from" value={source} onChange={e => setSource(e.target.value)}>
                 <option value="">Any source</option>
                 {SOURCES.map(s => <option key={s}>{s}</option>)}
@@ -782,10 +809,10 @@ export default function CRM() {
               <div className="crm-cards">
                 {visible.map(c => {
                   const value = (c.status === WON && c.finalPrice) || c.proposalValue;
-                  const note = statusNote(c);
+                  const note = c.status === DRAFT ? '' : statusNote(c);   // an open lead's type is its badge
                   const n = followupCount(c);
                   return (
-                    <article key={c.id} className={`mac-card crm-lead crm-s-${STATUS_TONE[c.status] || 'draft'}`} role="button" tabIndex={0} aria-label={`Open ${c.clientName}`}
+                    <article key={c.id} className={`mac-card crm-lead crm-t-${leadTone(c)}`} role="button" tabIndex={0} aria-label={`Open ${c.clientName}`}
                       onClick={() => setDetailId(c.id)}
                       onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setDetailId(c.id); } }}>
                       <header className="crm-lead-head">
@@ -794,18 +821,20 @@ export default function CRM() {
                           <h3 title={c.clientName}>{c.clientName}</h3>
                           <p title={c.companyName || undefined}>{c.companyName || c.contact || '—'}</p>
                         </div>
-                        <Badge color={getStatusColor(c.status)} dot>{c.status}</Badge>
+                        {c.status === DRAFT && c.interest
+                          ? <Badge color={getStatusColor(c.interest)} dot>{c.interest}</Badge>
+                          : <Badge color={getStatusColor(c.status)} dot>{c.status}</Badge>}
                       </header>
 
                       <div className="crm-lead-what">
                         <strong title={c.projectType || undefined}>{c.projectType || 'No project type'}</strong>
-                        {(c.industry || note) && <span title={[c.industry, note].filter(Boolean).join(' · ')}>{[c.industry, note].filter(Boolean).join(' · ')}</span>}
+                        <span title={[c.industry, note].filter(Boolean).join(' · ') || undefined}>{[c.industry, `${n} follow-up${n === 1 ? '' : 's'}`, note].filter(Boolean).join(' · ')}</span>
                       </div>
 
                       <dl className="crm-lead-facts">
                         <div><dt>Value</dt><dd>{value ? fmtMoney(value) : '—'}</dd></div>
-                        <div><dt>Follow-ups</dt><dd>{n}</dd></div>
-                        <div><dt>Next</dt><dd><span className={`crm-due ${dueState(c, today)}`}>{dueLabel(c, today)}</span></dd></div>
+                        <div><dt>Added</dt><dd>{c.createdDate ? fmtDate(c.createdDate) : '—'}</dd></div>
+                        <div><dt>Next follow-up</dt><dd><span className={`crm-due ${dueState(c, today)}`}>{dueLabel(c, today)}</span></dd></div>
                       </dl>
 
                       <footer className="crm-lead-foot" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>

@@ -178,3 +178,13 @@
 .crm-lead-foot { display: flex; gap: 4px; margin: -4px -6px -6px; padding-top: 6px; border-top: 1px solid var(--line); }
 .crm-lead-foot .mac-btn { padding: 6px 10px; font-size: var(--fs-sm); text-decoration: none; }
 .crm-lead-call { margin-left: auto; color: var(--good); }
+
+/* ── card colour by lead type: hot red, warm orange, cold blue; won green; lost grey ── */
+.crm-lead.crm-t-hot { --crm-stripe: var(--bad); background: linear-gradient(180deg, var(--bad-soft), var(--surface) 64px); }
+.crm-lead.crm-t-warm { --crm-stripe: var(--warn); background: linear-gradient(180deg, var(--warn-soft), var(--surface) 64px); }
+.crm-lead.crm-t-cold { --crm-stripe: var(--brand); background: linear-gradient(180deg, var(--brand-soft), var(--surface) 64px); }
+.crm-lead.crm-t-none { --crm-stripe: var(--line-strong); }
+.crm-lead.crm-t-won { --crm-stripe: var(--good); background: linear-gradient(180deg, var(--good-soft), var(--surface) 64px); }
+.crm-lead.crm-t-lost { --crm-stripe: var(--ink-3); }
+.crm-lead.crm-t-lost .crm-lead-who h3, .crm-lead.crm-t-lost .crm-lead-what strong { color: var(--ink-2); }
+.crm-lead-facts { grid-template-columns: 1fr 1fr 1.25fr; }
