@@ -5,7 +5,7 @@ import { useMemo, useState } from 'react';
 import Badge from '../ui/Badge';
 import Kpis from '../crm/Kpis';
 import { fmtMoney } from '../ui/kit';
-import { statusMeta, fmtMinutes, fmtNum, fmtTime, WEEKDAY_LABEL, weekdayOf, dayOfMonth, monthLabel } from '../../lib/hr';
+import { isWeeklyOff, statusMeta, fmtMinutes, fmtNum, fmtTime, WEEKDAY_LABEL, weekdayOf, dayOfMonth, monthLabel } from '../../lib/hr';
 import { CalendarCheck, CalendarX, IndianRupee, TrendingUp } from 'lucide-react';
 
 const TONE = { present: 'green', late: 'orange', half: 'purple', absent: 'red', leave: 'blue', holiday: 'gray', off: 'gray', none: 'gray', untracked: 'gray' };
@@ -78,7 +78,7 @@ export default function PayableDays({ month, days, summary, today, salary }) {
               const isToday = d.date === today;
               return (
                 <tr key={d.date} className={`${isToday ? 'is-today' : ''} ${future ? 'is-future' : ''} ${unpaid >= 1 ? 'is-unpaid' : unpaid > 0 ? 'is-part' : ''}`}>
-                  <td><span className="pay-date"><b>{dayOfMonth(d.date)}</b>{WEEKDAY_LABEL[weekdayOf(d.date)]}{isToday && <em>Today</em>}</span></td>
+                  <td><span className={`pay-date ${isWeeklyOff(d.date) ? 'is-off' : ''}`}><b>{dayOfMonth(d.date)}</b>{WEEKDAY_LABEL[weekdayOf(d.date)]}{isToday && <em>Today</em>}</span></td>
                   <td>{future ? <span className="faint">—</span> : <Badge color={TONE[m.tone] || 'gray'}>{m.label}</Badge>}</td>
                   <td>{d.punchIn ? fmtTime(d.punchIn) : <span className="faint">—</span>}</td>
                   <td>{d.punchOut ? fmtTime(d.punchOut) : d.punchIn && !future ? <span className="pay-miss">{isToday ? 'Not yet' : 'Missing'}</span> : <span className="faint">—</span>}</td>

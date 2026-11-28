@@ -11,7 +11,7 @@ import {
   useToast, Drawer, Field, FormGrid, FormSection, SkeletonRows, EmptyPanel, ErrorPanel, RowMenu, Avatar, fmtDate,
 } from '../components/ui/kit';
 import {
-  attendanceAPI, holidaysAPI, policyAPI, correctionsAPI, leaveMeta,
+  attendanceAPI, holidaysAPI, policyAPI, correctionsAPI, leaveMeta, dayTone, isWeeklyOff, loadWeeklyOffs,
   statusMeta, LEGEND, WEEKDAYS, WEEKDAY_LABEL, MONTH_NAMES,
   fmtMinutes, fmtNum, fmtTime, toHM, fmtClock, fmtLongDate, fmtDayLong, dateIST, todayIST, addDays,
   currentMonth, monthLabel, monthDates, weekdayOf, dayOfMonth, daySummary,
@@ -185,7 +185,7 @@ function MonthCalendar({ month, days, today, holidayNames, selected, onSelect })
         const m = statusMeta(day?.status || 'NOT_MARKED');
         const tag = day?.punchIn ? fmtTime(day.punchIn) : day?.status === 'HOLIDAY' ? (holidayNames.get(date) || m.label) : day?.status === 'NOT_MARKED' || !day ? '' : m.label;
         return (
-          <button key={date} type="button" className={`hr-cal-day hr-s-${m.tone} ${date === today ? 'is-today' : ''}`}
+          <button key={date} type="button" className={`hr-cal-day hr-s-${dayTone(day?.status, date)} ${date === today ? 'is-today' : ''}`}
             aria-pressed={selected === date} onClick={() => onSelect(date)}
             aria-label={`${fmtDayLong(date)}: ${m.label}${day?.workFromHome ? ', work from home' : ''}${day?.punchIn ? `, in ${fmtTime(day.punchIn)}` : ''}${day?.punchOut ? `, out ${fmtTime(day.punchOut)}` : ''}`}>
             <span className="hr-cal-num">{dayOfMonth(date)}</span>
@@ -489,7 +489,7 @@ function TeamGrid({ month, rows, today, holidayNames, focusId, onPick }) {
     return out;
   }, [rows, dates]);
   useEffect(() => { focusRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, [focusId, month]);
-  const colClass = date => `${offDates.has(date) ? 'is-off' : ''} ${date === today ? 'is-today' : ''}`;
+  const colClass = date => `${offDates.has(date) || isWeeklyOff(date) ? 'is-off' : ''} ${date === today ? 'is-today' : ''}`;
   return (
     <div className="mac-card hr-grid-wrap" tabIndex={0} role="region" aria-label={`Team attendance for ${monthLabel(month)} — scroll sideways for more days`}>
       <table className="hr-grid">
@@ -522,7 +522,7 @@ function TeamGrid({ month, rows, today, holidayNames, focusId, onPick }) {
                   return (
                     <td key={date} className={colClass(date)}>
                       <Tooltip content={tip} delay={150}>
-                        <button type="button" className={`hr-cell hr-s-${m.tone} ${day.corrected ? 'is-corrected' : ''} ${day.workFromHome ? 'is-wfh' : ''}`} aria-label={tip} onClick={() => onPick(row, day)}>{m.short}</button>
+                        <button type="button" className={`hr-cell hr-s-${dayTone(day.status, date)} ${day.corrected ? 'is-corrected' : ''} ${day.workFromHome ? 'is-wfh' : ''}`} aria-label={tip} onClick={() => onPick(row, day)}>{dayTone(day.status, date) === 'off' ? '–' : m.short}</button>
                       </Tooltip>
                     </td>
                   );
@@ -598,11 +598,10 @@ function TeamCards({ month, rows, today, holidayNames, focusId, onPick }) {
               {dates.map(date => {
                 const d = byDate.get(date);
                 if (!d) return <span key={date} className="att-strip-gap" />;
-                const m = statusMeta(d.status);
                 const tip = cellTip(row, d, holidayNames.get(date));
                 return (
                   <Tooltip key={date} content={tip} delay={150}>
-                    <button type="button" className={`hr-cell att-strip-cell hr-s-${m.tone} ${d.corrected ? 'is-corrected' : ''} ${d.workFromHome ? 'is-wfh' : ''} ${date === today ? 'is-today' : ''}`} aria-label={tip} onClick={() => onPick(row, d)}>{dayOfMonth(date)}</button>
+                    <button type="button" className={`hr-cell att-strip-cell hr-s-${dayTone(d.status, date)} ${d.corrected ? 'is-corrected' : ''} ${d.workFromHome ? 'is-wfh' : ''} ${date === today ? 'is-today' : ''}`} aria-label={tip} onClick={() => onPick(row, d)}>{dayOfMonth(date)}</button>
                   </Tooltip>
                 );
               })}
@@ -1006,6 +1005,9 @@ function TeamAttendance() {
 }
 
 export default function Attendance() {
+  // Weekly offs come from the policy; read once so every calendar on the page can colour them.
+  const [, setOffsReady] = useState(false);
+  useEffect(() => { loadWeeklyOffs().then(() => setOffsReady(true)); }, []);
   const { isPartner } = useAuth();
   return isPartner ? <TeamAttendance /> : <MyAttendance />;
 }

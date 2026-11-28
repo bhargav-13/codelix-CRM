@@ -295,6 +295,25 @@ export function weekdayOf(date) {
   return JS_DAY[new Date(y, m - 1, d).getDay()];
 }
 export const dayOfMonth = date => +String(date).slice(8, 10);
+
+// Weekly offs (the days outside the policy's working days). Saturday and Sunday until the policy
+// has been read once; every calendar draws these days in red, whatever else the day says.
+let offWeekdays = new Set(['SAT', 'SUN']);
+let offLoaded = null;
+export function loadWeeklyOffs() {
+  offLoaded ||= http.get('/hr/policy')
+    .then(p => { if (Array.isArray(p?.workingDays) && p.workingDays.length) offWeekdays = new Set(JS_DAY.filter(d => !p.workingDays.includes(d))); })
+    .catch(() => { offLoaded = null; });
+  return offLoaded;
+}
+export const isWeeklyOff = date => offWeekdays.has(weekdayOf(date));
+// The colour of a day in a calendar: a weekly off stays a weekly off (red) unless something
+// happened on it (worked, on leave, a holiday).
+export function dayTone(status, date) {
+  const s = status || 'NOT_MARKED';
+  if (s === 'WEEKLY_OFF' || ((s === 'NOT_MARKED' || s === 'NOT_TRACKED') && isWeeklyOff(date))) return 'off';
+  return statusMeta(s).tone;
+}
 export const fmtDayLong = date => {
   const [y, m, d] = String(date).split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });

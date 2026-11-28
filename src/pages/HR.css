@@ -30,7 +30,8 @@
 .hr-s-absent { background: var(--bad-soft); color: var(--bad); }
 .hr-s-leave { background: var(--brand-soft); color: var(--brand); }
 .hr-s-holiday { background: var(--surface-3); color: var(--ink-2); }
-.hr-s-off { background: var(--surface-2); color: var(--ink-3); }
+/* weekly off: red, striped so it never reads as an absence (which is solid) */
+.hr-s-off { background: repeating-linear-gradient(135deg, var(--bad-soft) 0 5px, transparent 5px 10px); color: var(--bad); box-shadow: inset 0 0 0 1px var(--bad-soft); }
 .hr-s-untracked { background: var(--surface-2); color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line); }
 .hr-s-none { background: transparent; color: var(--ink-3); box-shadow: inset 0 0 0 1px var(--line); }
 .hr-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: var(--fs-sm); color: var(--ink-2); }
@@ -83,8 +84,8 @@
 .hr-grid tbody tr:last-child td, .hr-grid tbody tr:last-child th { border-bottom: none; }
 .hr-grid thead th { font-size: 11px; font-weight: 500; color: var(--ink-3); background: var(--surface-2); padding: 6px 2px; line-height: 14px; }
 .hr-grid thead th b { display: block; font-size: 12.5px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.hr-grid .is-off { background: var(--surface-2); }
-.hr-grid thead th.is-off b { color: var(--ink-3); }
+.hr-grid .is-off { background: var(--bad-soft); }
+.hr-grid thead th.is-off, .hr-grid thead th.is-off b { color: var(--bad); }
 .hr-grid thead th.is-today b { color: var(--brand); }
 .hr-grid td.is-today, .hr-grid th.is-today { box-shadow: inset 1px 0 0 var(--brand), inset -1px 0 0 var(--brand); }
 .hr-grid .hr-grid-name { position: sticky; left: 0; z-index: 2; text-align: left; padding: 8px 12px; background: var(--surface); box-shadow: inset -1px 0 0 var(--line); min-width: 168px; max-width: 200px; font-weight: 400; }
@@ -259,7 +260,7 @@
 .hol-day { height: 28px; border: none; border-radius: 8px; background: none; color: var(--ink); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; transition: background-color var(--t-fast) ease; }
 .hol-day:hover { background: var(--surface-3); }
 .hol-day:focus-visible { outline: none; box-shadow: var(--ring); }
-.hol-day.is-off { background: var(--surface-2); color: var(--ink-3); }
+.hol-day.is-off { background: repeating-linear-gradient(135deg, var(--bad-soft) 0 5px, transparent 5px 10px); color: var(--bad); font-weight: 600; }
 .hol-day.is-holiday { background: var(--bad); color: #fff; font-weight: 700; }
 .hol-day.is-today { box-shadow: inset 0 0 0 2px var(--accent); }
 .hol-day.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -458,3 +459,6 @@
 .ana-table tr.is-click:hover td, .ana-table tr.is-click:focus-visible td { background: var(--hover, rgba(15, 23, 42, .04)); }
 .ana-warn { color: var(--warn, #b45309); font-weight: 600; }
 @media (max-width: 900px) { .ana-two { grid-template-columns: 1fr; } }
+
+.pay-date.is-off, .pay-date.is-off b { color: var(--bad); }
+.hr-cal-dow.is-off { color: var(--bad); }
