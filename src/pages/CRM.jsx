@@ -33,7 +33,12 @@ const STATUS_CHIPS = [
 const STATUS_TONE = { [DRAFT]: 'draft', [WON]: 'won', [LOST]: 'lost' };
 const PRIORITY_TONE = { High: 'high', Medium: 'medium', Low: 'low' };
 const toneOf = c => `crm-s-${STATUS_TONE[c.status] || 'draft'} crm-p-${PRIORITY_TONE[c.priority] || 'none'}`;
-const PriorityFlag = ({ p }) => (p ? <span className={`crm-flag crm-flag-${PRIORITY_TONE[p] || 'none'}`} title={`${p} priority`}><Flag size={12} aria-hidden="true" />{p}</span> : null);
+// `mini`: just the coloured flag (the table), with the words for screen readers and on hover.
+const PriorityFlag = ({ p, mini }) => (p ? (
+  <span className={`crm-flag crm-flag-${PRIORITY_TONE[p] || 'none'} ${mini ? 'mini' : ''}`} title={`${p} priority`}>
+    <Flag size={mini ? 14 : 12} aria-hidden="true" />{mini ? <span className="sr-only">{p} priority</span> : p}
+  </span>
+) : null);
 
 const NEXT_PRESETS = [['Tomorrow', 1], ['In 3 days', 3], ['In a week', 7]];
 const HIDE_CLOSED_AFTER_DAYS = 20;
@@ -809,11 +814,11 @@ export default function CRM() {
                             </td>
                             <td>
                               <div className="crm-ell" title={c.projectType || undefined}>{c.projectType || '—'}</div>
-                              <div className="cell-sub crm-ell">{[c.industry, c.source].filter(Boolean).join(' · ') || '—'}</div>
+                              {c.industry && <div className="cell-sub crm-ell" title={[c.industry, c.source].filter(Boolean).join(' · ')}>{c.industry}</div>}
                             </td>
                             <td>
-                              <span className="crm-badges"><Badge color={getStatusColor(c.status)} dot>{c.status}</Badge><PriorityFlag p={c.priority} /></span>
-                              <div className="cell-sub crm-ell" title={statusNote(c) || undefined}>{statusNote(c) || '—'}</div>
+                              <span className="crm-badges"><Badge color={getStatusColor(c.status)} dot>{c.status}</Badge><PriorityFlag p={c.priority} mini /></span>
+                              {statusNote(c) && <div className="cell-sub crm-ell" title={statusNote(c)}>{statusNote(c)}</div>}
                             </td>
                             <td className="crm-center"><span className="crm-pill">{followupCount(c)}</span></td>
                             <td className="num">{(c.status === WON && c.finalPrice) || c.proposalValue ? fmtMoney((c.status === WON && c.finalPrice) || c.proposalValue) : '—'}</td>
