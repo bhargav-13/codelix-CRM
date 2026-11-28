@@ -19,7 +19,7 @@ import { SERVICE_TYPES, INDUSTRIES, SOURCES, PRIORITIES, LEAD_INTEREST, LOST_REA
 import { discountOf, WON, LOST, DRAFT, addDays, lossFollowup, isOpen, isOverdue, isDueToday, followupCount, numberedFollowups, insights } from '../lib/crm';
 import {
   Plus, Phone, Mail, Globe, Edit2, Trash2, History, AlertCircle, CalendarClock, Repeat, IndianRupee, Users, SearchX,
-  Trophy, XCircle, RotateCcw, BarChart3, List, CalendarPlus, FolderKanban, FileText, Flag, ShieldCheck,
+  Trophy, XCircle, RotateCcw, BarChart3, List, CalendarPlus, FolderKanban, FileText, ShieldCheck,
 } from 'lucide-react';
 import './CRM.css';
 
@@ -29,17 +29,8 @@ const STATUS_CHIPS = [
   { value: WON, label: 'Won' },
   { value: LOST, label: 'Lost' },
 ];
-// Colours: the stripe on each lead follows its status, the flag its priority.
+// The colour of each lead's card follows its status.
 const STATUS_TONE = { [DRAFT]: 'draft', [WON]: 'won', [LOST]: 'lost' };
-const PRIORITY_TONE = { High: 'high', Medium: 'medium', Low: 'low' };
-const toneOf = c => `crm-s-${STATUS_TONE[c.status] || 'draft'} crm-p-${PRIORITY_TONE[c.priority] || 'none'}`;
-// `mini`: just the coloured flag (the table), with the words for screen readers and on hover.
-const PriorityFlag = ({ p, mini }) => (p ? (
-  <span className={`crm-flag crm-flag-${PRIORITY_TONE[p] || 'none'} ${mini ? 'mini' : ''}`} title={`${p} priority`}>
-    <Flag size={mini ? 14 : 12} aria-hidden="true" />{mini ? <span className="sr-only">{p} priority</span> : p}
-  </span>
-) : null);
-
 const NEXT_PRESETS = [['Tomorrow', 1], ['In 3 days', 3], ['In a week', 7]];
 const HIDE_CLOSED_AFTER_DAYS = 20;
 
@@ -788,79 +779,44 @@ export default function CRM() {
               <EmptyPanel icon={SearchX} title="No leads match" text="Nothing fits the current search and filters."
                 action={<button className="mac-btn mac-btn-secondary" onClick={clearFilters}>Clear filters</button>} />
             ) : (
-              <>
-                <div className="mac-card only-desktop">
-                  <div className="table-wrap">
-                    <table className="data-table crm-table">
-                      <colgroup><col style={{ width: '21%' }} /><col style={{ width: '19%' }} /><col style={{ width: '17%' }} /><col style={{ width: '8%' }} /><col style={{ width: '11%' }} /><col style={{ width: '14%' }} /><col style={{ width: '10%' }} /></colgroup>
-                      <thead>
-                        <tr>
-                          <th>Client</th><th>Project</th><th>Status</th><th className="crm-center">Follow-ups</th>
-                          <th className="num">Value</th><th>Next follow-up</th><th className="crm-center"><span className="sr-only">Actions</span></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {visible.map(c => (
-                          <tr key={c.id} className={`clickable crm-row ${toneOf(c)}`} tabIndex={0} onClick={() => setDetailId(c.id)}
-                            onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setDetailId(c.id); } }}>
-                            <td>
-                              <div className="crm-client">
-                                <Avatar name={c.clientName} />
-                                <div>
-                                  <div className="cell-main crm-ell" title={c.clientName}>{c.clientName}</div>
-                                  <div className="cell-sub crm-ell">{c.companyName || c.contact || '—'}</div>
-                                </div>
-                              </div>
-                            </td>
-                            <td>
-                              <div className="crm-ell" title={c.projectType || undefined}>{c.projectType || '—'}</div>
-                              {c.industry && <div className="cell-sub crm-ell" title={[c.industry, c.source].filter(Boolean).join(' · ')}>{c.industry}</div>}
-                            </td>
-                            <td>
-                              <span className="crm-badges"><Badge color={getStatusColor(c.status)} dot>{c.status}</Badge><PriorityFlag p={c.priority} mini /></span>
-                              {statusNote(c) && <div className="cell-sub crm-ell" title={statusNote(c)}>{statusNote(c)}</div>}
-                            </td>
-                            <td className="crm-center"><span className="crm-pill">{followupCount(c)}</span></td>
-                            <td className="num">{(c.status === WON && c.finalPrice) || c.proposalValue ? fmtMoney((c.status === WON && c.finalPrice) || c.proposalValue) : '—'}</td>
-                            <td><span className={`crm-due crm-due-chip ${dueState(c, today)}`}>{dueLabel(c, today)}</span></td>
-                            <td className="crm-center">
-                              <span className="crm-acts" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
-                                <button type="button" className="icon-btn plain" onClick={() => openEdit(c)} aria-label={`Edit ${c.clientName}`} title="Edit lead"><Edit2 size={16} /></button>
-                                <button type="button" className="icon-btn plain" onClick={() => makeProposal(c)} aria-label={`Make a proposal for ${c.clientName}`} title="Make proposal"><FileText size={16} /></button>
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+              <div className="crm-cards">
+                {visible.map(c => {
+                  const value = (c.status === WON && c.finalPrice) || c.proposalValue;
+                  const note = statusNote(c);
+                  const n = followupCount(c);
+                  return (
+                    <article key={c.id} className={`mac-card crm-lead crm-s-${STATUS_TONE[c.status] || 'draft'}`} role="button" tabIndex={0} aria-label={`Open ${c.clientName}`}
+                      onClick={() => setDetailId(c.id)}
+                      onKeyDown={e => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setDetailId(c.id); } }}>
+                      <header className="crm-lead-head">
+                        <Avatar name={c.clientName} />
+                        <div className="crm-lead-who">
+                          <h3 title={c.clientName}>{c.clientName}</h3>
+                          <p title={c.companyName || undefined}>{c.companyName || c.contact || '—'}</p>
+                        </div>
+                        <Badge color={getStatusColor(c.status)} dot>{c.status}</Badge>
+                      </header>
 
-                <div className="list-cards only-mobile">
-                  {visible.map(c => (
-                    <div key={c.id} className={`crm-card-row crm-row ${toneOf(c)}`}>
-                      <button className="list-card" onClick={() => setDetailId(c.id)}>
-                        <span className="crm-card-top">
-                          <span className="cell-main">{c.clientName}</span>
-                          <span className={`crm-due ${dueState(c, today)}`}>{dueLabel(c, today)}</span>
-                        </span>
-                        <span className="cell-sub">{[c.companyName, c.projectType].filter(Boolean).join(' · ') || '—'}</span>
-                        <span className="crm-card-meta">
-                          <Badge color={getStatusColor(c.status)} dot>{c.status}</Badge>
-                          <PriorityFlag p={c.priority} />
-                          <span className="cell-sub">{followupCount(c)} follow-up{followupCount(c) === 1 ? '' : 's'}</span>
-                          {!!c.proposalValue && <span className="cell-main">{fmtMoney(c.proposalValue)}</span>}
-                        </span>
-                      </button>
-                      <span className="crm-card-acts">
-                        <button type="button" className="icon-btn" onClick={() => openEdit(c)} aria-label={`Edit ${c.clientName}`}><Edit2 size={16} /></button>
-                        <button type="button" className="icon-btn" onClick={() => makeProposal(c)} aria-label={`Make a proposal for ${c.clientName}`}><FileText size={16} /></button>
-                        {c.contact && <a className="icon-btn crm-call" href={telHref(c.contact)} aria-label={`Call ${c.clientName}`}><Phone size={17} /></a>}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </>
+                      <div className="crm-lead-what">
+                        <strong title={c.projectType || undefined}>{c.projectType || 'No project type'}</strong>
+                        {(c.industry || note) && <span title={[c.industry, note].filter(Boolean).join(' · ')}>{[c.industry, note].filter(Boolean).join(' · ')}</span>}
+                      </div>
+
+                      <dl className="crm-lead-facts">
+                        <div><dt>Value</dt><dd>{value ? fmtMoney(value) : '—'}</dd></div>
+                        <div><dt>Follow-ups</dt><dd>{n}</dd></div>
+                        <div><dt>Next</dt><dd><span className={`crm-due ${dueState(c, today)}`}>{dueLabel(c, today)}</span></dd></div>
+                      </dl>
+
+                      <footer className="crm-lead-foot" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+                        <button type="button" className="mac-btn mac-btn-ghost" onClick={() => openEdit(c)}><Edit2 size={14} /> Edit</button>
+                        <button type="button" className="mac-btn mac-btn-ghost" onClick={() => makeProposal(c)}><FileText size={14} /> Proposal</button>
+                        {c.contact && <a className="mac-btn mac-btn-ghost crm-lead-call" href={telHref(c.contact)} aria-label={`Call ${c.clientName}`}><Phone size={14} /> Call</a>}
+                      </footer>
+                    </article>
+                  );
+                })}
+              </div>
             )}
 
             {hidesOldClosed && stats.oldClosed > 0 && (

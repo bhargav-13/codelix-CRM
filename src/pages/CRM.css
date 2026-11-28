@@ -156,3 +156,25 @@
 .crm-flag.mini { padding: 0; background: none; }
 .crm-flag-low.mini { color: var(--ink-3); }
 .crm-table tr.crm-row.crm-s-draft.crm-p-high > td { background: none; }
+
+/* ── leads as cards ── */
+.crm-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.crm-lead { --crm-stripe: var(--brand); display: flex; flex-direction: column; gap: 14px; padding: 16px; min-width: 0; cursor: pointer; border-top: 3px solid var(--crm-stripe); transition: box-shadow var(--t-fast) var(--ease), transform var(--t-fast) var(--ease); }
+.crm-lead.crm-s-won { --crm-stripe: var(--good); }
+.crm-lead.crm-s-lost { --crm-stripe: var(--bad); }
+.crm-lead:hover { box-shadow: var(--shadow-pop); transform: translateY(-1px); }
+.crm-lead:focus-visible { outline: none; box-shadow: var(--ring); }
+.crm-lead-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.crm-lead-who { flex: 1 1 auto; min-width: 0; }
+.crm-lead-who h3 { margin: 0; font-size: var(--fs-md); font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-lead-who p { margin: 2px 0 0; font-size: var(--fs-sm); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-lead-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.crm-lead-what strong { font-size: var(--fs-md); font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-lead-what span { font-size: var(--fs-sm); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-lead-facts { display: grid; grid-template-columns: 1.2fr .8fr 1.3fr; gap: 8px; margin: 0; padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2); }
+.crm-lead-facts dt { font-size: var(--fs-xs); color: var(--ink-3); }
+.crm-lead-facts dd { margin: 2px 0 0; font-size: var(--fs-sm); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-lead-facts .crm-due { font-weight: 600; }
+.crm-lead-foot { display: flex; gap: 4px; margin: -4px -6px -6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.crm-lead-foot .mac-btn { padding: 6px 10px; font-size: var(--fs-sm); text-decoration: none; }
+.crm-lead-call { margin-left: auto; color: var(--good); }
