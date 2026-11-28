@@ -48,6 +48,18 @@ export const attendanceAPI = {
   scansOf: (employeeId, date) => list(http.get(`/attendance/${enc(employeeId)}/${enc(date)}/scans`)), // partner
 };
 
+// ─── Work-from-home requests ─────────────────────────────────────
+// Employee: create / mine / cancel (own only). Partner: list / approve / reject.
+// On an approved day the employee may punch from the app from anywhere, and the day is flagged.
+export const wfhAPI = {
+  create: ({ fromDate, toDate, reason }) => http.post('/attendance/wfh-requests', { fromDate, toDate: toDate || fromDate, reason }),
+  mine: () => list(http.get('/attendance/wfh-requests/mine')),
+  cancel: id => http.post(`/attendance/wfh-requests/${enc(id)}/cancel`),
+  list: status => list(http.get(`/attendance/wfh-requests${query({ status })}`)),
+  approve: (id, note) => http.post(`/attendance/wfh-requests/${enc(id)}/approve`, { note: note || null }),
+  reject: (id, note) => http.post(`/attendance/wfh-requests/${enc(id)}/reject`, { note }),
+};
+
 // ─── "The device missed my scan" requests ────────────────────────
 // Employee: create / mine / cancel (own only). Partner: list / approve / reject.
 export const correctionsAPI = {
@@ -333,3 +345,9 @@ export function runTotals(run) {
 }
 // Everything taken off the gross on one line
 export const lineDeductions = l => (+l.unpaidDeduction || 0) + (+l.otherDeduction || 0);
+
+// "on Wed, 2 Dec" or "from Wed, 2 Dec to Fri, 4 Dec" for a work-from-home request
+export function wfhSpan(r) {
+  const short = d => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+  return r.fromDate === r.toDate ? `on ${short(r.fromDate)}` : `from ${short(r.fromDate)} to ${short(r.toDate)}`;
+}

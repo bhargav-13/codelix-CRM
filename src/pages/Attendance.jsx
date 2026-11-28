@@ -11,7 +11,7 @@ import {
   useToast, Drawer, Field, FormGrid, FormSection, SkeletonRows, EmptyPanel, ErrorPanel, RowMenu, Avatar, fmtDate,
 } from '../components/ui/kit';
 import {
-  attendanceAPI, holidaysAPI, policyAPI, correctionsAPI, leaveMeta,
+  attendanceAPI, holidaysAPI, policyAPI, correctionsAPI, wfhAPI, wfhSpan, leaveMeta,
   statusMeta, LEGEND, WEEKDAYS, WEEKDAY_LABEL, MONTH_NAMES,
   fmtMinutes, fmtNum, fmtTime, toHM, fmtClock, fmtLongDate, fmtDayLong, dateIST, todayIST, addDays,
   currentMonth, monthLabel, monthDates, weekdayOf, dayOfMonth, daySummary,
@@ -19,9 +19,10 @@ import {
 import { MonthNav, Notice, TabBar } from '../components/hr/parts';
 import HolidayCalendar from '../components/hr/HolidayCalendar';
 import CorrectionRequests from '../components/hr/CorrectionRequests';
+import WfhRequests from '../components/hr/WfhRequests';
 import PayableDays from '../components/hr/PayableDays';
 import { employeesDB } from '../lib/db';
-import { Wifi, WifiOff, AlertTriangle, CheckCircle2, Edit2, Info, LayoutGrid, LogIn, LogOut, ScanFace, Table2, Timer, Users } from 'lucide-react';
+import { Home, Wifi, WifiOff, AlertTriangle, CheckCircle2, Edit2, Info, LayoutGrid, LogIn, LogOut, ScanFace, Table2, Timer, Users } from 'lucide-react';
 import './HR.css';
 
 const STATUS_BADGE = { present: 'green', late: 'orange', half: 'purple', absent: 'red', leave: 'blue', holiday: 'gray', off: 'gray', none: 'gray', untracked: 'gray' };
@@ -99,6 +100,9 @@ function TodayCard({ today, now, policy, holidayName, net, punching, onPunch }) 
   const dayEnds = today.punchIn && fullMinutes > 0 ? new Date(new Date(today.punchIn).getTime() + fullMinutes * 60000) : null;
   const leftEarly = kind === 'done' && fullMinutes > 0 && (+today.workedMinutes || 0) < fullMinutes;
   const byApp = !!net?.enabled;
+  // An approved work-from-home day: the punch may come from anywhere.
+  const atHome = !!(today.workFromHome || net?.workFromHome);
+  const canPunchHere = !!net?.onOfficeNetwork || atHome;
   const sinceIn = today.punchIn ? Math.floor((now - new Date(today.punchIn).getTime()) / 60000) : 0;
   const tooSoon = kind === 'in' && sinceIn >= 0 && sinceIn < 30;
   // The server is on this same computer (a local test): it always sees "this computer", whatever WiFi it is on.
@@ -109,7 +113,7 @@ function TodayCard({ today, now, policy, holidayName, net, punching, onPunch }) 
         <div className="hr-clock" aria-label="Office time">{fmtClock(clock)}</div>
         <div className="hr-clock-date">{fmtLongDate(clock)}{policy?.officeStart ? ` · Office hours ${fmtTime(policy.officeStart)} – ${fmtTime(policy.officeEnd)}${+policy.lateAfterMinutes > 0 ? `, come in up to ${policy.lateAfterMinutes} min later and leave that much later` : ''}` : ''}</div>
         <div className="hr-today-facts">
-          <div className="hr-fact"><span>Status</span><span><StatusBadge status={today.status} /></span></div>
+          <div className="hr-fact"><span>Status</span><span><StatusBadge status={today.status} />{atHome && <Badge color="purple" icon={Home}>WFH</Badge>}</span></div>
           <div className="hr-fact"><span>In</span><span>{fmtTime(today.punchIn)}</span></div>
           <div className="hr-fact"><span>Out</span><span>{fmtTime(today.punchOut)}</span></div>
           {dayEnds && <div className="hr-fact"><span>{today.punchOut ? 'Full day was until' : 'Your day ends at'}</span><span>{fmtTime(dayEnds)}</span></div>}
@@ -128,12 +132,13 @@ function TodayCard({ today, now, policy, holidayName, net, punching, onPunch }) 
         </div>
         {byApp && (
           <>
-            <button type="button" className={`mac-btn ${kind === 'waiting' || kind === 'off' ? 'mac-btn-primary' : 'mac-btn-secondary'} hr-punch`} disabled={punching || !net.onOfficeNetwork || tooSoon} onClick={onPunch}>
-              {net.onOfficeNetwork ? <Wifi size={16} aria-hidden="true" /> : <WifiOff size={16} aria-hidden="true" />}
+            <button type="button" className={`mac-btn ${kind === 'waiting' || kind === 'off' ? 'mac-btn-primary' : 'mac-btn-secondary'} hr-punch`} disabled={punching || !canPunchHere || tooSoon} onClick={onPunch}>
+              {atHome ? <Home size={16} aria-hidden="true" /> : net.onOfficeNetwork ? <Wifi size={16} aria-hidden="true" /> : <WifiOff size={16} aria-hidden="true" />}
               {punching ? 'Saving…' : kind === 'done' ? 'Punch out again' : kind === 'in' ? 'Punch out' : 'Punch in'}
             </button>
-            <p className={`hr-net ${net.onOfficeNetwork ? 'is-on' : 'is-off'}`} role="status">
-              {localTest ? 'Local test site: the server runs on this computer, so the WiFi check cannot be tested here. It works on the live site.'
+            <p className={`hr-net ${canPunchHere ? 'is-on' : 'is-off'}`} role="status">
+              {atHome ? 'You are working from home today, so you can punch from anywhere.'
+                : localTest ? 'Local test site: the server runs on this computer, so the WiFi check cannot be tested here. It works on the live site.'
                 : net.onOfficeNetwork ? 'You are on the office network.'
                 : `You are not on the office network${net.address ? ` (your address is ${net.address})` : ''}. Connect to the office WiFi to punch.`}
             </p>
@@ -144,6 +149,7 @@ function TodayCard({ today, now, policy, holidayName, net, punching, onPunch }) 
             : kind === 'in' ? (byApp ? (tooSoon ? `Punch out opens 30 minutes after punch in (${30 - sinceIn} min to go).` : 'Press Punch out when you leave. Your last punch of the day is your out time.')
               : 'Scan on the office device again when you leave — your last scan of the day is your out time.')
             : kind === 'off' ? (byApp ? 'No work is expected today.' : 'Nothing to scan today.')
+            : byApp && atHome ? 'Press Punch in when you start work, and Punch out when you finish.'
             : byApp ? 'Press Punch in when you reach the office. It works only on the office WiFi.'
             : 'Scan your face on the office device when you arrive. It shows up here within a minute or two.'}
         </p>
@@ -179,10 +185,11 @@ function MonthCalendar({ month, days, today, holidayNames, selected, onSelect })
         return (
           <button key={date} type="button" className={`hr-cal-day hr-s-${m.tone} ${date === today ? 'is-today' : ''}`}
             aria-pressed={selected === date} onClick={() => onSelect(date)}
-            aria-label={`${fmtDayLong(date)}: ${m.label}${day?.punchIn ? `, in ${fmtTime(day.punchIn)}` : ''}${day?.punchOut ? `, out ${fmtTime(day.punchOut)}` : ''}`}>
+            aria-label={`${fmtDayLong(date)}: ${m.label}${day?.workFromHome ? ', work from home' : ''}${day?.punchIn ? `, in ${fmtTime(day.punchIn)}` : ''}${day?.punchOut ? `, out ${fmtTime(day.punchOut)}` : ''}`}>
             <span className="hr-cal-num">{dayOfMonth(date)}</span>
             {tag && <span className="hr-cal-tag">{tag}</span>}
             {(day?.corrected || day?.missingPunchOut) && <span className="hr-cal-flag" aria-hidden="true" />}
+            {day?.workFromHome && <span className="hr-cal-wfh" title="Work from home"><Home size={11} aria-hidden="true" />WFH</span>}
           </button>
         );
       })}
@@ -216,6 +223,14 @@ function MyAttendance() {
   const [askErrors, setAskErrors] = useState({});
   const [sending, setSending] = useState(false);
   const [cancelId, setCancelId] = useState(null);
+  // work from home: my requests, the form, and the one being withdrawn
+  const [homeReqs, setHomeReqs] = useState([]);
+  const [home, setHome] = useState(null);           // { fromDate, toDate, reason }
+  const [homeErrors, setHomeErrors] = useState({});
+  const [homeBusy, setHomeBusy] = useState(false);
+  const [homeCancel, setHomeCancel] = useState(null);
+  const loadHome = useCallback(() => wfhAPI.mine().then(setHomeReqs).catch(e => console.error(e)), []);
+  useEffect(() => { loadHome(); }, [loadHome]);
   const toast = useToast();
   const monthRef = useRef(month);
   useEffect(() => { monthRef.current = month; });
@@ -325,6 +340,37 @@ function MyAttendance() {
     setSending(false);
   }
 
+  function startHome(date) {
+    const first = date && date >= (todayDate || '') ? date : addDays(todayDate || todayIST(), 1);
+    setHomeErrors({});
+    setHome({ fromDate: first, toDate: first, reason: '' });
+  }
+
+  async function sendHome() {
+    if (homeBusy || !home) return;
+    const er = {};
+    if (!home.fromDate) er.fromDate = 'Pick the first day';
+    else if (todayDate && home.fromDate < todayDate) er.fromDate = 'That day has already passed';
+    if (home.toDate && home.fromDate && home.toDate < home.fromDate) er.toDate = 'Must not be before the first day';
+    if (!home.reason.trim()) er.reason = 'Say why';
+    setHomeErrors(er);
+    if (Object.keys(er).length) return;
+    setHomeBusy(true);
+    try {
+      await wfhAPI.create({ fromDate: home.fromDate, toDate: home.toDate || home.fromDate, reason: home.reason.trim() });
+      toast.success('Sent to the partners. You will get a notification when it is decided.');
+      setHome(null);
+      loadHome();
+    } catch (e) { toast.error('Could not send the request', e); }
+    setHomeBusy(false);
+  }
+
+  async function cancelHome(id) {
+    try { await wfhAPI.cancel(id); toast.success('Request withdrawn'); loadHome(); loadToday(); loadMonth(monthRef.current); }
+    catch (e) { toast.error('Could not withdraw the request', e); }
+    setHomeCancel(null);
+  }
+
   async function cancelAsk(id) {
     try { await correctionsAPI.cancel(id); toast.success('Request withdrawn'); loadRequests(); }
     catch (e) { toast.error('Could not withdraw the request', e); }
@@ -342,7 +388,10 @@ function MyAttendance() {
         <section className="mac-card hr-card" aria-label="My month">
           <div className="hr-head-row">
             <h2 className="section-title">My month</h2>
-            <MonthNav month={month} onChange={m => { setSelected(null); setMonth(m); }} max={currentMonth()} />
+            <div className="hr-actions">
+              <button type="button" className="mac-btn mac-btn-secondary" onClick={() => startHome()}><Home size={15} aria-hidden="true" /> Work from home</button>
+              <MonthNav month={month} onChange={m => { setSelected(null); setMonth(m); }} max={currentMonth()} />
+            </div>
           </div>
           {monthLoading ? <SkeletonRows rows={5} />
             : monthError ? <ErrorPanel title="Could not load this month" error={monthError} onRetry={() => loadMonth(month)} />
@@ -375,6 +424,30 @@ function MyAttendance() {
 
         {!monthLoading && !monthError && data?.days?.length > 0 && (
           <PayableDays month={month} days={data.days} summary={data.summary} today={todayDate} salary={salary} />
+        )}
+
+        {homeReqs.length > 0 && (
+          <section className="mac-card hr-card" aria-label="My work-from-home requests">
+            <div className="hr-head-row">
+              <h2 className="section-title">My work-from-home requests</h2>
+              <button type="button" className="mac-btn mac-btn-secondary" onClick={() => startHome()}><Home size={15} aria-hidden="true" /> Ask for another day</button>
+            </div>
+            <ul className="home-list">
+              {homeReqs.slice(0, 20).map(r => (
+                <li key={r.id} className="att-req">
+                  <div className="att-req-main">
+                    <strong>Work from home {wfhSpan(r)}{r.days > 1 ? ` (${r.days} days)` : ''}</strong>
+                    <span className="faint">{r.reason}</span>
+                    {r.decisionNote && <span className="faint">{r.status === 'REJECTED' ? 'Reason: ' : 'Note: '}{r.decisionNote}{r.decidedBy ? ` (${r.decidedBy})` : ''}</span>}
+                  </div>
+                  <div className="home-row-side">
+                    <ReqBadge status={r.status} />
+                    {(r.status === 'PENDING' || (r.status === 'APPROVED' && r.fromDate > (todayDate || ''))) && <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setHomeCancel(r.id)}>Withdraw</button>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
         )}
 
         {requests.length > 0 && (
@@ -424,6 +497,34 @@ function MyAttendance() {
         )}
       </Modal>
 
+      <Modal page back="Attendance" isOpen={!!home} onClose={() => !homeBusy && setHome(null)} title="Ask to work from home"
+        description="A partner decides. Once approved, you can punch in and out from anywhere on those days."
+        footer={<>
+          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setHome(null)} disabled={homeBusy}>Cancel</button>
+          <button type="submit" form="att-home-form" className="mac-btn mac-btn-primary" disabled={homeBusy}>{homeBusy ? 'Sending…' : 'Send to partners'}</button>
+        </>}>
+        {home && (
+          <form id="att-home-form" onSubmit={e => { e.preventDefault(); sendHome(); }} noValidate>
+            <FormGrid>
+              <Field label="First day" required error={homeErrors.fromDate}>
+                <input className="mac-input" type="date" min={todayDate || undefined} value={home.fromDate} onChange={e => setHome(h => ({ ...h, fromDate: e.target.value, toDate: h.toDate && h.toDate < e.target.value ? e.target.value : h.toDate }))} />
+              </Field>
+              <Field label="Last day" error={homeErrors.toDate} hint="Leave the same as the first day for a single day">
+                <input className="mac-input" type="date" min={home.fromDate || todayDate || undefined} value={home.toDate} onChange={e => setHome(h => ({ ...h, toDate: e.target.value }))} />
+              </Field>
+              <Field label="Why do you need to work from home?" required error={homeErrors.reason} span={2}>
+                <textarea className="mac-input" rows={3} maxLength={500} value={home.reason} onChange={e => setHome(h => ({ ...h, reason: e.target.value }))}
+                  placeholder="e.g. Plumber is coming in the afternoon" />
+              </Field>
+            </FormGrid>
+            <p className="hr-note">Your day still counts from your punch in and punch out, exactly like a day at the office. The day is marked WFH in the calendar.</p>
+          </form>
+        )}
+      </Modal>
+
+      <ConfirmDialog isOpen={!!homeCancel} onClose={() => setHomeCancel(null)} onConfirm={() => cancelHome(homeCancel)}
+        title="Withdraw this request?" confirmLabel="Withdraw" message="Those days go back to normal office days. You can ask again afterwards." />
+
       <ConfirmDialog isOpen={!!cancelId} onClose={() => setCancelId(null)} onConfirm={() => cancelAsk(cancelId)}
         title="Withdraw this request?" confirmLabel="Withdraw" message="The partners will no longer see it. You can send a new one afterwards." />
     </div>
@@ -462,6 +563,7 @@ function cellTip(row, day, holidayName) {
   const bits = [m.label + (day.status === 'HOLIDAY' && holidayName ? ` (${holidayName})` : '')];
   if (day.punchIn) bits.push(`${fmtTime(day.punchIn)} – ${day.punchOut ? fmtTime(day.punchOut) : 'no punch out'}`);
   if (day.punchIn && day.workedMinutes) bits.push(fmtMinutes(day.workedMinutes));
+  if (day.workFromHome) bits.push('work from home');
   if (day.corrected) bits.push('corrected');
   return `${row.employeeName} · ${fmtDayLong(day.date)} · ${bits.join(' · ')}`;
 }
@@ -511,7 +613,7 @@ function TeamGrid({ month, rows, today, holidayNames, focusId, onPick }) {
                   return (
                     <td key={date} className={colClass(date)}>
                       <Tooltip content={tip} delay={150}>
-                        <button type="button" className={`hr-cell hr-s-${m.tone} ${day.corrected ? 'is-corrected' : ''}`} aria-label={tip} onClick={() => onPick(row, day)}>{m.short}</button>
+                        <button type="button" className={`hr-cell hr-s-${m.tone} ${day.corrected ? 'is-corrected' : ''} ${day.workFromHome ? 'is-wfh' : ''}`} aria-label={tip} onClick={() => onPick(row, day)}>{m.short}</button>
                       </Tooltip>
                     </td>
                   );
@@ -559,7 +661,7 @@ function TeamCards({ month, rows, today, holidayNames, focusId, onPick }) {
                 <h3>{row.employeeName}</h3>
                 <p>{focusDate === today ? 'Today' : fmtDate(focusDate)}{+sum.notTracked > 0 ? ` · ${fmtNum(sum.notTracked)} days not tracked` : ''}</p>
               </div>
-              {day ? <StatusBadge status={day.status} /> : <Badge color="gray">No record</Badge>}
+              <span className="att-card-tags">{day?.workFromHome && <Badge color="purple" icon={Home}>WFH</Badge>}{day ? <StatusBadge status={day.status} /> : <Badge color="gray">No record</Badge>}</span>
             </header>
 
             <dl className="att-card-day">
@@ -591,7 +693,7 @@ function TeamCards({ month, rows, today, holidayNames, focusId, onPick }) {
                 const tip = cellTip(row, d, holidayNames.get(date));
                 return (
                   <Tooltip key={date} content={tip} delay={150}>
-                    <button type="button" className={`hr-cell att-strip-cell hr-s-${m.tone} ${d.corrected ? 'is-corrected' : ''} ${date === today ? 'is-today' : ''}`} aria-label={tip} onClick={() => onPick(row, d)}>{dayOfMonth(date)}</button>
+                    <button type="button" className={`hr-cell att-strip-cell hr-s-${m.tone} ${d.corrected ? 'is-corrected' : ''} ${d.workFromHome ? 'is-wfh' : ''} ${date === today ? 'is-today' : ''}`} aria-label={tip} onClick={() => onPick(row, d)}>{dayOfMonth(date)}</button>
                   </Tooltip>
                 );
               })}
@@ -933,9 +1035,13 @@ function TeamAttendance() {
   const [params] = useSearchParams();
   const focusId = params.get('employee');
   const [tab, setTab] = useState('team');
-  const [pending, setPending] = useState(0);
+  const [fixes, setFixes] = useState(0);       // correction requests waiting
+  const [homes, setHomes] = useState(0);       // work-from-home requests waiting
+  const [kind, setKind] = useState('wfh');     // which requests the tab shows
+  const pending = fixes + homes;
   useEffect(() => {
-    correctionsAPI.list('PENDING').then(l => setPending(l.length)).catch(e => console.error(e));
+    correctionsAPI.list('PENDING').then(l => setFixes(l.length)).catch(e => console.error(e));
+    wfhAPI.list('PENDING').then(l => { setHomes(l.length); if (!l.length) setKind('fix'); }).catch(e => console.error(e));
   }, []);
   return (
     <div>
@@ -945,7 +1051,15 @@ function TeamAttendance() {
         {tab === 'team' && <TeamTab focusId={focusId} />}
         {tab === 'holidays' && <HolidayCalendar />}
         {tab === 'rules' && <RulesTab />}
-        {tab === 'requests' && <CorrectionRequests onCount={setPending} />}
+        {tab === 'requests' && (
+          <>
+            <div className="att-layout" role="group" aria-label="Which requests" style={{ alignSelf: 'flex-start' }}>
+              <button type="button" className={kind === 'wfh' ? 'active' : ''} aria-pressed={kind === 'wfh'} onClick={() => setKind('wfh')}><Home size={15} /> Work from home{homes ? ` (${homes})` : ''}</button>
+              <button type="button" className={kind === 'fix' ? 'active' : ''} aria-pressed={kind === 'fix'} onClick={() => setKind('fix')}><Edit2 size={15} /> Punch corrections{fixes ? ` (${fixes})` : ''}</button>
+            </div>
+            {kind === 'wfh' ? <WfhRequests onCount={setHomes} /> : <CorrectionRequests onCount={setFixes} />}
+          </>
+        )}
       </div>
     </div>
   );

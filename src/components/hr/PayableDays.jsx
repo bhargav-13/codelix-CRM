@@ -83,7 +83,7 @@ export default function PayableDays({ month, days, summary, today, salary }) {
                   <td>{d.punchIn ? fmtTime(d.punchIn) : <span className="faint">—</span>}</td>
                   <td>{d.punchOut ? fmtTime(d.punchOut) : d.punchIn && !future ? <span className="pay-miss">{isToday ? 'Not yet' : 'Missing'}</span> : <span className="faint">—</span>}</td>
                   <td className="num">{d.workedMinutes ? fmtMinutes(d.workedMinutes) : <span className="faint">—</span>}</td>
-                  <td className="pay-why">{reason(d, unpaid, isToday, future)}{d.corrected ? ' · corrected' : ''}</td>
+                  <td className="pay-why">{reason(d, unpaid, isToday, future)}{d.workFromHome ? ' · from home' : ''}{d.corrected ? ' · corrected' : ''}</td>
                   <td className="num">{future ? <span className="faint">—</span> : <span className={`pay-chip ${paid >= 1 ? 'full' : paid > 0 ? 'half' : 'none'}`}>{paid >= 1 ? '1' : paid > 0 ? fmtNum(paid) : '0'}</span>}</td>
                   <td className="num">{running == null ? <span className="faint">—</span> : fmtNum(running)}</td>
                   {perDay > 0 && <td className="num">{future ? <span className="faint">—</span> : money(perDay * paid)}</td>}

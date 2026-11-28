@@ -420,3 +420,10 @@
 .slip-facts dd { margin: 2px 0 0; font-size: var(--fs-md); font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
 .slip-words { font-style: normal; }
 @media (max-width: 720px) { .slip-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* Work from home: the mark on a day */
+.hr-cal-wfh { display: inline-flex; align-items: center; gap: 3px; align-self: flex-start; margin-top: 2px; padding: 1px 6px; border-radius: var(--r-pill); background: var(--color-purple-alpha-16, #7d52f429); color: var(--color-purple-600, #6938ef); font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
+.hr-cell.is-wfh { position: relative; }
+.hr-cell.is-wfh::after { content: ''; position: absolute; left: 2px; top: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-purple-500, #7d52f4); box-shadow: 0 0 0 1.5px var(--surface); }
+.att-card-tags { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.hr-fact > span:last-child { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
