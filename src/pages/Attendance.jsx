@@ -11,7 +11,7 @@ import {
   useToast, Drawer, Field, FormGrid, FormSection, SkeletonRows, EmptyPanel, ErrorPanel, RowMenu, Avatar, fmtDate,
 } from '../components/ui/kit';
 import {
-  attendanceAPI, holidaysAPI, policyAPI, correctionsAPI, wfhAPI, wfhSpan, leaveMeta,
+  attendanceAPI, holidaysAPI, policyAPI, correctionsAPI, leaveMeta,
   statusMeta, LEGEND, WEEKDAYS, WEEKDAY_LABEL, MONTH_NAMES,
   fmtMinutes, fmtNum, fmtTime, toHM, fmtClock, fmtLongDate, fmtDayLong, dateIST, todayIST, addDays,
   currentMonth, monthLabel, monthDates, weekdayOf, dayOfMonth, daySummary,
@@ -19,7 +19,6 @@ import {
 import { MonthNav, Notice, TabBar } from '../components/hr/parts';
 import HolidayCalendar from '../components/hr/HolidayCalendar';
 import CorrectionRequests from '../components/hr/CorrectionRequests';
-import WfhRequests from '../components/hr/WfhRequests';
 import PayableDays from '../components/hr/PayableDays';
 import { employeesDB } from '../lib/db';
 import { Home, Wifi, WifiOff, AlertTriangle, CheckCircle2, Edit2, Info, LayoutGrid, LogIn, LogOut, ScanFace, Table2, Timer, Users } from 'lucide-react';
@@ -138,7 +137,7 @@ function TodayCard({ today, now, policy, holidayName, net, punching, onPunch }) 
               {punching ? 'Saving…' : kind === 'done' ? 'Punch out again' : kind === 'in' ? 'Punch out' : 'Punch in'}
             </button>
             <p className={`hr-net ${canPunchHere ? 'is-on' : 'is-off'}`} role="status">
-              {atHome ? 'You are working from home today, so you can punch from anywhere.'
+              {atHome ? 'Approved work-from-home day: you can punch from anywhere.'
                 : localTest ? 'Local test site: the server runs on this computer, so the WiFi check cannot be tested here. It works on the live site.'
                 : net.onOfficeNetwork ? 'You are on the office network.'
                 : `You are not on the office network${net.address ? ` (your address is ${net.address})` : ''}. Connect to the office WiFi to punch.`}
@@ -224,14 +223,6 @@ function MyAttendance() {
   const [askErrors, setAskErrors] = useState({});
   const [sending, setSending] = useState(false);
   const [cancelId, setCancelId] = useState(null);
-  // work from home: my requests, the form, and the one being withdrawn
-  const [homeReqs, setHomeReqs] = useState([]);
-  const [home, setHome] = useState(null);           // { fromDate, toDate, reason }
-  const [homeErrors, setHomeErrors] = useState({});
-  const [homeBusy, setHomeBusy] = useState(false);
-  const [homeCancel, setHomeCancel] = useState(null);
-  const loadHome = useCallback(() => wfhAPI.mine().then(setHomeReqs).catch(e => console.error(e)), []);
-  useEffect(() => { loadHome(); }, [loadHome]);
   const toast = useToast();
   const monthRef = useRef(month);
   useEffect(() => { monthRef.current = month; });
@@ -341,40 +332,6 @@ function MyAttendance() {
     setSending(false);
   }
 
-  // my open or approved work-from-home request that covers a day
-  const homeFor = date => homeReqs.find(r => (r.status === 'PENDING' || r.status === 'APPROVED') && r.fromDate <= date && r.toDate >= date);
-
-  function startHome(date) {
-    const first = date && date >= (todayDate || '') ? date : addDays(todayDate || todayIST(), 1);
-    setHomeErrors({});
-    setHome({ fromDate: first, toDate: first, reason: '' });
-  }
-
-  async function sendHome() {
-    if (homeBusy || !home) return;
-    const er = {};
-    if (!home.fromDate) er.fromDate = 'Pick the first day';
-    else if (todayDate && home.fromDate < todayDate) er.fromDate = 'That day has already passed';
-    if (home.toDate && home.fromDate && home.toDate < home.fromDate) er.toDate = 'Must not be before the first day';
-    if (!home.reason.trim()) er.reason = 'Say why';
-    setHomeErrors(er);
-    if (Object.keys(er).length) return;
-    setHomeBusy(true);
-    try {
-      await wfhAPI.create({ fromDate: home.fromDate, toDate: home.toDate || home.fromDate, reason: home.reason.trim() });
-      toast.success('Sent to the partners. You will get a notification when it is decided.');
-      setHome(null);
-      loadHome();
-    } catch (e) { toast.error('Could not send the request', e); }
-    setHomeBusy(false);
-  }
-
-  async function cancelHome(id) {
-    try { await wfhAPI.cancel(id); toast.success('Request withdrawn'); loadHome(); loadToday(); loadMonth(monthRef.current); }
-    catch (e) { toast.error('Could not withdraw the request', e); }
-    setHomeCancel(null);
-  }
-
   async function cancelAsk(id) {
     try { await correctionsAPI.cancel(id); toast.success('Request withdrawn'); loadRequests(); }
     catch (e) { toast.error('Could not withdraw the request', e); }
@@ -383,39 +340,11 @@ function MyAttendance() {
 
   return (
     <div>
-      <Header title="Attendance" subtitle="Your punches, your month and what you are paid for"
-        actions={<button type="button" className="mac-btn mac-btn-primary" onClick={() => startHome()}><Home size={15} aria-hidden="true" /> Work from home</button>} />
+      <Header title="Attendance" subtitle="Your punches, your month and what you are paid for" />
       <div className="page-body">
         {todayError && !today ? <ErrorPanel title="Could not load today’s attendance" error={todayError} onRetry={loadToday} />
           : !today ? <SkeletonRows rows={3} />
           : <TodayCard today={today} now={clock.now} policy={policy} holidayName={holidayNames.get(todayDate)} net={net} punching={punching} onPunch={punch} />}
-
-        <section className="mac-card hr-card" aria-label="Work from home">
-          <div className="hr-head-row">
-            <div>
-              <h2 className="section-title">Work from home</h2>
-              <p className="hr-note" style={{ margin: '2px 0 0' }}>Ask for a day or a few days. Once a partner approves, you can punch in and out from anywhere on those days, and the day shows a WFH mark.</p>
-            </div>
-            <button type="button" className="mac-btn mac-btn-secondary" onClick={() => startHome()}><Home size={15} aria-hidden="true" /> Ask to work from home</button>
-          </div>
-          {homeReqs.length === 0 ? <p className="hr-note">You have not asked for any work-from-home day yet.</p> : (
-            <ul className="home-list">
-              {homeReqs.slice(0, 20).map(r => (
-                <li key={r.id} className="att-req">
-                  <div className="att-req-main">
-                    <strong>Work from home {wfhSpan(r)}{r.days > 1 ? ` (${r.days} days)` : ''}</strong>
-                    <span className="faint">{r.reason}</span>
-                    {r.decisionNote && <span className="faint">{r.status === 'REJECTED' ? 'Reason: ' : 'Note: '}{r.decisionNote}{r.decidedBy ? ` (${r.decidedBy})` : ''}</span>}
-                  </div>
-                  <div className="home-row-side">
-                    <ReqBadge status={r.status} />
-                    {(r.status === 'PENDING' || (r.status === 'APPROVED' && r.fromDate > (todayDate || ''))) && <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setHomeCancel(r.id)}>Withdraw</button>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
 
         <section className="mac-card hr-card" aria-label="My month">
           <div className="hr-head-row">
@@ -442,15 +371,8 @@ function MyAttendance() {
                               <Edit2 size={14} aria-hidden="true" /> Request correction
                             </button>
                           )}
-                        {selected >= (todayDate || '') && (homeFor(selected)
-                          ? <Notice tone={homeFor(selected).status === 'APPROVED' ? 'good' : 'info'} icon={Home}>{homeFor(selected).status === 'APPROVED' ? 'Approved work-from-home day: you can punch from anywhere.' : 'You asked to work from home on this day. It is waiting for a partner.'}</Notice>
-                          : (
-                            <button type="button" className="mac-btn mac-btn-secondary" onClick={() => startHome(selected)}>
-                              <Home size={14} aria-hidden="true" /> Work from home on this day
-                            </button>
-                          ))}
                       </>
-                    ) : <p className="hr-note">Pick a day to see its punch times and status, or to ask to work from home on it.</p>}
+                    ) : <p className="hr-note">Pick a day to see its punch times and status.</p>}
                   </div>
                 </div>
                 <Legend />
@@ -508,34 +430,6 @@ function MyAttendance() {
           </form>
         )}
       </Modal>
-
-      <Modal page back="Attendance" isOpen={!!home} onClose={() => !homeBusy && setHome(null)} title="Ask to work from home"
-        description="A partner decides. Once approved, you can punch in and out from anywhere on those days."
-        footer={<>
-          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setHome(null)} disabled={homeBusy}>Cancel</button>
-          <button type="submit" form="att-home-form" className="mac-btn mac-btn-primary" disabled={homeBusy}>{homeBusy ? 'Sending…' : 'Send to partners'}</button>
-        </>}>
-        {home && (
-          <form id="att-home-form" onSubmit={e => { e.preventDefault(); sendHome(); }} noValidate>
-            <FormGrid>
-              <Field label="First day" required error={homeErrors.fromDate}>
-                <input className="mac-input" type="date" min={todayDate || undefined} value={home.fromDate} onChange={e => setHome(h => ({ ...h, fromDate: e.target.value, toDate: h.toDate && h.toDate < e.target.value ? e.target.value : h.toDate }))} />
-              </Field>
-              <Field label="Last day" error={homeErrors.toDate} hint="Leave the same as the first day for a single day">
-                <input className="mac-input" type="date" min={home.fromDate || todayDate || undefined} value={home.toDate} onChange={e => setHome(h => ({ ...h, toDate: e.target.value }))} />
-              </Field>
-              <Field label="Why do you need to work from home?" required error={homeErrors.reason} span={2}>
-                <textarea className="mac-input" rows={3} maxLength={500} value={home.reason} onChange={e => setHome(h => ({ ...h, reason: e.target.value }))}
-                  placeholder="e.g. Plumber is coming in the afternoon" />
-              </Field>
-            </FormGrid>
-            <p className="hr-note">Your day still counts from your punch in and punch out, exactly like a day at the office. The day is marked WFH in the calendar.</p>
-          </form>
-        )}
-      </Modal>
-
-      <ConfirmDialog isOpen={!!homeCancel} onClose={() => setHomeCancel(null)} onConfirm={() => cancelHome(homeCancel)}
-        title="Withdraw this request?" confirmLabel="Withdraw" message="Those days go back to normal office days. You can ask again afterwards." />
 
       <ConfirmDialog isOpen={!!cancelId} onClose={() => setCancelId(null)} onConfirm={() => cancelAsk(cancelId)}
         title="Withdraw this request?" confirmLabel="Withdraw" message="The partners will no longer see it. You can send a new one afterwards." />
@@ -1047,13 +941,9 @@ function TeamAttendance() {
   const [params] = useSearchParams();
   const focusId = params.get('employee');
   const [tab, setTab] = useState('team');
-  const [fixes, setFixes] = useState(0);       // correction requests waiting
-  const [homes, setHomes] = useState(0);       // work-from-home requests waiting
-  const [kind, setKind] = useState('wfh');     // which requests the tab shows
-  const pending = fixes + homes;
+  const [pending, setPending] = useState(0);
   useEffect(() => {
-    correctionsAPI.list('PENDING').then(l => setFixes(l.length)).catch(e => console.error(e));
-    wfhAPI.list('PENDING').then(l => { setHomes(l.length); if (!l.length) setKind('fix'); }).catch(e => console.error(e));
+    correctionsAPI.list('PENDING').then(l => setPending(l.length)).catch(e => console.error(e));
   }, []);
   return (
     <div>
@@ -1063,15 +953,7 @@ function TeamAttendance() {
         {tab === 'team' && <TeamTab focusId={focusId} />}
         {tab === 'holidays' && <HolidayCalendar />}
         {tab === 'rules' && <RulesTab />}
-        {tab === 'requests' && (
-          <>
-            <div className="att-layout" role="group" aria-label="Which requests" style={{ alignSelf: 'flex-start' }}>
-              <button type="button" className={kind === 'wfh' ? 'active' : ''} aria-pressed={kind === 'wfh'} onClick={() => setKind('wfh')}><Home size={15} /> Work from home{homes ? ` (${homes})` : ''}</button>
-              <button type="button" className={kind === 'fix' ? 'active' : ''} aria-pressed={kind === 'fix'} onClick={() => setKind('fix')}><Edit2 size={15} /> Punch corrections{fixes ? ` (${fixes})` : ''}</button>
-            </div>
-            {kind === 'wfh' ? <WfhRequests onCount={setHomes} /> : <CorrectionRequests onCount={setFixes} />}
-          </>
-        )}
+        {tab === 'requests' && <CorrectionRequests onCount={setPending} />}
       </div>
     </div>
   );

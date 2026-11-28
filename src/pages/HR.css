@@ -427,3 +427,14 @@
 .hr-cell.is-wfh::after { content: ''; position: absolute; left: 2px; top: 2px; width: 6px; height: 6px; border-radius: 50%; background: var(--color-purple-500, #7d52f4); box-shadow: 0 0 0 1.5px var(--surface); }
 .att-card-tags { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .hr-fact > span:last-child { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* Leave page: leave or work from home */
+.leave-kinds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.leave-kinds button { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--surface); color: var(--ink-2); font: inherit; text-align: left; cursor: pointer; }
+.leave-kinds button:hover { border-color: var(--ink-3); }
+.leave-kinds button.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--brand-soft); color: var(--brand); }
+.leave-kinds button span { display: flex; flex-direction: column; min-width: 0; }
+.leave-kinds button strong { font-size: var(--fs-md); color: var(--ink); }
+.leave-kinds button em { font-style: normal; font-size: var(--fs-xs); color: var(--ink-2); }
+.hr-req-tags { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 420px) { .leave-kinds { grid-template-columns: 1fr; } }
