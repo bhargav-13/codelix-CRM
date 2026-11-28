@@ -165,7 +165,7 @@ function buildSections(d, v) {
                 return (
                   <div key={i} className="pp-chart-row">
                     <span className="pp-chart-name"><span>{r.name}</span><em>{has(r.note) ? r.note : `${span} (${n} ${n === 1 ? U.one : U.many})`}</em></span>
-                    <span className={`pp-chart-weeks ${small}`}>{W.map(w => <span key={w}>{U.p}{w}</span>)}</span>
+                    <span className={`pp-chart-weeks ${small}`}>{W.map(w => <span key={w} className={w >= from && w <= to ? 'under' : undefined}>{U.p}{w}</span>)}</span>
                     <span className="pp-chart-bar" style={{ left, width }}><span>{span}</span><i /></span>
                   </div>
                 );

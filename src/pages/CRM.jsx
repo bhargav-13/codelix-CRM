@@ -19,7 +19,7 @@ import { SERVICE_TYPES, INDUSTRIES, SOURCES, PRIORITIES, LEAD_INTEREST, LOST_REA
 import { discountOf, WON, LOST, DRAFT, addDays, lossFollowup, isOpen, isOverdue, isDueToday, followupCount, numberedFollowups, insights } from '../lib/crm';
 import {
   Plus, Phone, Mail, Globe, Edit2, Trash2, History, AlertCircle, CalendarClock, Repeat, IndianRupee, Users, SearchX,
-  Trophy, XCircle, RotateCcw, BarChart3, List, CalendarPlus, FolderKanban, FileText, Flag,
+  Trophy, XCircle, RotateCcw, BarChart3, List, CalendarPlus, FolderKanban, FileText, Flag, ShieldCheck,
 } from 'lucide-react';
 import './CRM.css';
 
@@ -501,6 +501,9 @@ export default function CRM() {
   const today = todayLocal();
   const navigate = useNavigate();
   const makeProposal = c => navigate(`/templates/proposal?lead=${encodeURIComponent(c.id)}`);
+  const makeNda = c => navigate('/templates/nda', { state: { lead: c } });
+  const makeLetter = (route, c) => navigate(route, { state: { lead: c } });
+  const [ndaOffer, setNdaOffer] = useState(null);   // a lead just marked won: offer the NDA
 
   const [clients, setClients] = useState([]);
   const [auditLog, setAuditLog] = useState([]);
@@ -684,6 +687,7 @@ export default function CRM() {
         setClients(cs => cs.map(x => (x.id === c.id ? updated : x)));
         auditDB.log({ entity: 'project', entityId: project.id, action: 'Created', description: `${project.projectName} (from a won lead)` }).catch(console.error);
         toast.success(`${c.clientName} marked won. Project “${project.projectName}” created.`);
+        setNdaOffer({ ...c, ...updated });
       } catch (err) {
         toast.error(`${c.clientName} is marked won, but the project could not be created. Add it in Projects.`, err);
       }
@@ -721,6 +725,9 @@ export default function CRM() {
 
   const rowMenu = c => [
     { label: 'Edit', icon: Edit2, onClick: () => openEdit(c) },
+    { label: 'Make an NDA', icon: ShieldCheck, onClick: () => makeNda(c) },
+    { label: 'Make a scope of work', icon: FileText, onClick: () => makeLetter('/templates/sow', c) },
+    { label: 'Make a welcome letter', icon: Mail, onClick: () => makeLetter('/templates/welcome', c) },
     { label: 'Change history', icon: History, onClick: () => setAuditFor(c.id) },
     { label: 'Delete', icon: Trash2, danger: true, onClick: () => setDeleteTarget(c) },
   ];
@@ -884,6 +891,10 @@ export default function CRM() {
           <LeadForm v={form} set={set} errors={errors} isEdit={!!editId} today={today} />
         </form>
       </Modal>
+
+      <ConfirmDialog isOpen={!!ndaOffer} onClose={() => setNdaOffer(null)} onConfirm={() => makeLetter('/templates/welcome', ndaOffer)} danger={false}
+        title="Send a welcome letter?" confirmLabel="Open the letter"
+        message={`${ndaOffer?.companyName || ndaOffer?.clientName || 'This client'} is won. Open the welcome letter, filled in with their details? (The NDA and scope of work are in the lead's menu.)`} />
 
       <CloseDialog target={closeTarget} today={today} onClose={() => setCloseTarget(null)} onSave={closeLead} />
 

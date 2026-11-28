@@ -1,0 +1,151 @@
+/* The short letters, measured from the Figma file "Letters" (1440 × 1988 px frames).
+   Lines are drawn as borders with the exact colours of the design's strokes:
+   header rule 3px #3E7DFC · table rows 1.5px #D5E3FF · table edges #AFCAFF · footer 1px #58719A. */
+
+.lt-page, .lt-measure {
+  font-family: 'Inter', 'SF Pro Text', -apple-system, 'Segoe UI', sans-serif;
+  color: #31445E; font-size: 28px; line-height: 33px;
+  -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision;
+}
+.lt-page { position: relative; width: 1440px; height: 1988px; overflow: hidden; background: linear-gradient(216.24deg, #ffffff 0%, #E1EDFE 94.43%); }
+.lt-page *, .lt-measure * { box-sizing: border-box; }
+.lt-page p, .lt-page h2, .lt-page ul, .lt-measure p, .lt-measure h2, .lt-measure ul { margin: 0; padding: 0; font-weight: 400; }
+.lt-page b, .lt-measure b { font-weight: 600; }
+.lt-measure { position: absolute; left: -30000px; top: 0; width: 1240px; visibility: hidden; pointer-events: none; }
+.lt-body-area { position: absolute; left: 100px; width: 1240px; }
+.lt-block { display: flow-root; }
+
+/* ── chrome ── */
+.lt-logo { position: absolute; left: 108px; top: 79.1px; width: 268px; height: 104.1px; object-fit: contain; object-position: left center; }
+.lt-title {
+  position: absolute; right: 100px; top: 72px; height: 128px; display: flex; align-items: center;
+  font-family: 'Sora', 'Inter', sans-serif; font-weight: 200; font-size: 32px; line-height: 64px; text-transform: uppercase; color: #31445E;
+}
+.lt-page.dark .lt-title { color: #212121; }
+.lt-rule { position: absolute; left: 100px; top: 245px; width: 1202px; height: 3px; background: #3E7DFC; }
+.lt-foot {
+  position: absolute; left: 100px; top: 1836.6px; width: 1240px; padding-top: 24px; border-top: 1px solid #58719A;
+  display: flex; justify-content: space-between; font-size: 28px; line-height: 33px; color: #58719A;
+}
+.lt-foot-brand { text-transform: uppercase; font-size: 21px; letter-spacing: .02em; }
+
+/* ── section heading: "1. Milestone and Payments" ── */
+/* "1. Milestone and Payments": the number hangs left of a 63px indent, as in the design.
+   (".lt-page .lt-h" so the margin/padding reset above cannot win.) NDA headings start at the
+   left edge with the number in line. */
+.lt-page .lt-h, .lt-measure .lt-h { position: relative; padding-left: 63px; font-size: 42px; line-height: 50px; font-weight: 500; color: #58719A; }
+.lt-page .lt-h.semi, .lt-measure .lt-h.semi { padding-left: 0; font-weight: 600; }
+.lt-h-n { position: absolute; right: calc(100% - 51px); top: 0; }
+.lt-h.semi .lt-h-n { position: static; margin-right: 12px; }
+
+/* ── label / value table ── */
+.lt-kv { width: 1202px; border-top: 1.5px solid #AFCAFF; border-bottom: 1.5px solid #AFCAFF; background: linear-gradient(90deg, #EBF3FF 0 320px, #F3F8FF 320px); font-size: 24px; line-height: 29px; }
+.lt-kv-row { display: grid; grid-template-columns: 320px 1fr; min-height: 93px; }
+.lt-kv-row + .lt-kv-row { border-top: 1.5px solid #D5E3FF; }
+.lt-kv-row > span { padding: 32px 0 30px; }
+.lt-kv-row > span:first-child { padding-left: 32px; letter-spacing: .02em; border-right: 1.5px solid #AFCAFF; }
+.lt-kv-row > span:last-child { padding-left: 40px; padding-right: 24px; }
+.lt-kv-row:first-child > span { padding-top: 30.5px; }
+/* the delivered-project table: full width, one colour, a header row */
+.lt-kv.wide { width: 1240px; background: #F3F8FF; border-left: 1.5px solid #AFCAFF; }
+.lt-kv.wide .lt-kv-row { grid-template-columns: 328.5px 1fr; }
+.lt-kv.wide .lt-kv-row > span:first-child { padding-left: 31.5px; border-right-width: 1px; }
+.lt-kv.wide .lt-kv-row > span:last-child { padding-left: 41px; }
+.lt-kv.wide .lt-kv-row:first-child { min-height: 87px; font-weight: 500; }
+.lt-kv.wide .lt-kv-row:first-child > span { padding-top: 24.5px; }
+
+/* ── recurring charges: four columns ── */
+.lt-grid4 { width: 1202px; border: 1.5px solid #AFCAFF; background: #F3F8FF; font-size: 24px; line-height: 29px; }
+.lt-grid4-row { display: grid; grid-template-columns: 524.5px 224px 209px 1fr; min-height: 93px; }
+.lt-grid4-row + .lt-grid4-row { border-top: 1.5px solid #D5E3FF; }
+.lt-grid4-row > span { padding: 30.5px 0 30px; }
+.lt-grid4-row > span + span { border-left: 1px solid #AFCAFF; }
+.lt-grid4-row > span:nth-child(1) { padding-left: 30.5px; letter-spacing: .02em; }
+.lt-grid4-row > span:nth-child(2) { padding-left: 59px; }
+.lt-grid4-row > span:nth-child(3) { padding-left: 56px; }
+.lt-grid4-row > span:nth-child(4) { padding-left: 59px; }
+
+/* ── milestone cards, three to a row ── */
+.lt-cards { display: grid; grid-template-columns: repeat(3, 398px); gap: 23px; }
+.lt-card { display: flex; flex-direction: column; height: 294px; padding: 24px 24px 24px; border: 1px solid #58719A; border-radius: 10px; font-size: 20px; line-height: 24px; color: #58719A; }
+.lt-card > .m { font-weight: 500; }
+.lt-card > span + span { margin-top: 20px; }
+.lt-card p { margin-top: 32px !important; max-width: 347px; line-height: 28px; color: #31445E; }
+.lt-card-date { margin-top: auto !important; }
+
+/* ── bullets ── */
+.lt-bul { list-style: none; font-size: 32px; line-height: 48px; }
+.lt-bul li { position: relative; padding-left: 48px; }
+.lt-bul li i { position: absolute; left: 22px; top: 21px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.lt-bul.small { font-size: 24px; line-height: 42px; }
+.lt-bul.small li { padding-left: 36px; }
+.lt-bul.small li i { left: 14px; top: 18px; width: 5px; height: 5px; }
+.lt-bul.small li.deep { padding-left: 108px; }
+.lt-bul.small li.deep i { left: 86px; }
+
+/* ── letters: to / date, subject, greeting, paragraphs, sign-off ── */
+.lt-to { display: flex; justify-content: space-between; min-height: 229px; }
+.lt-to-left, .lt-to-right { width: 392px; display: flex; flex-direction: column; gap: 16px; }
+.lt-to-right { justify-content: space-between; }
+.lt-to-right > div { display: flex; flex-direction: column; gap: 16px; }
+.lt-to .m, .lt-signoff .m { font-weight: 500; }
+.lt-subject { font-size: 28px; line-height: 33px; }
+.lt-subject.blue { line-height: 42px; color: #58719A; }
+.lt-greet { display: flex; flex-direction: column; gap: 24px; max-width: 960px; }   /* 856px in the design, for SF Pro; Inter is wider */
+.lt-dear { font-size: 32px; line-height: 38px; font-weight: 600 !important; }
+.lt-para { line-height: 43px; }
+.lt-body p { line-height: 33px; }
+.lt-body .lt-body-p { line-height: 36px; }
+.lt-paras { display: flex; flex-direction: column; gap: 15px; line-height: 43px; }
+.lt-signoff { display: flex; flex-direction: column; gap: 16px; }
+.lt-contact { font-size: 18px; line-height: 21px; font-weight: 300 !important; color: #58719A; }
+
+/* ── NDA ── */
+.lt-party { display: flex; flex-direction: column; padding: 27px 27px 24px 24px; background: #E8F0FF; border-left: 3px solid #3E7DFC; line-height: 43px; }
+.lt-party .lt-and { margin: 22px 0 24px !important; font-style: italic; line-height: 42px; }
+.lt-clause { font-size: 24px; line-height: 42px; }
+.lt-clause-p { font-size: 24px; line-height: 42px; }
+
+/* ── signature boxes ── */
+.lt-sign { display: grid; grid-template-columns: 607px 607px; gap: 26px; }
+.lt-sign-box { height: 538px; border: 1px solid #3E7DFC; border-radius: 10px; padding: 35px 33px 0 31px; }
+.lt-sign-title { font-size: 24px; line-height: 29px; letter-spacing: .04em; text-transform: uppercase; }
+.lt-sign-pad { position: relative; margin-top: 43px; height: 101px; border: 1px solid #9D9D9D; border-radius: 10px; }
+.lt-sign-pad span { position: absolute; left: 0; right: 0; top: 28px; text-align: center; font-size: 16px; line-height: 19px; font-style: italic; font-weight: 300; color: #9D9D9D; }
+.lt-sign-pad i { position: absolute; left: 46px; right: 46px; top: 71px; border-top: 1px dashed #9D9D9D; }
+.lt-sign-pad img { position: absolute; left: 46px; top: 6px; height: 62px; width: calc(100% - 92px); object-fit: contain; }
+.lt-sign-pad + .lt-sign-row { margin-top: 47px; }
+.lt-sign-row { display: flex; padding-bottom: 16px; border-bottom: 1px solid #9D9D9D; font-size: 16px; line-height: 19px; }
+.lt-sign-row + .lt-sign-row { margin-top: 27px; }
+.lt-sign-row span:first-child { flex: none; width: 172px; }
+
+/* ── welcome letter ── */
+.lt-callout { padding: 16px 27px; background: #E8F0FF; border-left: 3px solid #3E7DFC; line-height: 43px; }
+.lt-callout.tall { padding: 27px 27px 24px; }
+.lt-body.wide .lt-body-p42 { line-height: 42px; }
+.lt-team { width: 1240px; font-size: 24px; line-height: 29px; }
+.lt-team-row { display: grid; grid-template-columns: 310px 271px 270px 1fr; min-height: 93px; }
+.lt-team-row > span { padding: 32px 12px 30px 32px; overflow-wrap: anywhere; }
+.lt-team-row > span:first-child { letter-spacing: .02em; }
+.lt-team-row > span:nth-child(2) { padding-left: 40px; }
+.lt-team-row > span + span { border-left: 1px solid #AFCAFF; }
+.lt-team-row.head { background: #E8F0FF; border: 1px solid #AFCAFF; border-bottom: 0; }
+.lt-team-row.head > span:last-child { text-align: center; padding-left: 12px; }
+.lt-team-body { background: #F3F8FF; border: 1.5px solid #AFCAFF; }
+.lt-team-body .lt-team-row + .lt-team-row { border-top: 1.5px solid #D5E3FF; }
+.lt-bul.mid { font-size: 28px; line-height: 43px; }
+.lt-bul.mid li { padding-left: 42px; }
+.lt-bul.mid li i { left: 18px; top: 19px; }
+
+/* ── scope of work ── */
+.lt-item b { display: block; font-size: 24px; line-height: 42px; font-weight: 600; color: #58719A; }
+.lt-item p { font-size: 24px; line-height: 42px; }
+.lt-grid3 { width: 1240px; border-left: 1.5px solid #AFCAFF; border-right: 1.5px solid #AFCAFF; border-top: 1.5px solid #D5E3FF; background: #F3F8FF; font-size: 24px; line-height: 34px; }
+.lt-grid3.head { border-top-color: #AFCAFF; background: #E8F0FF; font-weight: 500; }
+.lt-grid3.last { border-bottom: 1.5px solid #AFCAFF; }
+.lt-grid3-row { display: grid; grid-template-columns: 1fr 1.25fr 1.05fr; }
+.lt-grid3-row > span { padding: 22px 20px 22px 30px; overflow-wrap: anywhere; }
+.lt-grid3-row > span + span { border-left: 1px solid #AFCAFF; }
+.lt-chips { display: flex; flex-wrap: wrap; gap: 14px; }
+.lt-chips span { padding: 10px 24px; border: 1px solid #58719A; border-radius: 10px; font-size: 24px; line-height: 34px; color: #58719A; }
+.lt-card.short { height: 230px; }

@@ -65,3 +65,7 @@
 .ppf-stepnav { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0 12px; }
 
 .pp-builder .pp-slot { cursor: pointer; }
+
+/* letters: the "Fill from" panel */
+.ltf-fill .sowf-page-head h2 { display: flex; align-items: center; gap: 8px; }
+.ltf-rows { display: flex; flex-direction: column; gap: 6px; }

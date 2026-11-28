@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import Badge, { getStatusColor } from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -13,7 +13,7 @@ import {
   useToast, Drawer, Field, FormGrid, FormSection, Toolbar, Chips, SkeletonRows, EmptyPanel, ErrorPanel,
   RowMenu, Avatar, fmtMoney, fmtDate, todayLocal,
 } from '../components/ui/kit';
-import { Plus, Edit2, Trash2, History, IndianRupee, FolderKanban, Briefcase, Wallet, Clock, Archive, X, CalendarDays, User, ListChecks, Receipt, Building2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, History, IndianRupee, FolderKanban, Briefcase, Wallet, Clock, Archive, X, CalendarDays, User, ListChecks, Receipt, Building2, FileText, CalendarRange, HandHeart, ShieldCheck } from 'lucide-react';
 import Kpis from '../components/crm/Kpis';
 import './Projects.css';
 
@@ -364,7 +364,7 @@ function PaymentInlineForm({ v, set, error, saving, onSubmit, onCancel }) {
   );
 }
 
-function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDeletePayment, onToggleMilestone, onAskMove }) {
+function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDeletePayment, onToggleMilestone, onAskMove, onPaymentLetter }) {
   const [pf, setPf] = useState(startAddPayment ? blankPayment() : null); // payment form (new or edit)
   const [pfError, setPfError] = useState('');
   const [pfSaving, setPfSaving] = useState(false);
@@ -482,6 +482,7 @@ function ProjectDetail({ proj, startAddPayment, moving, onSavePayment, onAskDele
                   <span className="amount-in">+{fmtMoney(p.amount)}</span>
                   <RowMenu label="Payment actions" items={[
                     { label: 'Edit', icon: Edit2, onClick: () => { setPf({ id, amount: String(p.amount ?? ''), date: p.date || '', method: p.method || 'Bank Transfer', account: p.account || 'Company Bank', remark: p.remark ?? p.note ?? '' }); setPfError(''); } },
+                    p.id && onPaymentLetter && { label: 'Thank-you letter', icon: FileText, onClick: () => onPaymentLetter(proj, p.id) },
                     { label: 'Delete', icon: Trash2, danger: true, onClick: () => onAskDeletePayment(proj.id, id, p) },
                   ]} />
                 </div>
@@ -623,6 +624,18 @@ export default function Projects() {
     toast.success(`“${p.projectName}” is completed. It stays here until ${fmtMoney(m.balance)} is collected, then moves to Past Projects.`);
   }
 
+  // ── Letters: the moment something happens, offer the matching letter, already filled ──
+  const navigate = useNavigate();
+  const LETTER_ROUTES = { milestones: '/templates/milestones', payment: '/templates/payment-thanks', delivery: '/templates/delivery-thanks', nda: '/templates/nda', welcome: '/templates/welcome', sow: '/templates/sow' };
+  const openLetter = (kind, project, paymentId) => navigate(LETTER_ROUTES[kind], { state: { project, paymentId } });
+  const OFFERS = {
+    milestones: p => ({ title: 'Make the milestone & payment schedule?', message: `“${p.projectName}” now has ${(p.milestones || []).length} payment milestone${(p.milestones || []).length === 1 ? '' : 's'}. Open the Project milestones & payment schedule letter, filled in with them?`, confirmLabel: 'Open the letter' }),
+    payment: p => ({ title: 'Send a thank-you for this payment?', message: `Open the “Thank you for your payment” letter for “${p.projectName}”, filled in with this payment, the milestone it covers and the balance?`, confirmLabel: 'Open the letter' }),
+    delivery: p => ({ title: 'Thank the client for the project?', message: `“${p.projectName}” is completed. Open the “Thank you — project delivered” letter, filled in for ${p.companyName || p.clientName || 'the client'}?`, confirmLabel: 'Open the letter' }),
+  };
+  const offerLetter = (kind, project, paymentId) => setConfirm({ ...OFFERS[kind](project), danger: false, run: () => openLetter(kind, project, paymentId) });
+  const msKey = p => JSON.stringify((p?.milestones || []).map(m => [m.label, +m.percent]));
+
   async function saveProject() {
     if (saving || !form) return;
     const v = form.values;
@@ -647,12 +660,16 @@ export default function Projects() {
         await logAudit(form.id, 'Edited', updated.projectName);
         toast.success('Project updated');
         if (current?.status !== 'Completed') completed(updated);
+        if (updated.status === 'Completed' && current?.status !== 'Completed') offerLetter('delivery', updated);
+        else if ((updated.milestones || []).length && msKey(updated) !== msKey(current)) offerLetter('milestones', updated);
       } else {
         const created = await projectsDB.create({ ...base, milestones: v.milestones || [] });
         setProjs(ps => [created, ...ps]);
         await logAudit(created.id, 'Created', created.projectName);
         toast.success('Project created');
         completed(created);
+        if (created.status === 'Completed') offerLetter('delivery', created);
+        else if ((created.milestones || []).length) offerLetter('milestones', created);
       }
       setForm(null);
     } catch (e) {
@@ -685,6 +702,11 @@ export default function Projects() {
       const nowFull = moneyOf(updated).fullyPaid && !moneyOf(proj).fullyPaid;
       toast.success(nowFull ? 'Payment saved — this project is now fully paid' : id == null ? 'Payment added' : 'Payment updated');
       if (nowFull) completed(updated);
+      if (id == null) {
+        const before = new Set((proj.payments || []).map(x => String(x.id)));
+        const added = (updated.payments || []).find(x => !before.has(String(x.id)));
+        if (added) offerLetter('payment', updated, added.id);
+      }
       return true;
     } catch (e) { toast.error('Could not save the payment', e); return false; }
   }
@@ -777,6 +799,12 @@ export default function Projects() {
   const rowMenu = p => [
     { label: 'Add payment', icon: IndianRupee, onClick: () => setDetail({ id: p.id, addPayment: true }) },
     { label: 'Edit', icon: Edit2, onClick: () => openEdit(p) },
+    { label: 'Milestone & payment schedule', icon: CalendarRange, onClick: () => openLetter('milestones', p) },
+    (p.payments || []).length > 0 && { label: 'Thank-you for the last payment', icon: FileText, onClick: () => openLetter('payment', p, [...p.payments].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0]?.id) },
+    { label: 'Thank-you for delivery', icon: HandHeart, onClick: () => openLetter('delivery', p) },
+    { label: 'NDA with this client', icon: ShieldCheck, onClick: () => openLetter('nda', p) },
+    { label: 'Scope of work', icon: FileText, onClick: () => openLetter('sow', p) },
+    { label: 'Welcome letter', icon: HandHeart, onClick: () => openLetter('welcome', p) },
     moneyOf(p).fullyPaid && { label: 'Move to Past Projects', icon: Archive, onClick: () => askMove(p.id) },
     { label: 'Delete', icon: Trash2, danger: true, onClick: () => askDelete(p) },
   ];
@@ -839,7 +867,8 @@ export default function Projects() {
         actions={detailProj && <RowMenu items={rowMenu(detailProj).slice(1)} label="Project actions" />}>
         {detailProj && (
           <ProjectDetail key={detailProj.id} proj={detailProj} startAddPayment={detail.addPayment} moving={movingId === detailProj.id}
-            onSavePayment={savePayment} onAskDeletePayment={askDeletePayment} onToggleMilestone={toggleMilestone} onAskMove={askMove} />
+            onSavePayment={savePayment} onAskDeletePayment={askDeletePayment} onToggleMilestone={toggleMilestone} onAskMove={askMove}
+            onPaymentLetter={(p, payId) => openLetter('payment', p, payId)} />
         )}
       </Drawer>
 

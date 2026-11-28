@@ -23,6 +23,7 @@ import CorrectionRequests from '../components/hr/CorrectionRequests';
 import PayableDays from '../components/hr/PayableDays';
 import { employeesDB, settingsDB } from '../lib/db';
 import { Home, Wifi, WifiOff, AlertTriangle, CheckCircle2, Edit2, Info, LayoutGrid, LogIn, LogOut, ScanFace, Table2, Timer, Users } from 'lucide-react';
+import { mailAPI } from '../lib/mail';
 import './HR.css';
 
 const STATUS_BADGE = { present: 'green', late: 'orange', half: 'purple', absent: 'red', leave: 'blue', holiday: 'gray', off: 'gray', none: 'gray', untracked: 'gray' };
@@ -781,13 +782,20 @@ const NETWORK_ENTRY = /^(\d{1,3}(\.\d{1,3}){3}|[0-9a-fA-F:.]*:[0-9a-fA-F:.]*)(\/
 // Notifications by email: one switch for the whole office, saved the moment it is flipped.
 function EmailRule() {
   const toast = useToast();
-  const [on, setOn] = useState(null);       // null while loading
+  const [value, setValue] = useState(null);   // the saved setting: { enabled, from }; null while loading
+  const [senders, setSenders] = useState([]);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { settingsDB.get('email_notifications').then(v => setOn(v?.enabled !== false)).catch(e => { console.error(e); setOn(true); }); }, []);
-  async function flip(next) {
+  useEffect(() => {
+    settingsDB.get('email_notifications').then(v => setValue(v || {})).catch(e => { console.error(e); setValue({}); });
+    mailAPI.senders().then(c => setSenders(c.senders || [])).catch(() => {});
+  }, []);
+  const on = value?.enabled !== false;
+  const fromKey = value?.from && senders.some(x => x.key === value.from) ? value.from : (senders.find(x => x.key === 'no-reply') || senders[0])?.key || '';
+  const fromAddress = senders.find(x => x.key === fromKey)?.address || 'no-reply@codelixitsolutions.com';
+  async function save(next, message) {
     if (busy) return;
     setBusy(true);
-    try { await settingsDB.set('email_notifications', { enabled: next }); setOn(next); toast.success(next ? 'Notifications are sent by email too' : 'Email notifications are switched off'); }
+    try { await settingsDB.set('email_notifications', next); setValue(next); toast.success(message); }
     catch (e) { toast.error('Could not save the email setting', e); }
     setBusy(false);
   }
@@ -795,9 +803,17 @@ function EmailRule() {
     <section className="mac-card hr-card">
       <div>
         <h2 className="section-title">Notifications by email</h2>
-        <p className="hr-note">Leave, work from home, attendance corrections, bank-detail changes, payslips and task notifications are also sent to each person's email address, from no-reply@codelixitsolutions.com. Chat messages are never emailed.</p>
+        <p className="hr-note">Leave, work from home, attendance corrections, bank-detail changes, payslips and task notifications are also sent to each person's email address, from {fromAddress}. Chat messages are never emailed.</p>
       </div>
-      <label className="hr-check"><input type="checkbox" checked={on !== false} disabled={on == null || busy} onChange={e => flip(e.target.checked)} /> Send notifications by email</label>
+      <label className="hr-check"><input type="checkbox" checked={on} disabled={value == null || busy} onChange={e => save({ ...value, enabled: e.target.checked }, e.target.checked ? 'Notifications are sent by email too' : 'Email notifications are switched off')} /> Send notifications by email</label>
+      {senders.length > 0 && (
+        <Field label="Send them from" hint="Proposals and letters let you choose the address each time you send.">
+          {id => <select id={id} className="mac-select" value={fromKey} disabled={value == null || busy || !on}
+            onChange={e => save({ ...value, enabled: on, from: e.target.value }, `Notifications now come from ${senders.find(x => x.key === e.target.value)?.address}`)}>
+            {senders.map(x => <option key={x.key} value={x.key}>{x.name} · {x.address}</option>)}
+          </select>}
+        </Field>
+      )}
       <p className="hr-note">A person is mailed at the email on their employee record (partners at their sign-in email). Someone with no email there gets the notification in the app only.</p>
     </section>
   );

@@ -89,7 +89,7 @@ export function Rows({ rows, onChange, cols, blank, addLabel, name, move = false
           <div className="sowf-row-fields">
             {cols.map(c => c.area
               ? <AutoArea key={c.k} rows={c.rows || 2} value={r[c.k] ?? ''} onChange={e => set(i, c.k, e.target.value)} placeholder={c.label} aria-label={`${name} ${i + 1}: ${c.label}`} />
-              : <input key={c.k} className="mac-input" type={c.num ? 'number' : 'text'} min={c.num ? 0 : undefined} value={r[c.k] ?? ''} onChange={e => set(i, c.k, e.target.value)}
+              : <input key={c.k} className="mac-input" type={c.num ? 'number' : c.date ? 'date' : 'text'} min={c.num ? 0 : undefined} value={r[c.k] ?? ''} onChange={e => set(i, c.k, e.target.value)}
                   placeholder={c.label} aria-label={`${name} ${i + 1}: ${c.label}`} style={c.w ? { flex: `0 0 ${c.w}px` } : undefined} />)}
           </div>
           <span className="sowf-row-tools">

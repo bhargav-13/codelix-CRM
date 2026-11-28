@@ -1,6 +1,6 @@
 // Proposal builder: every word, number, colour and picture of the Codelix proposal design can be
 // changed on the left; the real pages are on the right; then they become a PDF.
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import Header from '../components/layout/Header';
 import ConfirmDialog from '../components/ui/ConfirmDialog';
@@ -8,6 +8,7 @@ import { Field, FormGrid, useToast } from '../components/ui/kit';
 import { useMeSummary } from '../components/layout/shell';
 import ProposalDocument from '../components/proposal/ProposalDocument';
 import LeadPicker from '../components/proposal/LeadPicker';
+import SendEmail from '../components/templates/SendEmail';
 import { Sec, Rows, ImagePick, Toggle, AutoArea } from '../components/templates/FormBits';
 import { clientsDB } from '../lib/db';
 import { uploadFile } from '../lib/files';
@@ -15,7 +16,7 @@ import { documentsDB } from '../lib/documents';
 import { pagesToPdf, downloadBlob } from '../lib/pdf';
 import { shrinkImage } from '../lib/sow';
 import { PAGE_W, PAGE_H, PDF_MM, UNITS, unitOf, fromLead, FONTS, FONT_LINK, STYLE_PRESETS, DEFAULT_STYLE, blankProposal, draft, totals, money, pdfName } from '../lib/proposal';
-import { ArrowLeft, ArrowRight, Download, Eye, FolderPlus, X, RotateCcw, AlertTriangle, ZoomIn, ZoomOut } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Download, Eye, FolderPlus, X, RotateCcw, AlertTriangle, ZoomIn, ZoomOut, Send } from 'lucide-react';
 import './SowBuilder.css';
 import './ProposalBuilder.css';
 
@@ -311,20 +312,40 @@ export default function ProposalBuilder() {
       const name = pdfName(d);
       if (kind === 'preview') setPreview({ url: URL.createObjectURL(blob), blob, name });
       else if (kind === 'download') { downloadBlob(blob, name); toast.success('PDF downloaded'); }
-      else {
-        const stored = await uploadFile(new File([blob], name, { type: 'application/pdf' }));
-        await documentsDB.add({
-          id: stored.id, client: d.client.name.trim(), type: 'proposal', title: `Proposal · ${d.doc.number || d.cover.kicker || 'draft'}`,
-          name: stored.name, size: stored.size, contentType: 'application/pdf', uploadedAt: new Date().toISOString(), uploadedBy: me.name,
-        });
-        toast.success(`Saved under ${d.client.name.trim()} in Client documents`);
-      }
+      else await saveCopy(blob);
     } catch (err) {
       toast.error('Could not make the PDF', err);
     } finally {
       setBusy(null);
     }
   }
+
+  // Saves a made PDF under the client in Client documents.
+  async function saveCopy(blob) {
+    const stored = await uploadFile(new File([blob], pdfName(d), { type: 'application/pdf' }));
+    await documentsDB.add({
+      id: stored.id, client: d.client.name.trim(), type: 'proposal', title: `Proposal · ${d.doc.number || d.cover.kicker || 'draft'}`,
+      name: stored.name, size: stored.size, contentType: 'application/pdf', uploadedAt: new Date().toISOString(), uploadedBy: me.name,
+    });
+    toast.success(`Saved under ${d.client.name.trim()} in Client documents`);
+  }
+
+  // ── Send by email ──
+  const [mailOpen, setMailOpen] = useState(false);
+  const pdfForMail = useCallback(async () => {
+    setBusy('mail');
+    try { return await makePdf(); } finally { setBusy(null); }
+  }, [makePdf]);
+  const mailDefaults = useMemo(() => {
+    const name = d.client.name.trim().toLowerCase();
+    const lead = clients.find(c => [c.companyName, c.clientName].some(n => n && String(n).trim().toLowerCase() === name));
+    const who = d.client.contact || lead?.clientName || '';
+    return {
+      to: lead?.email || '',
+      subject: `Proposal ${d.doc.number ? `${d.doc.number} ` : ''}— ${d.cover.kicker || 'our proposal'} for ${d.client.name || 'you'}`,
+      message: `Dear ${who || 'Sir/Madam'},\n\nPlease find attached our proposal for ${d.cover.kicker ? d.cover.kicker.toLowerCase() : 'your project'}. It sets out the scope, deliverables, timeline and commercial terms.\n\nWe would be glad to walk you through it on a short call. Please let us know a time that suits you.\n\nWarm regards,\n${d.company.signatory || ''}\n${d.company.name || 'Codelix IT Solutions'}`,
+    };
+  }, [d, clients]);
 
   const closePreview = () => { if (preview) URL.revokeObjectURL(preview.url); setPreview(null); };
   useEffect(() => {
@@ -359,6 +380,7 @@ export default function ProposalBuilder() {
 
   const actions = (
     <>
+      <button className="mac-btn mac-btn-secondary" onClick={() => setMailOpen(true)} disabled={!!busy}><Send size={15} /> Send by email</button>
       <button className="mac-btn mac-btn-secondary" onClick={() => run('preview')} disabled={!!busy}><Eye size={15} /> Preview PDF</button>
       <button className="mac-btn mac-btn-primary" onClick={() => run('download')} disabled={!!busy}><Download size={15} /> Download PDF</button>
     </>
@@ -668,6 +690,9 @@ export default function ProposalBuilder() {
         message={resetAsk?.all
           ? 'Every page goes back to the Codelix design: all text, the client, colours, font, logo, cover photo and company details. It cannot be undone.'
           : `Only the ${String(resetAsk?.name || '').toLowerCase()} part goes back to the text from the design. Everything else stays as it is. It cannot be undone.`} />
+
+      <SendEmail isOpen={mailOpen} onClose={() => setMailOpen(false)} kind="proposal" defaults={mailDefaults} fileName={pdfName(d)}
+        makePdf={pdfForMail} onSaveCopy={d.client.name.trim() ? saveCopy : null} />
 
       <ConfirmDialog isOpen={resetOpen} onClose={() => setResetOpen(false)} onConfirm={resetAll} title="Start a new proposal?" confirmLabel="Start new"
         message="This puts back the text from the design and clears the client. Your colours, logo, cover photo and company details are kept. It cannot be undone." />
