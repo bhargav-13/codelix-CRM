@@ -32,6 +32,7 @@ function Legend() {
   return (
     <div className="hr-legend" aria-label="What the colours mean">
       {LEGEND.map(s => { const m = statusMeta(s); return <span key={s}><span className={`hr-swatch hr-s-${m.tone}`} aria-hidden="true">{m.short}</span>{m.legend || m.label}</span>; })}
+      <span><span className="hr-cal-wfh" aria-hidden="true"><Home size={11} />WFH</span>Work from home (approved)</span>
     </div>
   );
 }
@@ -340,6 +341,9 @@ function MyAttendance() {
     setSending(false);
   }
 
+  // my open or approved work-from-home request that covers a day
+  const homeFor = date => homeReqs.find(r => (r.status === 'PENDING' || r.status === 'APPROVED') && r.fromDate <= date && r.toDate >= date);
+
   function startHome(date) {
     const first = date && date >= (todayDate || '') ? date : addDays(todayDate || todayIST(), 1);
     setHomeErrors({});
@@ -379,19 +383,44 @@ function MyAttendance() {
 
   return (
     <div>
-      <Header title="Attendance" subtitle="Your punches, your month and what you are paid for" />
+      <Header title="Attendance" subtitle="Your punches, your month and what you are paid for"
+        actions={<button type="button" className="mac-btn mac-btn-primary" onClick={() => startHome()}><Home size={15} aria-hidden="true" /> Work from home</button>} />
       <div className="page-body">
         {todayError && !today ? <ErrorPanel title="Could not load today’s attendance" error={todayError} onRetry={loadToday} />
           : !today ? <SkeletonRows rows={3} />
           : <TodayCard today={today} now={clock.now} policy={policy} holidayName={holidayNames.get(todayDate)} net={net} punching={punching} onPunch={punch} />}
 
+        <section className="mac-card hr-card" aria-label="Work from home">
+          <div className="hr-head-row">
+            <div>
+              <h2 className="section-title">Work from home</h2>
+              <p className="hr-note" style={{ margin: '2px 0 0' }}>Ask for a day or a few days. Once a partner approves, you can punch in and out from anywhere on those days, and the day shows a WFH mark.</p>
+            </div>
+            <button type="button" className="mac-btn mac-btn-secondary" onClick={() => startHome()}><Home size={15} aria-hidden="true" /> Ask to work from home</button>
+          </div>
+          {homeReqs.length === 0 ? <p className="hr-note">You have not asked for any work-from-home day yet.</p> : (
+            <ul className="home-list">
+              {homeReqs.slice(0, 20).map(r => (
+                <li key={r.id} className="att-req">
+                  <div className="att-req-main">
+                    <strong>Work from home {wfhSpan(r)}{r.days > 1 ? ` (${r.days} days)` : ''}</strong>
+                    <span className="faint">{r.reason}</span>
+                    {r.decisionNote && <span className="faint">{r.status === 'REJECTED' ? 'Reason: ' : 'Note: '}{r.decisionNote}{r.decidedBy ? ` (${r.decidedBy})` : ''}</span>}
+                  </div>
+                  <div className="home-row-side">
+                    <ReqBadge status={r.status} />
+                    {(r.status === 'PENDING' || (r.status === 'APPROVED' && r.fromDate > (todayDate || ''))) && <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setHomeCancel(r.id)}>Withdraw</button>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
         <section className="mac-card hr-card" aria-label="My month">
           <div className="hr-head-row">
             <h2 className="section-title">My month</h2>
-            <div className="hr-actions">
-              <button type="button" className="mac-btn mac-btn-secondary" onClick={() => startHome()}><Home size={15} aria-hidden="true" /> Work from home</button>
-              <MonthNav month={month} onChange={m => { setSelected(null); setMonth(m); }} max={currentMonth()} />
-            </div>
+            <MonthNav month={month} onChange={m => { setSelected(null); setMonth(m); }} max={currentMonth()} />
           </div>
           {monthLoading ? <SkeletonRows rows={5} />
             : monthError ? <ErrorPanel title="Could not load this month" error={monthError} onRetry={() => loadMonth(month)} />
@@ -413,8 +442,15 @@ function MyAttendance() {
                               <Edit2 size={14} aria-hidden="true" /> Request correction
                             </button>
                           )}
+                        {selected >= (todayDate || '') && (homeFor(selected)
+                          ? <Notice tone={homeFor(selected).status === 'APPROVED' ? 'good' : 'info'} icon={Home}>{homeFor(selected).status === 'APPROVED' ? 'Approved work-from-home day: you can punch from anywhere.' : 'You asked to work from home on this day. It is waiting for a partner.'}</Notice>
+                          : (
+                            <button type="button" className="mac-btn mac-btn-secondary" onClick={() => startHome(selected)}>
+                              <Home size={14} aria-hidden="true" /> Work from home on this day
+                            </button>
+                          ))}
                       </>
-                    ) : <p className="hr-note">Pick a day to see its punch times and status.</p>}
+                    ) : <p className="hr-note">Pick a day to see its punch times and status, or to ask to work from home on it.</p>}
                   </div>
                 </div>
                 <Legend />
@@ -424,30 +460,6 @@ function MyAttendance() {
 
         {!monthLoading && !monthError && data?.days?.length > 0 && (
           <PayableDays month={month} days={data.days} summary={data.summary} today={todayDate} salary={salary} />
-        )}
-
-        {homeReqs.length > 0 && (
-          <section className="mac-card hr-card" aria-label="My work-from-home requests">
-            <div className="hr-head-row">
-              <h2 className="section-title">My work-from-home requests</h2>
-              <button type="button" className="mac-btn mac-btn-secondary" onClick={() => startHome()}><Home size={15} aria-hidden="true" /> Ask for another day</button>
-            </div>
-            <ul className="home-list">
-              {homeReqs.slice(0, 20).map(r => (
-                <li key={r.id} className="att-req">
-                  <div className="att-req-main">
-                    <strong>Work from home {wfhSpan(r)}{r.days > 1 ? ` (${r.days} days)` : ''}</strong>
-                    <span className="faint">{r.reason}</span>
-                    {r.decisionNote && <span className="faint">{r.status === 'REJECTED' ? 'Reason: ' : 'Note: '}{r.decisionNote}{r.decidedBy ? ` (${r.decidedBy})` : ''}</span>}
-                  </div>
-                  <div className="home-row-side">
-                    <ReqBadge status={r.status} />
-                    {(r.status === 'PENDING' || (r.status === 'APPROVED' && r.fromDate > (todayDate || ''))) && <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setHomeCancel(r.id)}>Withdraw</button>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
         )}
 
         {requests.length > 0 && (
