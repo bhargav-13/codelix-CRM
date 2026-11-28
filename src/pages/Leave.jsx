@@ -8,9 +8,9 @@ import { employeesDB } from '../lib/db';
 import {
   useToast, Field, FormGrid, Toolbar, Chips, StatTiles, SkeletonRows, EmptyPanel, ErrorPanel, Avatar, fmtDate,
 } from '../components/ui/kit';
-import { leaveAPI, wfhAPI, policyAPI, holidaysAPI, leaveMeta, countLeaveDays, fmtDays, fmtNum, todayIST } from '../lib/hr';
+import { leaveAPI, wfhAPI, officeWfhAPI, policyAPI, holidaysAPI, leaveMeta, countLeaveDays, fmtDays, fmtNum, todayIST } from '../lib/hr';
 import { Notice, TabBar } from '../components/hr/parts';
-import { CalendarCheck, CalendarDays, Check, CheckCircle2, Home, Hourglass, Info, Plane, Plus, Wallet, X } from 'lucide-react';
+import { CalendarCheck, CalendarDays, Check, CheckCircle2, Home, Hourglass, Info, Plane, Plus, Trash2, Users, Wallet, X } from 'lucide-react';
 import './HR.css';
 
 const fmtRange = r => (r.fromDate === r.toDate ? fmtDate(r.fromDate) : `${fmtDate(r.fromDate)} – ${fmtDate(r.toDate)}`);
@@ -65,6 +65,27 @@ function RequestCard({ req, who, balance, children }) {
         </div>
       )}
       {children && <div className="hr-req-foot">{children}</div>}
+    </div>
+  );
+}
+
+// Days the whole office works from home, set by a partner. Past ones are left out.
+function OfficeWfhDays({ days, onRemove }) {
+  const today = todayIST();
+  const live = days.filter(d => d.toDate >= today).sort((a, b) => String(a.fromDate).localeCompare(String(b.fromDate)));
+  if (!live.length) return null;
+  return (
+    <div className="office-wfh" role="list" aria-label="Work from home for everyone">
+      {live.map(d => (
+        <div key={d.id} className="office-wfh-row" role="listitem">
+          <span className="office-wfh-icon"><Users size={18} aria-hidden="true" /></span>
+          <div className="office-wfh-text">
+            <strong>Everyone works from home {d.fromDate === d.toDate ? `on ${fmtDate(d.fromDate)}` : `from ${fmtDate(d.fromDate)} to ${fmtDate(d.toDate)}`}{d.fromDate <= today ? ' (now)' : ''}</strong>
+            <span>{d.reason}{d.createdBy ? ` · set by ${d.createdBy}` : ''} · punch in from anywhere</span>
+          </div>
+          {onRemove && <button type="button" className="mac-btn mac-btn-secondary" onClick={() => onRemove(d)}><Trash2 size={15} /> Remove</button>}
+        </div>
+      ))}
     </div>
   );
 }
@@ -143,6 +164,8 @@ function RequestForm({ v, set, errors, balance, policy, holidayDates, onSubmit }
 
 function MyLeave() {
   const toast = useToast();
+  const [officeDays, setOfficeDays] = useState([]);
+  useEffect(() => { officeWfhAPI.list().then(setOfficeDays).catch(e => console.error(e)); }, []);
   const [balance, setBalance] = useState(null);
   const [requests, setRequests] = useState([]);
   const [policy, setPolicy] = useState(null);
@@ -228,6 +251,7 @@ function MyLeave() {
           : (
             <>
               <StatTiles items={balanceTiles(balance)} />
+              <OfficeWfhDays days={officeDays} />
               <h2 className="section-title">My requests</h2>
               {requests.length === 0
                 ? <EmptyPanel icon={Plane} title="Nothing requested yet" text="Ask for leave or to work from home here, and a partner will approve or reject it." action={requestBtn} />
@@ -279,6 +303,41 @@ function TeamLeave() {
   const [decide, setDecide] = useState(null);         // { req, kind: 'approve' | 'reject', note }
   const [noteError, setNoteError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [officeDays, setOfficeDays] = useState([]);
+  const [everyone, setEveryone] = useState(null);     // { fromDate, toDate, reason } while the form is open
+  const [everyoneErrors, setEveryoneErrors] = useState({});
+  const [removeDay, setRemoveDay] = useState(null);
+
+  const loadOfficeDays = useCallback(() => officeWfhAPI.list().then(setOfficeDays).catch(e => console.error(e)), []);
+  useEffect(() => { loadOfficeDays(); }, [loadOfficeDays]);
+
+  async function giveEveryone() {
+    if (saving || !everyone) return;
+    const er = {};
+    const today = todayIST();
+    if (!everyone.fromDate) er.fromDate = 'Pick the day';
+    else if (everyone.fromDate < today) er.fromDate = 'Pick today or a later day';
+    if (everyone.toDate && everyone.fromDate && everyone.toDate < everyone.fromDate) er.toDate = 'Must not be before the first day';
+    if (!everyone.reason.trim()) er.reason = 'Say why, so everyone knows';
+    setEveryoneErrors(er);
+    if (Object.keys(er).length) return;
+    setSaving(true);
+    try {
+      await officeWfhAPI.create({ fromDate: everyone.fromDate, toDate: everyone.toDate || everyone.fromDate, reason: everyone.reason.trim() });
+      toast.success('Everyone has been told they work from home');
+      setEveryone(null);
+      loadOfficeDays();
+    } catch (e) { toast.error('Could not set work from home for everyone', e); }
+    setSaving(false);
+  }
+
+  async function takeBack(day) {
+    try {
+      await officeWfhAPI.remove(day.id);
+      toast.success('Removed. Everyone has been told to come to the office');
+      loadOfficeDays();
+    } catch (e) { toast.error('Could not remove it', e); }
+  }
 
   const loadBalances = useCallback(async list => {
     const settled = await Promise.allSettled(list.map(e => leaveAPI.balanceFor(e.id)));
@@ -345,12 +404,14 @@ function TeamLeave() {
 
   return (
     <div>
-      <Header title="Leave" subtitle={subtitle} />
+      <Header title="Leave" subtitle={subtitle}
+        actions={<button type="button" className="mac-btn mac-btn-primary" onClick={() => { const t = todayIST(); setEveryone({ fromDate: t, toDate: t, reason: '' }); setEveryoneErrors({}); }}><Users size={15} /> WFH for everyone</button>} />
       <div className="page-body">
         {loading ? <SkeletonRows rows={6} />
           : loadError ? <ErrorPanel title="Could not load leave requests" error={loadError} onRetry={load} />
           : (
             <>
+              <OfficeWfhDays days={officeDays} onRemove={setRemoveDay} />
               <h2 className="section-title">Waiting for approval{pending.length ? ` (${pending.length})` : ''}</h2>
               {pending.length === 0
                 ? <EmptyPanel icon={CalendarCheck} title="All caught up" text="New leave and work-from-home requests appear here for you to approve or reject." />
@@ -445,6 +506,33 @@ function TeamLeave() {
           </form>
         )}
       </Modal>
+
+      <Modal isOpen={!!everyone} onClose={() => { if (!saving) setEveryone(null); }} title="Work from home for everyone" size="md"
+        footer={<>
+          <button type="button" className="mac-btn mac-btn-secondary" onClick={() => setEveryone(null)} disabled={saving}>Cancel</button>
+          <button type="submit" form="wfh-everyone-form" className="mac-btn mac-btn-primary" disabled={saving}>{saving ? 'Saving…' : 'Give everyone WFH'}</button>
+        </>}>
+        {everyone && (
+          <form id="wfh-everyone-form" onSubmit={e => { e.preventDefault(); giveEveryone(); }} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <FormGrid>
+              <Field label="From" required error={everyoneErrors.fromDate}>
+                <input className="mac-input" type="date" min={todayIST()} value={everyone.fromDate} onChange={e => setEveryone(v => ({ ...v, fromDate: e.target.value, toDate: v.toDate && v.toDate < e.target.value ? e.target.value : v.toDate }))} />
+              </Field>
+              <Field label="To" required error={everyoneErrors.toDate}>
+                <input className="mac-input" type="date" min={everyone.fromDate || todayIST()} value={everyone.toDate} onChange={e => setEveryone(v => ({ ...v, toDate: e.target.value }))} />
+              </Field>
+              <Field label="Reason" required span={2} error={everyoneErrors.reason}>
+                <textarea className="mac-input" rows={3} maxLength={500} value={everyone.reason} onChange={e => setEveryone(v => ({ ...v, reason: e.target.value }))} placeholder="e.g. Heavy rain, or office maintenance" />
+              </Field>
+            </FormGrid>
+            <Notice tone="info" icon={Info}>On {everyone.toDate && everyone.toDate !== everyone.fromDate ? 'these days' : 'this day'} every employee can punch in and out from anywhere, and attendance shows a WFH mark. Nobody has to ask, nothing is taken from leave, and everyone is notified. A day with no punch is still absent.</Notice>
+          </form>
+        )}
+      </Modal>
+
+      <ConfirmDialog isOpen={!!removeDay} onClose={() => setRemoveDay(null)} onConfirm={() => { if (removeDay) takeBack(removeDay); }}
+        title="Remove work from home for everyone?" confirmLabel="Remove"
+        message="These become normal office days again and everyone is told to come to the office. Punches already made stay as they are." />
     </div>
   );
 }

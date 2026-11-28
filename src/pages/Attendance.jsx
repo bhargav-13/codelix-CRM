@@ -17,10 +17,11 @@ import {
   currentMonth, monthLabel, monthDates, weekdayOf, dayOfMonth, daySummary,
 } from '../lib/hr';
 import { MonthNav, Notice, TabBar } from '../components/hr/parts';
+import AttendanceAnalytics from '../components/hr/AttendanceAnalytics';
 import HolidayCalendar from '../components/hr/HolidayCalendar';
 import CorrectionRequests from '../components/hr/CorrectionRequests';
 import PayableDays from '../components/hr/PayableDays';
-import { employeesDB } from '../lib/db';
+import { employeesDB, settingsDB } from '../lib/db';
 import { Home, Wifi, WifiOff, AlertTriangle, CheckCircle2, Edit2, Info, LayoutGrid, LogIn, LogOut, ScanFace, Table2, Timer, Users } from 'lucide-react';
 import './HR.css';
 
@@ -404,6 +405,7 @@ function MyAttendance() {
             </ul>
           </section>
         )}
+        <AttendanceAnalytics own />
       </div>
 
       <Modal isOpen={!!ask} onClose={() => !sending && setAsk(null)} title="Request a correction"
@@ -776,6 +778,31 @@ const toDraft = p => ({
 const networkList = text => String(text || '').split(/[\s,]+/).filter(Boolean);
 const NETWORK_ENTRY = /^(\d{1,3}(\.\d{1,3}){3}|[0-9a-fA-F:.]*:[0-9a-fA-F:.]*)(\/\d{1,3})?$/;
 
+// Notifications by email: one switch for the whole office, saved the moment it is flipped.
+function EmailRule() {
+  const toast = useToast();
+  const [on, setOn] = useState(null);       // null while loading
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { settingsDB.get('email_notifications').then(v => setOn(v?.enabled !== false)).catch(e => { console.error(e); setOn(true); }); }, []);
+  async function flip(next) {
+    if (busy) return;
+    setBusy(true);
+    try { await settingsDB.set('email_notifications', { enabled: next }); setOn(next); toast.success(next ? 'Notifications are sent by email too' : 'Email notifications are switched off'); }
+    catch (e) { toast.error('Could not save the email setting', e); }
+    setBusy(false);
+  }
+  return (
+    <section className="mac-card hr-card">
+      <div>
+        <h2 className="section-title">Notifications by email</h2>
+        <p className="hr-note">Leave, work from home, attendance corrections, bank-detail changes, payslips and task notifications are also sent to each person's email address, from no-reply@codelixitsolutions.com. Chat messages are never emailed.</p>
+      </div>
+      <label className="hr-check"><input type="checkbox" checked={on !== false} disabled={on == null || busy} onChange={e => flip(e.target.checked)} /> Send notifications by email</label>
+      <p className="hr-note">A person is mailed at the email on their employee record (partners at their sign-in email). Someone with no email there gets the notification in the app only.</p>
+    </section>
+  );
+}
+
 function RulesTab() {
   const toast = useToast();
   const [here, setHere] = useState(null);   // { enabled, onOfficeNetwork, address } for this computer
@@ -925,6 +952,8 @@ function RulesTab() {
         </FormGrid>
       </section>
 
+      <EmailRule />
+
       {dirty && (
         <div className="save-bar" role="region" aria-label="Unsaved changes">
           <span className="save-bar-text"><span className="save-bar-dot" aria-hidden="true" /><span>Unsaved changes</span></span>
@@ -947,10 +976,11 @@ function TeamAttendance() {
   }, []);
   return (
     <div>
-      <Header title="Attendance" subtitle="Who is in, the month at a glance, requests, holidays and rules" />
+      <Header title="Attendance" subtitle="Who is in, the month at a glance, analytics, requests, holidays and rules" />
       <div className="page-body">
-        <TabBar label="Attendance sections" value={tab} onChange={setTab} tabs={[['team', 'Team'], ['requests', pending ? `Requests (${pending})` : 'Requests'], ['holidays', 'Holidays'], ['rules', 'Rules']]} />
+        <TabBar label="Attendance sections" value={tab} onChange={setTab} tabs={[['team', 'Team'], ['analytics', 'Analytics'], ['requests', pending ? `Requests (${pending})` : 'Requests'], ['holidays', 'Holidays'], ['rules', 'Rules']]} />
         {tab === 'team' && <TeamTab focusId={focusId} />}
+        {tab === 'analytics' && <AttendanceAnalytics />}
         {tab === 'holidays' && <HolidayCalendar />}
         {tab === 'rules' && <RulesTab />}
         {tab === 'requests' && <CorrectionRequests onCount={setPending} />}

@@ -438,3 +438,23 @@
 .leave-kinds button em { font-style: normal; font-size: var(--fs-xs); color: var(--ink-2); }
 .hr-req-tags { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 @media (max-width: 420px) { .leave-kinds { grid-template-columns: 1fr; } }
+
+/* ── Work from home for everyone (Leave page) ───────────────────── */
+.office-wfh { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+.office-wfh-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--purple, #7c3aed) 28%, transparent); background: color-mix(in srgb, var(--purple, #7c3aed) 7%, var(--surface, #fff)); border-radius: 12px; }
+.office-wfh-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: color-mix(in srgb, var(--purple, #7c3aed) 16%, transparent); color: var(--purple, #7c3aed); flex: none; }
+.office-wfh-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.office-wfh-text strong { font-size: 14px; }
+.office-wfh-text span { font-size: 13px; color: var(--text-secondary, #64748b); }
+@media (max-width: 640px) { .office-wfh-row { flex-wrap: wrap; } }
+
+/* ── Attendance analytics ───────────────────────────────────────── */
+.ana, .ana-person { display: flex; flex-direction: column; gap: 16px; }
+.ana { margin-top: 8px; }
+.ana-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.ana-sort { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary, #64748b); }
+.ana-table td, .ana-table th { white-space: nowrap; }
+.ana-table tr.is-click { cursor: pointer; }
+.ana-table tr.is-click:hover td, .ana-table tr.is-click:focus-visible td { background: var(--hover, rgba(15, 23, 42, .04)); }
+.ana-warn { color: var(--warn, #b45309); font-weight: 600; }
+@media (max-width: 900px) { .ana-two { grid-template-columns: 1fr; } }

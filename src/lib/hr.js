@@ -60,6 +60,15 @@ export const wfhAPI = {
   reject: (id, note) => http.post(`/attendance/wfh-requests/${enc(id)}/reject`, { note }),
 };
 
+// ─── Work from home for everyone ─────────────────────────────────
+// A partner names a day (or a short run) on which the whole office works from home.
+// Everyone can read the list; only a partner can add or remove.
+export const officeWfhAPI = {
+  list: () => list(http.get('/attendance/wfh-days')),
+  create: ({ fromDate, toDate, reason }) => http.post('/attendance/wfh-days', { fromDate, toDate: toDate || fromDate, reason }),
+  remove: id => http.del(`/attendance/wfh-days/${enc(id)}`),
+};
+
 // ─── "The device missed my scan" requests ────────────────────────
 // Employee: create / mine / cancel (own only). Partner: list / approve / reject.
 export const correctionsAPI = {
